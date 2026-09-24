@@ -21,7 +21,7 @@
     {
       "path": "ACCEPTANCE-REPORT.md",
       "byte_length": 5781,
-      "sha256": "D6CC0C83DAE46AC19141FF18C424135D419BE36DC351AA2EFE96EF3082DFA4A4"
+      "sha256": "B1A1640CC01E7FC314C9A9926F83D3D97B129CAA983DC8EDF48C4EAAB7D5E92B"
     },
     {
       "path": "ADOPTERS.md",
@@ -315,8 +315,8 @@
     },
     {
       "path": "tests/test_otcs_bridge.py",
-      "byte_length": 194353,
-      "sha256": "200A1284B3300A04905BA05AB2FE789E9A08A935DF5F28C174EF21A37291444F"
+      "byte_length": 195040,
+      "sha256": "74EB04B42603D0BD3AEFDAAD30F3D22623FCBEB6E1BA8AC65781742D4F512FBE"
     },
     {
       "path": "tests/test_safety_mutations.py",

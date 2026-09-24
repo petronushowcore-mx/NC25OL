@@ -3331,14 +3331,10 @@ class OTCSBridgeRegressions(unittest.TestCase):
             # A literal depth, not one read from sys.getrecursionlimit(): the
             # form must stay past any recursion limit a run could set.
             "array nested past the recursion limit": "[" * 100_000 + "]" * 100_000,
-            # The form above dies at `json.loads` and never reaches the walk. This one
-            # PARSES: 600 levels is inside the parser's own limit and outside what a deep
-            # copy of the decoded record survives - measured, 400 parses and copies, 600
-            # parses and the copy raises. Before the walk carried the engine's nesting
-            # limit, a value in this band left a public read as a bare RecursionError
-            # under no code at all, and no planted form landed here to say so.
-            "array nested inside the parser's limit but past a deep copy":
-                "[" * 600 + "]" * 600,
+            # A top-level object reaches the decoded-value walk. A top-level array
+            # would be refused by the object-shape check before its depth is inspected.
+            "object with a parsed value nested past the storage limit":
+                '{"nested":' + "[" * 600 + "]" * 600 + "}",
             "non-ASCII text": "é",
             "undecodable bytes": b"\xff\xfe\xfd",
             "integer": 7,
@@ -3495,6 +3491,21 @@ class OTCSBridgeRegressions(unittest.TestCase):
                 ).outbox_record(*key)
 
         for column in ("request_json", "receipt_json", "execution_request_json", "local_receipt_json"):
+            with self.subTest(member="stored JSON object exceeds the nesting limit", column=column):
+                bridge = foreign_outbox(
+                    f"pinned-depth-{column}.sqlite", "LOCAL_COMMITTED", column,
+                    stored_forms["object with a parsed value nested past the storage limit"],
+                )
+                with self.assertRaises(OTCSBridgeError) as raised:
+                    bridge.outbox_record(*key)
+                self.assertEqual(raised.exception.code, "OTCS_OUTBOX_ROW_JSON")
+                self.assertEqual(raised.exception.detail, f"{column}: nested past 64")
+            with self.subTest(control="stored JSON object at the nesting limit", column=column):
+                bridge = foreign_outbox(
+                    f"control-depth-{column}.sqlite", "LOCAL_COMMITTED", column,
+                    '{"nested":' + "[" * 63 + "]" * 63 + "}",
+                )
+                self.assertIsInstance(bridge.outbox_record(*key)[column.removesuffix("_json")], dict)
             with self.subTest(member="stored JSON column that does not parse", column=column):
                 bridge = foreign_outbox(f"pinned-{column}.sqlite", "LOCAL_COMMITTED", column, "{")
                 with self.assertRaisesRegex(OTCSBridgeError, r"^OTCS_OUTBOX_ROW_JSON(:|$)"):
