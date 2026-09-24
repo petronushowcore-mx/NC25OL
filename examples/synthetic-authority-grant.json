@@ -1,0 +1,28 @@
+{
+  "message_type": "authority_grant",
+  "grant_id": "synthetic-grant-001",
+  "subject_id": "synthetic-workload",
+  "connector_id": "synthetic-bank-connector",
+  "binding": {
+    "profile_id": "banking.reference.v1",
+    "profile_version": "1.3.0",
+    "profile_hash": "D0467762926BF45A856431BF8038044852681456D1FBBAEEEBC80A4EC1674C6F",
+    "declaration_id": "synthetic.bank.connection",
+    "declaration_version": "1.2.0",
+    "declaration_hash": "54E6C072FA6D20F2F4E32030E26F124C339BEE10F9307B6FA2D35EDF33DFC78E"
+  },
+  "permitted_action_ids": [
+    "BANK_PAYMENT_POST",
+    "BANK_PAYMENT_STATUS_READ",
+    "NO_EFFECT_FALLBACK"
+  ],
+  "target_system_ids": [
+    "bank-sandbox-ledger",
+    "bank-sandbox-query",
+    "local-fallback"
+  ],
+  "valid_from": "2026-07-27T00:00:00Z",
+  "valid_until": "2026-08-30T00:00:00Z",
+  "issued_by": "synthetic-authority-issuer",
+  "approval_evidence_ref": "evidence://synthetic/grant-001"
+}

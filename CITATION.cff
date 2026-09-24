@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use this package, please cite it as below."
+title: "NC25OL - Navigational Cybernetics 2.5 Open Ledger"
+abstract: >-
+  A domain-neutral connection contract for placing an execution boundary in
+  front of an external adapter while preserving the declared Navigational
+  Cybernetics 2.5 separation rules: sealed profiles and declarations, a
+  two-gate evaluation, single-use permits, and a hash-chained audit ledger,
+  with a standard-library reference engine, wire contract, and executable
+  conformance suite.
+type: software
+version: "0.0.11"
+license:
+  - MIT
+  - CC-BY-4.0
+authors:
+  - family-names: Barziankou
+    given-names: Maksim
+    alias: MxBv
+    affiliation: "The Urgrund Laboratheory"
+    email: research@petronus.eu
+repository-code: "https://github.com/petronushowcore-mx/NC25OL"
+references:
+  - type: article
+    title: "Navigational Cybernetics 2.5 v2.1 - Axiomatic Core"
+    authors:
+      - family-names: Barziankou
+        given-names: Maksim
+    doi: "10.17605/OSF.IO/NHTC5"
+  - type: article
+    title: "NC2.5 Research Programme White Paper"
+    authors:
+      - family-names: Barziankou
+        given-names: Maksim
+    doi: "10.17605/OSF.IO/WXPHF"

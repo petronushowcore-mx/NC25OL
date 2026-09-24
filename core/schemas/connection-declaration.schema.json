@@ -1,0 +1,379 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nc25.local/universal-ledger/connection-declaration.schema.json",
+  "title": "NC25OL Connection Declaration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "declaration_id",
+    "declaration_version",
+    "predecessor_declaration_hash",
+    "created_at",
+    "effective_from",
+    "expires_at",
+    "core_anchor",
+    "profile_binding",
+    "connector",
+    "instance_scope",
+    "structural_budget",
+    "resource_limits",
+    "governance",
+    "interfaces",
+    "mapping_witness_binding",
+    "evidence_refs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "declaration_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "declaration_version": {
+      "$ref": "#/$defs/version"
+    },
+    "predecessor_declaration_hash": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/sha256"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "effective_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "core_anchor": {
+      "$ref": "#/$defs/core_anchor"
+    },
+    "profile_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "profile_version",
+        "profile_hash"
+      ],
+      "properties": {
+        "profile_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "profile_version": {
+          "$ref": "#/$defs/version"
+        },
+        "profile_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connector_id",
+        "workload_identity_issuer",
+        "environment_ids"
+      ],
+      "properties": {
+        "connector_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "workload_identity_issuer": {
+          "$ref": "#/$defs/identifier"
+        },
+        "environment_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        }
+      }
+    },
+    "instance_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_ids",
+        "effect_class_ids",
+        "target_system_ids",
+        "action_target_bindings",
+        "scope_constraints"
+      ],
+      "properties": {
+        "action_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        },
+        "effect_class_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        },
+        "target_system_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        },
+        "action_target_bindings": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/non_empty_identifier_set"
+          }
+        },
+        "scope_constraints": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          }
+        }
+      }
+    },
+    "structural_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selector_id",
+        "capacity",
+        "unit",
+        "provenance"
+      ],
+      "properties": {
+        "selector_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "provenance": {
+          "type": "string",
+          "enum": [
+            "fully_stipulated",
+            "empirically_calibrated",
+            "derived_from_load_model",
+            "mixed"
+          ]
+        }
+      }
+    },
+    "resource_limits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource_id",
+          "max_per_intent",
+          "max_committed_per_window",
+          "window_seconds"
+        ],
+        "properties": {
+          "resource_id": {
+            "$ref": "#/$defs/identifier"
+          },
+          "max_per_intent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_committed_per_window": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "window_seconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_owner_id",
+        "declaration_owner_id",
+        "approval_owner_id",
+        "authority_issuer_id",
+        "revision_authority_ids",
+        "change_process_ref",
+        "no_live_gate_override"
+      ],
+      "properties": {
+        "profile_owner_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "declaration_owner_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "approval_owner_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "authority_issuer_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "revision_authority_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        },
+        "change_process_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "no_live_gate_override": {
+          "const": true
+        }
+      }
+    },
+    "interfaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "governance_service_id",
+        "operator_service_id",
+        "executor_service_id",
+        "architect_store_id",
+        "observer_projection_id",
+        "off_limits_system_ids"
+      ],
+      "properties": {
+        "governance_service_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "operator_service_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "executor_service_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "architect_store_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "observer_projection_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "off_limits_system_ids": {
+          "$ref": "#/$defs/identifier_set"
+        }
+      }
+    },
+    "mapping_witness_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "witness_id",
+        "witness_hash"
+      ],
+      "properties": {
+        "witness_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "witness_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/evidence_ref"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{1,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "identifier_set": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "non_empty_identifier_set": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "core_anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file_name",
+        "core_version",
+        "doi",
+        "sha256"
+      ],
+      "properties": {
+        "file_name": {
+          "const": "NC25_v3_0_patched_v4.tex"
+        },
+        "core_version": {
+          "const": "3.0"
+        },
+        "doi": {
+          "const": "10.17605/OSF.IO/NHTC5"
+        },
+        "sha256": {
+          "const": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3"
+        }
+      }
+    },
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_type",
+        "ref",
+        "sha256"
+      ],
+      "properties": {
+        "evidence_type": {
+          "$ref": "#/$defs/identifier"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

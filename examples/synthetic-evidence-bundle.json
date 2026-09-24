@@ -1,0 +1,25 @@
+{
+  "message_type": "evidence_bundle",
+  "intent_id": "synthetic-intent-001",
+  "collected_at": "2026-08-01T09:59:50Z",
+  "items": [
+    {
+      "evidence_type": "ACCOUNT_STATUS",
+      "ref": "evidence://synthetic/account-status/001",
+      "sha256": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "status": "VALID"
+    },
+    {
+      "evidence_type": "KYC_STATUS",
+      "ref": "evidence://synthetic/kyc-status/001",
+      "sha256": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+      "status": "VALID"
+    },
+    {
+      "evidence_type": "SANCTIONS_STATUS",
+      "ref": "evidence://synthetic/sanctions-status/001",
+      "sha256": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "status": "VALID"
+    }
+  ]
+}

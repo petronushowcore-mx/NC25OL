@@ -1,0 +1,671 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nc25.local/universal-ledger/runtime-contracts.schema.json",
+  "title": "NC25OL Connection Runtime Contracts",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/authority_grant"
+    },
+    {
+      "$ref": "#/$defs/authority_revocation"
+    },
+    {
+      "$ref": "#/$defs/intent"
+    },
+    {
+      "$ref": "#/$defs/evidence_bundle"
+    },
+    {
+      "$ref": "#/$defs/operator_result"
+    },
+    {
+      "$ref": "#/$defs/execution_permit"
+    },
+    {
+      "$ref": "#/$defs/execution_request"
+    },
+    {
+      "$ref": "#/$defs/execution_receipt"
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{1,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "identifier_set": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "non_empty_identifier_set": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "profile_version",
+        "profile_hash",
+        "declaration_id",
+        "declaration_version",
+        "declaration_hash"
+      ],
+      "properties": {
+        "profile_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "profile_version": {
+          "$ref": "#/$defs/version"
+        },
+        "profile_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "declaration_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "declaration_version": {
+          "$ref": "#/$defs/version"
+        },
+        "declaration_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "evidence_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_type",
+        "ref",
+        "sha256",
+        "status"
+      ],
+      "properties": {
+        "evidence_type": {
+          "$ref": "#/$defs/identifier"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "enum": [
+            "VALID",
+            "INVALID",
+            "REVOKED",
+            "EXPIRED"
+          ]
+        }
+      }
+    },
+    "authority_grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "grant_id",
+        "subject_id",
+        "connector_id",
+        "binding",
+        "permitted_action_ids",
+        "target_system_ids",
+        "valid_from",
+        "valid_until",
+        "issued_by",
+        "approval_evidence_ref"
+      ],
+      "properties": {
+        "message_type": {
+          "const": "authority_grant"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "subject_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "connector_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "binding": {
+          "$ref": "#/$defs/binding"
+        },
+        "permitted_action_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        },
+        "target_system_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        },
+        "valid_from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "valid_until": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "issued_by": {
+          "$ref": "#/$defs/identifier"
+        },
+        "approval_evidence_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "authority_revocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "grant_id",
+        "declaration_hash",
+        "revoked_at",
+        "revoked_by",
+        "reason_code",
+        "evidence_ref"
+      ],
+      "properties": {
+        "message_type": {
+          "const": "authority_revocation"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "declaration_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "revoked_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revoked_by": {
+          "$ref": "#/$defs/identifier"
+        },
+        "reason_code": {
+          "$ref": "#/$defs/identifier"
+        },
+        "evidence_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "intent_id",
+        "idempotency_key",
+        "connector_id",
+        "requester_id",
+        "authority_grant_id",
+        "binding",
+        "action_id",
+        "target_system_id",
+        "scope",
+        "resource_claims",
+        "received_at",
+        "payload_hash",
+        "history_summary_hash",
+        "state_anchor_hash",
+        "prerequisite_results",
+        "hard_block_flags",
+        "manual_review_flags",
+        "ambiguity_flags"
+      ],
+      "properties": {
+        "message_type": {
+          "const": "intent"
+        },
+        "intent_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/identifier"
+        },
+        "connector_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "requester_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "authority_grant_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "binding": {
+          "$ref": "#/$defs/binding"
+        },
+        "action_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "target_system_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "scope": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "resource_claims": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "received_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "payload_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "history_summary_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state_anchor_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "prerequisite_results": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "hard_block_flags": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "manual_review_flags": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "ambiguity_flags": {
+          "$ref": "#/$defs/identifier_set"
+        }
+      }
+    },
+    "evidence_bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "intent_id",
+        "collected_at",
+        "items"
+      ],
+      "properties": {
+        "message_type": {
+          "const": "evidence_bundle"
+        },
+        "intent_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "collected_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/evidence_item"
+          }
+        }
+      }
+    },
+    "operator_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "intent_id",
+        "request_hash",
+        "disposition",
+        "channel",
+        "message_code",
+        "permit_hash",
+        "expires_at"
+      ],
+      "properties": {
+        "message_type": {
+          "const": "operator_result"
+        },
+        "intent_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "request_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "disposition": {
+          "enum": [
+            "ALLOW",
+            "REFUSAL",
+            "MANUAL_REVIEW"
+          ]
+        },
+        "channel": {
+          "enum": [
+            "OUTPUT",
+            "REFUSAL"
+          ]
+        },
+        "message_code": {
+          "enum": [
+            "EXECUTION_AUTHORIZED",
+            "EXECUTION_DENIED",
+            "HUMAN_REVIEW_REQUIRED"
+          ]
+        },
+        "permit_hash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/sha256"
+            }
+          ]
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "date-time"
+            }
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "disposition": {
+              "const": "ALLOW"
+            },
+            "channel": {
+              "const": "OUTPUT"
+            },
+            "message_code": {
+              "const": "EXECUTION_AUTHORIZED"
+            },
+            "permit_hash": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        {
+          "properties": {
+            "disposition": {
+              "const": "REFUSAL"
+            },
+            "channel": {
+              "const": "REFUSAL"
+            },
+            "message_code": {
+              "const": "EXECUTION_DENIED"
+            },
+            "permit_hash": {
+              "type": "null"
+            },
+            "expires_at": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "disposition": {
+              "const": "MANUAL_REVIEW"
+            },
+            "channel": {
+              "const": "REFUSAL"
+            },
+            "message_code": {
+              "const": "HUMAN_REVIEW_REQUIRED"
+            },
+            "permit_hash": {"type": "null"},
+            "expires_at": {"type": "null"}
+          }
+        }
+      ]
+    },
+    "execution_permit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "permit_id",
+        "intent_id",
+        "request_hash",
+        "binding",
+        "authority_grant_id",
+        "connector_id",
+        "action_id",
+        "effect_class_id",
+        "target_system_id",
+        "state_anchor_hash",
+        "structural_cost",
+        "resource_claims",
+        "reservation_id",
+        "gate_engaged",
+        "gate_bit",
+        "structural_gate",
+        "effect_gate",
+        "issued_at",
+        "ttl_seconds",
+        "expires_at"
+      ],
+      "properties": {
+        "message_type": {"const": "execution_permit"},
+        "permit_id": {"$ref": "#/$defs/identifier"},
+        "intent_id": {"$ref": "#/$defs/identifier"},
+        "request_hash": {"$ref": "#/$defs/sha256"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "authority_grant_id": {"$ref": "#/$defs/identifier"},
+        "connector_id": {"$ref": "#/$defs/identifier"},
+        "action_id": {"$ref": "#/$defs/identifier"},
+        "effect_class_id": {"$ref": "#/$defs/identifier"},
+        "target_system_id": {"$ref": "#/$defs/identifier"},
+        "state_anchor_hash": {"$ref": "#/$defs/sha256"},
+        "structural_cost": {"type": "integer", "minimum": 0},
+        "resource_claims": {"type": "object", "propertyNames": {"$ref": "#/$defs/identifier"}, "additionalProperties": {"type": "integer", "minimum": 0}},
+        "reservation_id": {"$ref": "#/$defs/identifier"},
+        "gate_engaged": {"const": true},
+        "gate_bit": {"const": 1},
+        "structural_gate": {"const": true},
+        "effect_gate": {"const": true},
+        "issued_at": {"type": "string", "format": "date-time"},
+        "ttl_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 900,
+          "description": "The permit's effective lifetime in whole seconds: the configured TTL capped by the authority-grant and declaration expiries, rounded up and never below one, so that issued_at + ttl_seconds equals expires_at to the second."
+        },
+        "expires_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "execution_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "permit_hash",
+        "connector_id",
+        "binding",
+        "state_anchor_hash",
+        "outcome",
+        "downstream_receipt_hash",
+        "committed_at"
+      ],
+      "properties": {
+        "message_type": {
+          "const": "execution_request"
+        },
+        "permit_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "connector_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "binding": {
+          "$ref": "#/$defs/binding"
+        },
+        "state_anchor_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "outcome": {
+          "enum": [
+            "COMMITTED",
+            "FAILED",
+            "ABORTED"
+          ]
+        },
+        "downstream_receipt_hash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/sha256"
+            }
+          ]
+        },
+        "committed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "COMMITTED"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "downstream_receipt_hash": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "downstream_receipt_hash": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "execution_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "receipt_id",
+        "permit_hash",
+        "intent_id",
+        "outcome",
+        "structural_debit",
+        "resource_debits",
+        "ledger_event_hash",
+        "receipt_hash",
+        "recorded_at"
+      ],
+      "properties": {
+        "message_type": {
+          "const": "execution_receipt"
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "permit_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "intent_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "outcome": {
+          "enum": [
+            "COMMITTED",
+            "FAILED",
+            "ABORTED"
+          ]
+        },
+        "structural_debit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resource_debits": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "ledger_event_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "receipt_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

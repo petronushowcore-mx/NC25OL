@@ -1,0 +1,46 @@
+{
+  "message_type": "intent",
+  "intent_id": "synthetic-intent-001",
+  "idempotency_key": "synthetic-idempotency-001",
+  "connector_id": "synthetic-bank-connector",
+  "requester_id": "synthetic-workload",
+  "authority_grant_id": "synthetic-grant-001",
+  "binding": {
+    "profile_id": "banking.reference.v1",
+    "profile_version": "1.3.0",
+    "profile_hash": "D0467762926BF45A856431BF8038044852681456D1FBBAEEEBC80A4EC1674C6F",
+    "declaration_id": "synthetic.bank.connection",
+    "declaration_version": "1.2.0",
+    "declaration_hash": "54E6C072FA6D20F2F4E32030E26F124C339BEE10F9307B6FA2D35EDF33DFC78E"
+  },
+  "action_id": "BANK_PAYMENT_POST",
+  "target_system_id": "bank-sandbox-ledger",
+  "scope": {
+    "product": "synthetic-payment",
+    "customer_segment": "synthetic-corporate",
+    "region": "GB",
+    "currency": "GBP"
+  },
+  "resource_claims": {
+    "money_minor_units": 12500
+  },
+  "received_at": "2026-08-01T10:00:00Z",
+  "payload_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "history_summary_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+  "state_anchor_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+  "prerequisite_results": {
+    "ACCOUNT_ACTIVE": true,
+    "KYC_VERIFIED": true,
+    "SANCTIONS_CLEAR": true
+  },
+  "hard_block_flags": {
+    "ACCOUNT_FROZEN": false,
+    "OUT_OF_SCOPE": false,
+    "SANCTIONS_HIT": false
+  },
+  "manual_review_flags": {
+    "IDENTITY_UNCERTAIN": false,
+    "RULE_CONFLICT": false
+  },
+  "ambiguity_flags": []
+}

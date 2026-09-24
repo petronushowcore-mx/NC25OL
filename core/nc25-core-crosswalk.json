@@ -1,0 +1,120 @@
+{
+  "crosswalk_version": "1.0.0",
+  "source_file": "NC25_v3_0_patched_v4.tex",
+  "source_sha256": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3",
+  "source_line_count": 14228,
+  "entries": [
+    {
+      "id": "CORE-DECLARATION",
+      "source_lines": "313-326",
+      "core_object": "Architectural Declaration Record and Interface Partition Convention",
+      "universal_use": "Complete, sealed, versioned profile and connection declaration.",
+      "constraint": "Missing required fields make the claim undefined; a material post-activation change creates a new version and hash."
+    },
+    {
+      "id": "CORE-NON-ACTIONABILITY",
+      "source_lines": "337-351",
+      "core_object": "Non-Actionability of Admissibility",
+      "universal_use": "Exclusion-only gate and minimal operator projection.",
+      "constraint": "Boundary data, margins, sub-verdicts, statistics, and traces cannot be scores, features, objectives, or gradients."
+    },
+    {
+      "id": "CORE-EFFECT-SPACE",
+      "source_lines": "389-404, 542-552",
+      "core_object": "Admissibility relation, action alphabet, and structural effect-space",
+      "universal_use": "Typed action, effect, and forbidden-effect declarations in every profile.",
+      "constraint": "Action, admissible subset, effect class, and forbidden effect remain distinct types."
+    },
+    {
+      "id": "A28-HISTORY",
+      "source_lines": "1174-1184",
+      "core_object": "Axiom 28 and Structural Exclusion vs Runtime Enforcement",
+      "universal_use": "History and state anchors on every intent and permit.",
+      "constraint": "A restored operational state does not erase structural history."
+    },
+    {
+      "id": "A29-A33-GATE",
+      "source_lines": "1186-1284",
+      "core_object": "Axioms 29-33",
+      "universal_use": "Authority before evaluation, zero executability for refusal, declared safe fallback.",
+      "constraint": "An inadmissible candidate is not scored, ranked, optimized, or executed."
+    },
+    {
+      "id": "A40-A43-MINIMALITY",
+      "source_lines": "1378-1404",
+      "core_object": "Axioms 40-43",
+      "universal_use": "No blocked-branch learning, minimal operator result, prospective revision.",
+      "constraint": "Architect detail may be retained post-event but cannot become an operator signal."
+    },
+    {
+      "id": "A48-A52-INTERFACE",
+      "source_lines": "1497-1618",
+      "core_object": "Type of Admissibility, Well-Foundedness Barrier, Gate Interface Setup, NR-epsilon",
+      "universal_use": "Binary read-only gate and normalized response surface.",
+      "constraint": "Admissibility is an exclusion relation, not a scalar or probability."
+    },
+    {
+      "id": "A52-1-A52-2-ABSTENTION",
+      "source_lines": "1620-1685",
+      "core_object": "Honest-Reporting and Operator Self-Withdrawal disciplines",
+      "universal_use": "Non-executable ambiguity, hold, and manual-review paths.",
+      "constraint": "Architect-only ambiguity measures are not operator-readable."
+    },
+    {
+      "id": "A53-A59-REVISION",
+      "source_lines": "1687-1837, 5686-6055",
+      "core_object": "Revision cost, finite authorized revision, query budget, and Evidence Isolation",
+      "universal_use": "Authorized version change and isolated evidence references.",
+      "constraint": "No unlimited micro-revision and no post-failure rule rescue."
+    },
+    {
+      "id": "A60-A61-BUDGET",
+      "source_lines": "1839-1935",
+      "core_object": "Tau-constrained predicate and structural pressure",
+      "universal_use": "Committed-action structural capacity channel, separate from domain resource limits, with a declared capacity provenance coding.",
+      "constraint": "Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package."
+    },
+    {
+      "id": "A64-A66-SEPARATION",
+      "source_lines": "10334-10387",
+      "core_object": "Read-only substrate interface, non-negative deduction, architect-only post-emission trace",
+      "universal_use": "Read-only profile and gate, validated debit, role-restricted trace.",
+      "constraint": "Architect trace is post-emission only and unavailable to operator or ordinary observer."
+    },
+    {
+      "id": "T67-HALT",
+      "source_lines": "7057-7148",
+      "core_object": "Enforcement Necessity for Coordination Invariants",
+      "universal_use": "Commit guard with halt authority and append-only local state.",
+      "constraint": "A detector without halt authority does not prevent propagation."
+    },
+    {
+      "id": "T69-BIFURCATION",
+      "source_lines": "7374-7468",
+      "core_object": "Gate Bifurcation",
+      "universal_use": "Permit/refusal witness without direct gate geometry or reason-code exposure.",
+      "constraint": "The connector receives only a coarse disposition. Repeated probing of that unavoidable decision bit must be throttled and audited by the production adapter."
+    },
+    {
+      "id": "T98-FRAMEWORK-CORE",
+      "source_lines": "12252-12458",
+      "core_object": "Necessity of Two-Layer Admissibility Separation",
+      "universal_use": "Independent determination and non-accumulating realization layers.",
+      "constraint": "Single-layer write-back or cross-invocation boundary reconstruction exits the declared class."
+    },
+    {
+      "id": "T107-T108-TRANSFER",
+      "source_lines": "12995-13065",
+      "core_object": "Forgetful Separation, cost-bounded selector, viability-transfer defect, minimal repair",
+      "universal_use": "Explicit profile mapping witness for each domain.",
+      "constraint": "Connection or API similarity does not license viability transfer."
+    },
+    {
+      "id": "L47-NON-WEAPONIZABILITY",
+      "source_lines": "13317-13341",
+      "core_object": "Internal Non-Weaponizability of Admissibility Evaluations",
+      "universal_use": "Hash-only registry, coarse operator codes, forbidden-key scans, and adapter-level anti-probing controls.",
+      "constraint": "Boundary geometry and detailed reasons remain architect evidence only; the unavoidable disposition bit is rate-limited and auditable."
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0.0",
+  "declaration_id": "synthetic.bank.connection",
+  "declaration_version": "1.2.0",
+  "predecessor_declaration_hash": "DEB57A166C27580AF0E3D425252327B78D0EEAA7B843825B94E2520EA47FE01C",
+  "created_at": "2026-07-31T00:00:00Z",
+  "effective_from": "2026-07-31T00:00:00Z",
+  "expires_at": "2027-07-27T00:00:00Z",
+  "core_anchor": {
+    "file_name": "NC25_v3_0_patched_v4.tex",
+    "core_version": "3.0",
+    "doi": "10.17605/OSF.IO/NHTC5",
+    "sha256": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3"
+  },
+  "profile_binding": {
+    "profile_id": "banking.reference.v1",
+    "profile_version": "1.3.0",
+    "profile_hash": "D0467762926BF45A856431BF8038044852681456D1FBBAEEEBC80A4EC1674C6F"
+  },
+  "connector": {
+    "connector_id": "synthetic-bank-connector",
+    "workload_identity_issuer": "synthetic-identity-issuer",
+    "environment_ids": [
+      "sandbox"
+    ]
+  },
+  "instance_scope": {
+    "action_ids": [
+      "BANK_PAYMENT_POST",
+      "BANK_PAYMENT_STATUS_READ",
+      "NO_EFFECT_FALLBACK"
+    ],
+    "effect_class_ids": [
+      "BANK_LEDGER_MUTATION",
+      "BANK_READ_ONLY_QUERY",
+      "NO_EFFECT"
+    ],
+    "target_system_ids": [
+      "bank-sandbox-ledger",
+      "bank-sandbox-query",
+      "local-fallback"
+    ],
+    "action_target_bindings": {
+      "BANK_PAYMENT_POST": [
+        "bank-sandbox-ledger"
+      ],
+      "BANK_PAYMENT_STATUS_READ": [
+        "bank-sandbox-query"
+      ],
+      "NO_EFFECT_FALLBACK": [
+        "local-fallback"
+      ]
+    },
+    "scope_constraints": {
+      "product": [
+        "synthetic-payment"
+      ],
+      "customer_segment": [
+        "synthetic-corporate"
+      ],
+      "region": [
+        "GB"
+      ],
+      "currency": [
+        "GBP"
+      ]
+    }
+  },
+  "structural_budget": {
+    "selector_id": "synthetic-structural-selector",
+    "capacity": 10000,
+    "unit": "structural-cost-unit",
+    "provenance": "fully_stipulated"
+  },
+  "resource_limits": [
+    {
+      "resource_id": "money_minor_units",
+      "max_per_intent": 50000,
+      "max_committed_per_window": 250000,
+      "window_seconds": 86400
+    },
+    {
+      "resource_id": "query_units",
+      "max_per_intent": 1,
+      "max_committed_per_window": 10000,
+      "window_seconds": 86400
+    }
+  ],
+  "governance": {
+    "profile_owner_id": "synthetic-profile-owner",
+    "declaration_owner_id": "synthetic-declaration-owner",
+    "approval_owner_id": "synthetic-approval-owner",
+    "authority_issuer_id": "synthetic-authority-issuer",
+    "revision_authority_ids": [
+      "synthetic-revision-board"
+    ],
+    "change_process_ref": "evidence://synthetic/change-process/v1",
+    "no_live_gate_override": true
+  },
+  "interfaces": {
+    "governance_service_id": "synthetic-governance-service",
+    "operator_service_id": "synthetic-operator-service",
+    "executor_service_id": "synthetic-executor-service",
+    "architect_store_id": "synthetic-architect-worm-store",
+    "observer_projection_id": "synthetic-observer-projection",
+    "off_limits_system_ids": [
+      "production-core-ledger",
+      "architect-private-store"
+    ]
+  },
+  "mapping_witness_binding": {
+    "witness_id": "bank-questionnaire-crosswalk-v1",
+    "witness_hash": "81F9552562648773F84123BADD5957A3DA50A65ED47FB962AEC9E1D9518E1069"
+  },
+  "evidence_refs": [
+    {
+      "evidence_type": "DECLARATION_APPROVAL",
+      "ref": "evidence://synthetic/declaration-approval/v1",
+      "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "evidence_type": "IDENTITY_BOUNDARY",
+      "ref": "evidence://synthetic/identity-boundary/v1",
+      "sha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+    },
+    {
+      "evidence_type": "ATOMICITY_DESIGN",
+      "ref": "evidence://synthetic/atomicity-design/v1",
+      "sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    }
+  ]
+}

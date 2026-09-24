@@ -1,0 +1,529 @@
+{
+  "profile": {
+    "schema_version": "1.0.0",
+    "profile_id": "otcs.registry.reference.v1",
+    "profile_version": "1.0.0",
+    "created_at": "2026-07-28T00:00:00Z",
+    "core_anchor": {
+      "file_name": "NC25_v3_0_patched_v4.tex",
+      "core_version": "3.0",
+      "doi": "10.17605/OSF.IO/NHTC5",
+      "sha256": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3"
+    },
+    "domain": {
+      "domain_name": "OTCS registry connection reference profile",
+      "description": "An interoperability profile in which NC2.5 defines the admissibility atmosphere and issues the execution permit. OTCS supplies typed rights receipts and an exact project head, then performs only the permitted compare-and-swap append and returns a content-addressed receipt."
+    },
+    "action_alphabet": [
+      {
+        "action_id": "OTCS_APPEND_EVENT",
+        "description": "Append one content-addressed event to the declared OTCS project stream after NC2.5 admission.",
+        "effect_class_id": "OTCS_REGISTRY_MUTATION",
+        "structural_cost": 50,
+        "required_resource_ids": [
+          "otcs_append_units"
+        ]
+      },
+      {
+        "action_id": "NO_EFFECT_FALLBACK",
+        "description": "Record a non-mutating fallback without contacting OTCS.",
+        "effect_class_id": "NO_EFFECT",
+        "structural_cost": 0,
+        "required_resource_ids": []
+      }
+    ],
+    "effect_classes": [
+      {
+        "effect_class_id": "OTCS_REGISTRY_MUTATION",
+        "description": "An externally committed compare-and-swap append to the declared OTCS project stream.",
+        "mutates_external_state": true
+      },
+      {
+        "effect_class_id": "NO_EFFECT",
+        "description": "No downstream call and no external state mutation.",
+        "mutates_external_state": false
+      }
+    ],
+    "resource_catalog": [
+      {
+        "resource_id": "otcs_append_units",
+        "unit": "accepted project events",
+        "claim_rule": "POSITIVE_IF_EFFECTFUL",
+        "reservation_required": true
+      }
+    ],
+    "controls": {
+      "required_prerequisite_ids": [
+        "ENTRY_CONTENT_RIGHTS_VERIFIED",
+        "REGISTRY_OPERATING_GRANT_VERIFIED",
+        "CONSENT_VERIFIED",
+        "MARK_PERMISSION_VERIFIED",
+        "EXPECTED_HEAD_BOUND"
+      ],
+      "hard_block_flag_ids": [
+        "RIGHTS_REVOKED",
+        "CONSENT_WITHDRAWN",
+        "SOURCE_DRIFT_UNRESOLVED",
+        "TARGET_DELISTED"
+      ],
+      "manual_review_flag_ids": [
+        "RIGHTS_AMBIGUOUS",
+        "IDENTITY_AMBIGUOUS",
+        "HASH_PROFILE_UNSUPPORTED"
+      ],
+      "safe_fallback_action_id": "NO_EFFECT_FALLBACK"
+    },
+    "evidence_requirements": [
+      {
+        "requirement_id": "OTCS_APPEND_AUTHORIZATION_EVIDENCE",
+        "applies_to_action_ids": [
+          "OTCS_APPEND_EVENT"
+        ],
+        "required_evidence_types": [
+          "OTCS_ENTRY_CONTENT_RIGHTS",
+          "OTCS_REGISTRY_OPERATING_GRANT",
+          "OTCS_CONSENT_RECORD",
+          "OTCS_MARK_PERMISSION",
+          "OTCS_EXPECTED_HEAD"
+        ]
+      },
+      {
+        "requirement_id": "OTCS_FALLBACK_EVIDENCE",
+        "applies_to_action_ids": [
+          "NO_EFFECT_FALLBACK"
+        ],
+        "required_evidence_types": [
+          "DECLARATION_BINDING"
+        ]
+      }
+    ],
+    "mapping_witness": {
+      "witness_id": "otcs-registry-reference-witness-v1",
+      "method": "The mapping treats OTCS rights, consent, operating authority, mark permission, and project-head receipts as typed evidence; NC2.5 alone evaluates the declared prerequisites, blocks, resources, and effect before an OTCS compare-and-swap append can be attempted.",
+      "evidence_refs": [
+        {
+          "evidence_type": "OTCS_INTEROPERABILITY_MAPPING",
+          "ref": "evidence://synthetic/otcs/interoperability-mapping/v1",
+          "sha256": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+        }
+      ],
+      "covered_action_ids": [
+        "OTCS_APPEND_EVENT",
+        "NO_EFFECT_FALLBACK"
+      ],
+      "covered_effect_class_ids": [
+        "OTCS_REGISTRY_MUTATION",
+        "NO_EFFECT"
+      ],
+      "witness_hash": "B06BC6E5E10E24E9E02EAD8125E47BAE0454A76855F636FE5A07B017D9ABD6F2"
+    },
+    "roles": {
+      "governance_scope": "nc25.governance",
+      "operator_scope": "nc25.operator",
+      "executor_scope": "nc25.executor",
+      "architect_scope": "nc25.architect",
+      "observer_projection_fields": [
+        "channel",
+        "message_code",
+        "event_time",
+        "subject_ref"
+      ],
+      "forbidden_operator_fields": [
+        "admissibility_score",
+        "architect_trace",
+        "boundary_geometry",
+        "gate_margin",
+        "gate_statistics",
+        "reason_vector",
+        "selector_score",
+        "sub_verdicts",
+        "threshold_vector"
+      ]
+    },
+    "failure_posture": {
+      "missing_required_data": "REFUSAL",
+      "ambiguity": "MANUAL_REVIEW"
+    },
+    "change_control": {
+      "material_fields_require_new_version": true,
+      "live_gate_override_allowed": false
+    },
+    "registry_policy": {
+      "mode": "HASH_ONLY",
+      "forbidden_fields": [
+        "architect_trace",
+        "control_plane_configuration",
+        "gate_geometry",
+        "legal_instrument_body",
+        "personal_data",
+        "raw_evidence",
+        "raw_event_payload",
+        "raw_intent",
+        "reason_vector",
+        "reusable_credentials",
+        "sub_verdicts"
+      ]
+    }
+  },
+  "declaration": {
+    "schema_version": "1.0.0",
+    "declaration_id": "synthetic.otcs.registry.connection",
+    "declaration_version": "1.0.0",
+    "predecessor_declaration_hash": null,
+    "created_at": "2026-07-31T00:00:00Z",
+    "effective_from": "2026-07-31T00:00:00Z",
+    "expires_at": "2027-07-27T00:00:00Z",
+    "core_anchor": {
+      "file_name": "NC25_v3_0_patched_v4.tex",
+      "core_version": "3.0",
+      "doi": "10.17605/OSF.IO/NHTC5",
+      "sha256": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3"
+    },
+    "profile_binding": {
+      "profile_id": "otcs.registry.reference.v1",
+      "profile_version": "1.0.0",
+      "profile_hash": "523EC760A055D6E966B203AF6BAA899A5DC90B7AC51A7E663D69CE059FBD1871"
+    },
+    "connector": {
+      "connector_id": "synthetic-otcs-connector",
+      "workload_identity_issuer": "synthetic-otcs-identity-issuer",
+      "environment_ids": [
+        "sandbox"
+      ]
+    },
+    "instance_scope": {
+      "action_ids": [
+        "OTCS_APPEND_EVENT",
+        "NO_EFFECT_FALLBACK"
+      ],
+      "effect_class_ids": [
+        "OTCS_REGISTRY_MUTATION",
+        "NO_EFFECT"
+      ],
+      "target_system_ids": [
+        "synthetic-otcs-registry",
+        "local-fallback"
+      ],
+      "action_target_bindings": {
+        "OTCS_APPEND_EVENT": [
+          "synthetic-otcs-registry"
+        ],
+        "NO_EFFECT_FALLBACK": [
+          "local-fallback"
+        ]
+      },
+      "scope_constraints": {
+        "project_id": [
+          "otcs-project-0004"
+        ],
+        "event_type": [
+          "version_accepted"
+        ],
+        "registry_mode": [
+          "reference_only"
+        ],
+        "governing_object_kind": [
+          "project_record"
+        ]
+      }
+    },
+    "structural_budget": {
+      "selector_id": "synthetic-otcs-selector",
+      "capacity": 500,
+      "unit": "structural-cost-unit",
+      "provenance": "fully_stipulated"
+    },
+    "resource_limits": [
+      {
+        "resource_id": "otcs_append_units",
+        "max_per_intent": 1,
+        "max_committed_per_window": 100,
+        "window_seconds": 86400
+      }
+    ],
+    "governance": {
+      "profile_owner_id": "synthetic-otcs-profile-owner",
+      "declaration_owner_id": "synthetic-otcs-declaration-owner",
+      "approval_owner_id": "synthetic-otcs-approval-owner",
+      "authority_issuer_id": "synthetic-otcs-authority-issuer",
+      "revision_authority_ids": [
+        "synthetic-otcs-revision-board"
+      ],
+      "change_process_ref": "evidence://synthetic/otcs/change-process/v1",
+      "no_live_gate_override": true
+    },
+    "interfaces": {
+      "governance_service_id": "synthetic-otcs-governance-service",
+      "operator_service_id": "synthetic-otcs-operator-service",
+      "executor_service_id": "synthetic-otcs-executor-service",
+      "architect_store_id": "synthetic-otcs-architect-store",
+      "observer_projection_id": "synthetic-otcs-observer-projection",
+      "off_limits_system_ids": [
+        "production-otcs-registry",
+        "architect-private-store"
+      ]
+    },
+    "mapping_witness_binding": {
+      "witness_id": "otcs-registry-reference-witness-v1",
+      "witness_hash": "B06BC6E5E10E24E9E02EAD8125E47BAE0454A76855F636FE5A07B017D9ABD6F2"
+    },
+    "evidence_refs": [
+      {
+        "evidence_type": "DECLARATION_APPROVAL",
+        "ref": "evidence://synthetic/otcs/declaration-approval/v1",
+        "sha256": "F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0"
+      },
+      {
+        "evidence_type": "IDENTITY_BOUNDARY",
+        "ref": "evidence://synthetic/otcs/identity-boundary/v1",
+        "sha256": "F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1"
+      },
+      {
+        "evidence_type": "OUTBOX_DESIGN",
+        "ref": "evidence://synthetic/otcs/outbox-design/v1",
+        "sha256": "F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2"
+      }
+    ]
+  },
+  "grant": {
+    "message_type": "authority_grant",
+    "grant_id": "synthetic-otcs-operational-grant-001",
+    "subject_id": "synthetic-otcs-workload",
+    "connector_id": "synthetic-otcs-connector",
+    "binding": {
+      "profile_id": "otcs.registry.reference.v1",
+      "profile_version": "1.0.0",
+      "profile_hash": "523EC760A055D6E966B203AF6BAA899A5DC90B7AC51A7E663D69CE059FBD1871",
+      "declaration_id": "synthetic.otcs.registry.connection",
+      "declaration_version": "1.0.0",
+      "declaration_hash": "A2D8A2E092F5D28D527F75C8C5DDDA48146FEBD61A0804631E9F0EC5EED503AF"
+    },
+    "permitted_action_ids": [
+      "OTCS_APPEND_EVENT",
+      "NO_EFFECT_FALLBACK"
+    ],
+    "target_system_ids": [
+      "synthetic-otcs-registry",
+      "local-fallback"
+    ],
+    "valid_from": "2026-07-27T00:00:00Z",
+    "valid_until": "2026-08-30T00:00:00Z",
+    "issued_by": "synthetic-otcs-authority-issuer",
+    "approval_evidence_ref": "evidence://synthetic/otcs/operational-grant/001"
+  },
+  "intent": {
+    "message_type": "intent",
+    "intent_id": "synthetic-otcs-intent-001",
+    "idempotency_key": "synthetic-otcs-idempotency-001",
+    "connector_id": "synthetic-otcs-connector",
+    "requester_id": "synthetic-otcs-workload",
+    "authority_grant_id": "synthetic-otcs-operational-grant-001",
+    "binding": {
+      "profile_id": "otcs.registry.reference.v1",
+      "profile_version": "1.0.0",
+      "profile_hash": "523EC760A055D6E966B203AF6BAA899A5DC90B7AC51A7E663D69CE059FBD1871",
+      "declaration_id": "synthetic.otcs.registry.connection",
+      "declaration_version": "1.0.0",
+      "declaration_hash": "A2D8A2E092F5D28D527F75C8C5DDDA48146FEBD61A0804631E9F0EC5EED503AF"
+    },
+    "action_id": "OTCS_APPEND_EVENT",
+    "target_system_id": "synthetic-otcs-registry",
+    "scope": {
+      "project_id": "otcs-project-0004",
+      "event_type": "version_accepted",
+      "registry_mode": "reference_only",
+      "governing_object_kind": "project_record"
+    },
+    "resource_claims": {
+      "otcs_append_units": 1
+    },
+    "received_at": "2026-08-01T10:00:00Z",
+    "payload_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "history_summary_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "state_anchor_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+    "prerequisite_results": {
+      "ENTRY_CONTENT_RIGHTS_VERIFIED": true,
+      "REGISTRY_OPERATING_GRANT_VERIFIED": true,
+      "CONSENT_VERIFIED": true,
+      "MARK_PERMISSION_VERIFIED": true,
+      "EXPECTED_HEAD_BOUND": true
+    },
+    "hard_block_flags": {
+      "RIGHTS_REVOKED": false,
+      "CONSENT_WITHDRAWN": false,
+      "SOURCE_DRIFT_UNRESOLVED": false,
+      "TARGET_DELISTED": false
+    },
+    "manual_review_flags": {
+      "RIGHTS_AMBIGUOUS": false,
+      "IDENTITY_AMBIGUOUS": false,
+      "HASH_PROFILE_UNSUPPORTED": false
+    },
+    "ambiguity_flags": []
+  },
+  "evidence": {
+    "message_type": "evidence_bundle",
+    "intent_id": "synthetic-otcs-intent-001",
+    "collected_at": "2026-08-01T09:59:50Z",
+    "items": [
+      {
+        "evidence_type": "OTCS_ENTRY_CONTENT_RIGHTS",
+        "ref": "evidence://synthetic/otcs/entry-content-rights/001",
+        "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "status": "VALID"
+      },
+      {
+        "evidence_type": "OTCS_REGISTRY_OPERATING_GRANT",
+        "ref": "evidence://synthetic/otcs/registry-operating-grant/001",
+        "sha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "status": "VALID"
+      },
+      {
+        "evidence_type": "OTCS_CONSENT_RECORD",
+        "ref": "evidence://synthetic/otcs/consent/001",
+        "sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        "status": "VALID"
+      },
+      {
+        "evidence_type": "OTCS_MARK_PERMISSION",
+        "ref": "evidence://synthetic/otcs/mark-permission/001",
+        "sha256": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+        "status": "VALID"
+      },
+      {
+        "evidence_type": "OTCS_EXPECTED_HEAD",
+        "ref": "evidence://synthetic/otcs/head/project-0004/7",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "status": "VALID"
+      }
+    ]
+  },
+  "bridge_operation": {
+    "bridge_version": "1.0.0",
+    "project_id": "otcs-project-0004",
+    "event_id": "otcs-event-0004",
+    "event_type": "version_accepted",
+    "project_sequence": 8,
+    "idempotency_key": "synthetic-otcs-idempotency-001",
+    "effective_at": "2026-08-01T10:00:00Z",
+    "target_system_id": "synthetic-otcs-registry",
+    "registry_mode": "reference_only",
+    "governing_object": {
+      "object_kind": "project_record",
+      "object_id": "otcs-project-0004-record",
+      "hash_profile": "RFC8785_SHA256",
+      "digest": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+      "object_kind": "version_snapshot",
+      "object_id": "otcs-project-0004-version-0004",
+      "hash_profile": "RFC8785_SHA256",
+      "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "expected_head": {
+      "project_id": "otcs-project-0004",
+      "governing_object_kind": "project_record",
+      "governing_digest": {
+        "object_kind": "project_record",
+        "object_id": "otcs-project-0004-record",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      "project_sequence": 7,
+      "event_id": "otcs-event-0003",
+      "event_digest": {
+        "object_kind": "project_event",
+        "object_id": "otcs-event-0003",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "history_digest": {
+        "object_kind": "project_history",
+        "object_id": "otcs-project-0004-history-0007",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    },
+    "legal_evidence": {
+      "OTCS_ENTRY_CONTENT_RIGHTS": {
+        "object_kind": "entry_content_rights_receipt",
+        "object_id": "otcs-rights-receipt-001",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "OTCS_REGISTRY_OPERATING_GRANT": {
+        "object_kind": "registry_operating_grant_receipt",
+        "object_id": "otcs-operating-grant-receipt-001",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "OTCS_CONSENT_RECORD": {
+        "object_kind": "consent_receipt",
+        "object_id": "otcs-consent-receipt-001",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+      },
+      "OTCS_MARK_PERMISSION": {
+        "object_kind": "mark_permission_receipt",
+        "object_id": "otcs-mark-permission-receipt-001",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+      }
+    }
+  },
+  "downstream_receipt": {
+    "receipt_id": "otcs-receipt-0004",
+    "project_id": "otcs-project-0004",
+    "event_id": "otcs-event-0004",
+    "project_sequence": 8,
+    "idempotency_key": "synthetic-otcs-idempotency-001",
+    "previous_head": {
+      "project_id": "otcs-project-0004",
+      "governing_object_kind": "project_record",
+      "governing_digest": {
+        "object_kind": "project_record",
+        "object_id": "otcs-project-0004-record",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      "project_sequence": 7,
+      "event_id": "otcs-event-0003",
+      "event_digest": {
+        "object_kind": "project_event",
+        "object_id": "otcs-event-0003",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "history_digest": {
+        "object_kind": "project_history",
+        "object_id": "otcs-project-0004-history-0007",
+        "hash_profile": "RFC8785_SHA256",
+        "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    },
+    "event_digest": {
+      "object_kind": "project_event",
+      "object_id": "otcs-event-0004",
+      "hash_profile": "RFC8785_SHA256",
+      "digest": "6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    "receipt_digest": {
+      "object_kind": "append_receipt",
+      "object_id": "otcs-receipt-0004",
+      "hash_profile": "RFC8785_SHA256",
+      "digest": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "issuer_id": "synthetic-otcs-operator",
+    "operator_epoch": "otcs-epoch-2026-01",
+    "key_id": "otcs-signing-key-01",
+    "effective_at": "2026-08-01T10:00:00Z",
+    "signature_ref": "evidence://synthetic/otcs/signature/receipt-0004",
+    "log_root": {
+      "object_kind": "transparency_log_root",
+      "object_id": "otcs-log-root-0008",
+      "hash_profile": "RFC8785_SHA256",
+      "digest": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    "inclusion_proof_ref": "evidence://synthetic/otcs/inclusion-proof/receipt-0004"
+  }
+}

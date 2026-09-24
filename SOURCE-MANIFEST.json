@@ -1,0 +1,25 @@
+{
+  "manifest_version": "0.1.0",
+  "created_at": "2026-07-28T00:00:00Z",
+  "package_name": "NC25OL - Navigational Cybernetics 2.5 Open Ledger",
+  "package_version": "0.0.11",
+  "author": "Maksim Barziankou (MxBv)",
+  "affiliation": "The Urgrund Laboratheory",
+  "license": "CC-BY-4.0 for the documentation and specification; MIT for the code, schemas, and machine-readable artefacts. See LICENSE.",
+  "inputs": [
+    {
+      "role": "immutable_nc25_core",
+      "file_name": "NC25_v3_0_patched_v4.tex",
+      "relative_path": "NC25_v3_0_patched_v4.tex",
+      "core_version": "3.0",
+      "doi": "10.17605/OSF.IO/NHTC5",
+      "sha256": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3",
+      "byte_length": 1414184,
+      "line_count": 14228,
+      "read_only": true
+    }
+  ],
+  "profile_provenance": "The banking, document-release, and OTCS registry profiles are worked reference examples authored for this package. The NC2.5 profile defines admissibility while OTCS rights, consent, operating-grant, mark-permission, and expected-head data remain typed external evidence; no concrete OTCS deployment data is distributed or required to verify the package.",
+  "binding_rule": "A profile and declaration are eligible for this reference package only when their core_anchor exactly reproduces the core version, DOI, file name, and SHA-256 above.",
+  "derivation_scope": "The package translates declared NC2.5 interface and separation constraints into a reusable engineering contract. It neither modifies the core nor infers admissibility from connector similarity."
+}

@@ -1,0 +1,79 @@
+{
+  "crosswalk_version": "1.3.0",
+  "source_description": "Standard bank onboarding questionnaire structure. The originating document of any concrete institution is not distributed with this package.",
+  "sections": [
+    {
+      "questionnaire_section": "1. Business Scope and Boundaries",
+      "universal_paths": [
+        "declaration.instance_scope.scope_constraints",
+        "declaration.instance_scope.action_ids",
+        "declaration.instance_scope.effect_class_ids",
+        "declaration.instance_scope.target_system_ids"
+      ],
+      "connection_effect": "Defines which intents can be typed for this instance. An undeclared scope value is non-executable."
+    },
+    {
+      "questionnaire_section": "2. Authorized Activities and Limits",
+      "universal_paths": [
+        "profile.action_alphabet",
+        "profile.effect_classes",
+        "profile.resource_catalog",
+        "declaration.resource_limits"
+      ],
+      "connection_effect": "Creates the action, effect, and domain resource boundaries. Financial limits remain domain controls and are not the structural budget."
+    },
+    {
+      "questionnaire_section": "3. Access and System Boundaries",
+      "universal_paths": [
+        "declaration.connector",
+        "declaration.interfaces",
+        "declaration.instance_scope.target_system_ids"
+      ],
+      "connection_effect": "Separates governance, acting connector, executor, observer projection, architect store, downstream targets, and off-limits systems."
+    },
+    {
+      "questionnaire_section": "4. Decision Rules and Logic",
+      "universal_paths": [
+        "profile.controls.required_prerequisite_ids",
+        "profile.controls.hard_block_flag_ids",
+        "profile.controls.manual_review_flag_ids",
+        "profile.failure_posture"
+      ],
+      "connection_effect": "Separates binary gate logic from non-executable workflow routing."
+    },
+    {
+      "questionnaire_section": "5. Audit, Evidence, and Compliance",
+      "universal_paths": [
+        "profile.evidence_requirements",
+        "declaration.evidence_refs",
+        "declaration.interfaces.architect_store_id",
+        "profile.registry_policy"
+      ],
+      "connection_effect": "Defines immutable local evidence and a minimal hash-only shared projection."
+    },
+    {
+      "questionnaire_section": "6. Ownership and Change Control",
+      "universal_paths": [
+        "declaration.governance",
+        "profile.change_control",
+        "declaration.predecessor_declaration_hash"
+      ],
+      "connection_effect": "A material edit creates a new declaration or profile hash. No owner may flip a refusal inside the live version."
+    },
+    {
+      "questionnaire_section": "7. Exception and Failure Handling",
+      "universal_paths": [
+        "profile.failure_posture"
+      ],
+      "connection_effect": "The profile mirrors protocol-fixed routing: missing required data is REFUSAL and ambiguity is MANUAL_REVIEW. Integrity failures remain hard errors; downstream and rule-conflict handling require explicit runtime branches rather than decorative configuration."
+    },
+    {
+      "questionnaire_section": "8. Supporting Documents",
+      "universal_paths": [
+        "profile.mapping_witness.evidence_refs",
+        "declaration.evidence_refs"
+      ],
+      "connection_effect": "Stores immutable references and hashes without placing raw documents or secrets in the runtime ledger or shared registry."
+    }
+  ]
+}

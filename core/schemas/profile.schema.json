@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nc25.local/universal-ledger/profile.schema.json",
+  "title": "NC25OL Connection Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "profile_version",
+    "created_at",
+    "core_anchor",
+    "domain",
+    "action_alphabet",
+    "effect_classes",
+    "resource_catalog",
+    "controls",
+    "evidence_requirements",
+    "mapping_witness",
+    "roles",
+    "failure_posture",
+    "change_control",
+    "registry_policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "profile_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "profile_version": {
+      "$ref": "#/$defs/version"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "core_anchor": {
+      "$ref": "#/$defs/core_anchor"
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain_name",
+        "description"
+      ],
+      "properties": {
+        "domain_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "action_alphabet": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action_id",
+          "description",
+          "effect_class_id",
+          "structural_cost",
+          "required_resource_ids"
+        ],
+        "properties": {
+          "action_id": {
+            "$ref": "#/$defs/identifier"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "effect_class_id": {
+            "$ref": "#/$defs/identifier"
+          },
+          "structural_cost": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "required_resource_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/identifier"
+            }
+          }
+        }
+      }
+    },
+    "effect_classes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "effect_class_id",
+          "description",
+          "mutates_external_state"
+        ],
+        "properties": {
+          "effect_class_id": {
+            "$ref": "#/$defs/identifier"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "mutates_external_state": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "resource_catalog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource_id",
+          "unit",
+          "claim_rule",
+          "reservation_required"
+        ],
+        "properties": {
+          "resource_id": {
+            "$ref": "#/$defs/identifier"
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "claim_rule": {
+            "enum": [
+              "NON_NEGATIVE",
+              "POSITIVE",
+              "ZERO",
+              "POSITIVE_IF_EFFECTFUL"
+            ]
+          },
+          "reservation_required": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_prerequisite_ids",
+        "hard_block_flag_ids",
+        "manual_review_flag_ids",
+        "safe_fallback_action_id"
+      ],
+      "properties": {
+        "required_prerequisite_ids": {
+          "$ref": "#/$defs/identifier_set"
+        },
+        "hard_block_flag_ids": {
+          "$ref": "#/$defs/identifier_set"
+        },
+        "manual_review_flag_ids": {
+          "$ref": "#/$defs/identifier_set"
+        },
+        "safe_fallback_action_id": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "evidence_requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requirement_id",
+          "applies_to_action_ids",
+          "required_evidence_types"
+        ],
+        "properties": {
+          "requirement_id": {
+            "$ref": "#/$defs/identifier"
+          },
+          "applies_to_action_ids": {
+            "$ref": "#/$defs/non_empty_identifier_set"
+          },
+          "required_evidence_types": {
+            "$ref": "#/$defs/non_empty_identifier_set"
+          }
+        }
+      }
+    },
+    "mapping_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "witness_id",
+        "method",
+        "evidence_refs",
+        "covered_action_ids",
+        "covered_effect_class_ids",
+        "witness_hash"
+      ],
+      "properties": {
+        "witness_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "method": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 2000
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/evidence_ref"
+          }
+        },
+        "covered_action_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        },
+        "covered_effect_class_ids": {
+          "$ref": "#/$defs/non_empty_identifier_set"
+        },
+        "witness_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "governance_scope",
+        "operator_scope",
+        "executor_scope",
+        "architect_scope",
+        "observer_projection_fields",
+        "forbidden_operator_fields"
+      ],
+      "properties": {
+        "governance_scope": {
+          "const": "nc25.governance"
+        },
+        "operator_scope": {
+          "const": "nc25.operator"
+        },
+        "executor_scope": {
+          "const": "nc25.executor"
+        },
+        "architect_scope": {
+          "const": "nc25.architect"
+        },
+        "observer_projection_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "channel",
+              "message_code",
+              "event_time",
+              "subject_ref"
+            ]
+          }
+        },
+        "forbidden_operator_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "failure_posture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "missing_required_data",
+        "ambiguity"
+      ],
+      "properties": {
+        "missing_required_data": {
+          "const": "REFUSAL"
+        },
+        "ambiguity": {
+          "const": "MANUAL_REVIEW"
+        }
+      }
+    },
+    "change_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "material_fields_require_new_version",
+        "live_gate_override_allowed"
+      ],
+      "properties": {
+        "material_fields_require_new_version": {
+          "const": true
+        },
+        "live_gate_override_allowed": {
+          "const": false
+        }
+      }
+    },
+    "registry_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "forbidden_fields"
+      ],
+      "properties": {
+        "mode": {
+          "const": "HASH_ONLY"
+        },
+        "forbidden_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{1,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "identifier_set": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "non_empty_identifier_set": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "core_anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file_name",
+        "core_version",
+        "doi",
+        "sha256"
+      ],
+      "properties": {
+        "file_name": {
+          "const": "NC25_v3_0_patched_v4.tex"
+        },
+        "core_version": {
+          "const": "3.0"
+        },
+        "doi": {
+          "const": "10.17605/OSF.IO/NHTC5"
+        },
+        "sha256": {
+          "const": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3"
+        }
+      }
+    },
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_type",
+        "ref",
+        "sha256"
+      ],
+      "properties": {
+        "evidence_type": {
+          "$ref": "#/$defs/identifier"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

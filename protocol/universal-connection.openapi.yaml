@@ -1,0 +1,940 @@
+openapi: 3.1.0
+info:
+  title: NC25OL - Navigational Cybernetics 2.5 Open Ledger API
+  version: 0.0.11
+  description: >-
+    Role-separated reference contract for activating one connection
+    declaration, issuing and revoking workload authority, evaluating bound
+    intents, consuming single-use permits, and reading architect or hash-only
+    registry projections. Every route requires mTLS and a scoped workload
+    identity. Beyond the responses listed per route, any route returns 503 on a
+    local integrity-halt condition and 400 on a malformed path parameter. Every
+    status the reference WSGI adapter can emit is declared: 403 for a missing
+    or wrong workload scope on every route, and 413 for an oversized body on
+    every body-bearing route.
+servers:
+  - url: https://ledger.example.invalid
+    description: Non-routable documentation placeholder
+tags:
+  - name: Governance
+  - name: Operator
+  - name: Executor
+  - name: Architect
+  - name: Registry
+paths:
+  /v1/declarations:activate:
+    post:
+      tags:
+        - Governance
+      operationId: activateDeclaration
+      summary: Activate exact profile and declaration hashes
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.governance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - profile
+                - declaration
+                - activated_by
+                - approval_evidence_ref
+              properties:
+                profile:
+                  $ref: ../core/schemas/profile.schema.json
+                declaration:
+                  $ref: ../core/schemas/connection-declaration.schema.json
+                activated_by:
+                  type: string
+                approval_evidence_ref:
+                  type: string
+      responses:
+        "201":
+          description: >-
+            Declaration activated. The HTTP adapter wraps the reference
+            engine's returned declaration hash with the profile hash and
+            ACTIVE status shown by this response schema.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - profile_hash
+                  - declaration_hash
+                  - status
+                properties:
+                  profile_hash:
+                    $ref: "#/components/schemas/Sha256"
+                  declaration_hash:
+                    $ref: "#/components/schemas/Sha256"
+                  status:
+                    const: ACTIVE
+        "400":
+          $ref: "#/components/responses/ContractError"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+  /v1/authority-grants:
+    post:
+      tags:
+        - Governance
+      operationId: issueAuthorityGrant
+      summary: Issue one scoped, time-bounded workload grant
+      description: >-
+        The first valid request records the grant once. An exact re-issue of a
+        grant already on the chain is a replay: it returns 200 with the same
+        grant_hash and records no second event. A differing body under an
+        existing grant_id is a 409 conflict. A grant whose valid_until is not
+        after the trusted processing clock is refused at issue with
+        AUTHORITY_EXPIRED; a grant whose whole window lies in the future is
+        issued and refuses use with AUTHORITY_NOT_YET_VALID until it opens.
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.governance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../core/schemas/runtime-contracts.schema.json#/$defs/authority_grant
+      responses:
+        "201":
+          description: >-
+            Grant issued. The HTTP adapter wraps the reference engine's
+            returned grant hash with the request grant_id shown by this
+            response schema.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantIssueResult"
+        "200":
+          description: >-
+            Exact replay of a grant already on the chain: the same grant_hash,
+            no second event recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantIssueResult"
+        "400":
+          $ref: "#/components/responses/ContractError"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+  /v1/authority-revocations:
+    post:
+      tags:
+        - Governance
+      operationId: revokeAuthorityGrant
+      summary: Revoke a grant and invalidate outstanding permits
+      description: >-
+        revoked_at may be at most five seconds ahead of the trusted
+        processing clock. A later timestamp is rejected before state changes.
+        Revocation is idempotent by state: a valid revocation of a grant that
+        is already revoked returns 204 and records no second event, and a
+        permit already invalidated for another reason keeps that reason. Every
+        field of a repeated request is still validated, so a malformed repeat
+        is refused exactly as a first attempt would be.
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.governance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../core/schemas/runtime-contracts.schema.json#/$defs/authority_revocation
+      responses:
+        "204":
+          description: Revocation recorded
+        "400":
+          $ref: "#/components/responses/ContractError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+  /v1/operator/intents:evaluate:
+    post:
+      tags:
+        - Operator
+      operationId: evaluateIntent
+      summary: Evaluate one intent and return a minimal operator result
+      description: >-
+        The response never exposes gate geometry, margins, sub-verdicts,
+        thresholds, reason vectors, retained statistics, or architect trace.
+        The referenced runtime schemas describe the internal evaluator input.
+        A production HTTP adapter MUST NOT trust connector-supplied evidence
+        status, prerequisite results, hard-block flags, or manual-review flags.
+        It MUST resolve approved evidence, verify provenance and hashes, derive
+        those control results inside the independent evaluator boundary, bind
+        them to the request and current-state anchor, and overwrite the
+        connector claims before invoking evaluation. The reference engine
+        ships both injection points: an evidence resolver and a control
+        resolver whose derived results replace the connector claims as gate
+        inputs, are bound into the request hash, and fail closed on resolver
+        exceptions or malformed output.
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.operator
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: >-
+            Must exactly equal intent.idempotency_key in the request body. A
+            body that carries a different value is rejected as 409 before
+            evaluation. A body that carries no idempotency_key at all is not a
+            mismatch but an incomplete intent, refused as 400 INTENT_FIELDS.
+          schema:
+            type: string
+            pattern: '^[A-Za-z][A-Za-z0-9._:-]{1,127}$'
+            minLength: 2
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - intent
+                - evidence_bundle
+              properties:
+                intent:
+                  $ref: ../core/schemas/runtime-contracts.schema.json#/$defs/intent
+                evidence_bundle:
+                  $ref: ../core/schemas/runtime-contracts.schema.json#/$defs/evidence_bundle
+      responses:
+        "200":
+          description: Executable or non-executable normalized result
+          content:
+            application/json:
+              schema:
+                $ref: ../core/schemas/runtime-contracts.schema.json#/$defs/operator_result
+        "400":
+          $ref: "#/components/responses/ContractError"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+  /v1/executor/permits/{permit_hash}:consume:
+    post:
+      tags:
+        - Executor
+      operationId: consumePermit
+      summary: Commit one live permit with replay-safe receipt recovery
+      description: >-
+        The first valid request consumes and debits the permit at most once.
+        The path and body permit_hash values MUST identify the same digest after
+        hexadecimal case normalization. A mismatch MUST fail with
+        EXECUTION_PERMIT_MISMATCH before permit lookup, replay, consumption, or
+        debit. An exact canonical replay returns the stored execution receipt without
+        another event or debit. A changed request for the consumed permit is a
+        conflict.
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.executor
+      parameters:
+        - $ref: "#/components/parameters/PermitHash"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../core/schemas/runtime-contracts.schema.json#/$defs/execution_request
+      responses:
+        "200":
+          description: >-
+            Execution outcome recorded, or an exact stored receipt replayed
+            without re-execution after a successful commit, including after
+            permit, grant, or declaration expiry or revocation
+          content:
+            application/json:
+              schema:
+                $ref: ../core/schemas/runtime-contracts.schema.json#/$defs/execution_receipt
+        "400":
+          $ref: "#/components/responses/ContractError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+  /v1/architect/permits/{permit_hash}:
+    get:
+      tags:
+        - Architect
+      operationId: getArchitectPermit
+      summary: Read the post-event permit and gate trace
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.architect
+      parameters:
+        - $ref: "#/components/parameters/PermitHash"
+      responses:
+        "400":
+          $ref: "#/components/responses/ContractError"
+        "200":
+          description: Architect-only post-event record
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - permit_body
+                  - permit_hash
+                  - signature
+                  - consumed
+                  - reservation_active
+                  - invalidated_reason
+                properties:
+                  permit_body:
+                    $ref: "../core/schemas/runtime-contracts.schema.json#/$defs/execution_permit"
+                  permit_hash:
+                    $ref: "#/components/schemas/Sha256"
+                  signature:
+                    $ref: "#/components/schemas/SignatureEnvelope"
+                  consumed:
+                    type: boolean
+                  reservation_active:
+                    type: boolean
+                  invalidated_reason:
+                    oneOf:
+                      - type: "null"
+                      - type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/architect/decisions/{request_hash}:
+    get:
+      tags:
+        - Architect
+      operationId: getArchitectDecision
+      summary: Read a post-event decision trace
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.architect
+      parameters:
+        - name: request_hash
+          in: path
+          required: true
+          description: >-
+            Hexadecimal SHA-256, accepted in either case. A value that is not a
+            well-formed digest is a contract error (400); a well-formed digest
+            that names no decision is 404.
+          schema:
+            $ref: "#/components/schemas/Sha256"
+      responses:
+        "400":
+          $ref: "#/components/responses/ContractError"
+        "200":
+          description: >-
+            Architect-only decision trace. permit_hash is present only when the
+            disposition is ALLOW; gate_bit, structural_gate, and effect_gate are
+            null when the decision was taken before the gate was engaged.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - intent_id
+                  - request_hash
+                  - disposition
+                  - message_code
+                  - gate_engaged
+                  - gate_bit
+                  - structural_gate
+                  - effect_gate
+                  - recorded_at
+                properties:
+                  intent_id:
+                    type: string
+                  request_hash:
+                    $ref: "#/components/schemas/Sha256"
+                  disposition:
+                    enum:
+                      - ALLOW
+                      - REFUSAL
+                      - MANUAL_REVIEW
+                  message_code:
+                    type: string
+                  gate_engaged:
+                    type: boolean
+                  gate_bit:
+                    oneOf:
+                      - type: "null"
+                      - enum:
+                          - 0
+                          - 1
+                  structural_gate:
+                    oneOf:
+                      - type: "null"
+                      - type: boolean
+                  effect_gate:
+                    oneOf:
+                      - type: "null"
+                      - type: boolean
+                  permit_hash:
+                    $ref: "#/components/schemas/Sha256"
+                  recorded_at:
+                    type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/architect/ledger/head:
+    get:
+      tags:
+        - Architect
+      operationId: getLedgerHead
+      summary: Verify the local append-only chain head
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.architect
+      responses:
+        "200":
+          description: Current chain head
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - event_count
+                  - head_hash
+                properties:
+                  event_count:
+                    type: integer
+                    minimum: 0
+                  head_hash:
+                    $ref: "#/components/schemas/Sha256"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/registry/connectors/{connector_id}:
+    get:
+      tags:
+        - Registry
+      operationId: getRegistryRecord
+      summary: Read the hash-only connector projection
+      security:
+        - mutualTLS: []
+          OAuth2:
+            - nc25.architect
+      parameters:
+        - name: connector_id
+          in: path
+          required: true
+          description: >-
+            Exact connector selector. A well-formed but different or unknown value
+            returns 404; the server MUST NOT substitute the active connector. A
+            selector that is not a well-formed identifier is a contract error (400).
+          schema:
+            type: string
+      responses:
+        "400":
+          $ref: "#/components/responses/ContractError"
+        "200":
+          description: Hash-only registry record
+          content:
+            application/json:
+              schema:
+                $ref: ../core/schemas/registry-record.schema.json
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    mutualTLS:
+      type: mutualTLS
+      description: Enterprise-managed mutual TLS is required on every route.
+    OAuth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://identity.example.invalid/oauth2/token
+          scopes:
+            nc25.governance: Activate declarations and manage authority.
+            nc25.operator: Submit bound intents and receive minimal results.
+            nc25.executor: Consume a live permit exactly once.
+            nc25.architect: Read post-event evidence and hash-only projections.
+  parameters:
+    PermitHash:
+      name: permit_hash
+      in: path
+      required: true
+      description: >-
+        Hexadecimal SHA-256, accepted in either case. A value that is not a
+        well-formed digest is a contract error (400); a well-formed digest that
+        names no permit is 404.
+      schema:
+        $ref: "#/components/schemas/Sha256"
+  schemas:
+    Sha256:
+      type: string
+      pattern: "^[A-Fa-f0-9]{64}$"
+    GrantIssueResult:
+      type: object
+      additionalProperties: false
+      required:
+        - grant_id
+        - grant_hash
+      properties:
+        grant_id:
+          type: string
+        grant_hash:
+          $ref: "#/components/schemas/Sha256"
+    SignatureEnvelope:
+      description: >-
+        Versioned detached signature over the permit hash. Verification MUST
+        route by key_id to the key custody source and MUST fail closed on an
+        unknown algorithm, an unknown or revoked key_id, or a field-set
+        mismatch. The reference engine ships HMAC-SHA256 (hex signature) and
+        Ed25519 (base64 signature) through the same envelope; a production
+        signer supplies managed keys without changing this shape.
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - algorithm
+        - key_id
+        - signature
+      properties:
+        version:
+          type: string
+          minLength: 1
+        algorithm:
+          type: string
+          minLength: 1
+        key_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        signature:
+          type: string
+          minLength: 1
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+      properties:
+        code:
+          description: >-
+            The complete vocabulary a caller can receive: every engine refusal
+            code, every adapter wire code, and every code the adapter re-emits
+            from an integrity halt. Generated from the shipped source by the
+            failure-surface scan and held in step with it by the package
+            verifier; adding a code to the engine or the adapter without
+            adding it here fails acceptance.
+          type: string
+          enum:
+            - ACTION_DESCRIPTION
+            - ACTION_RESOURCE_IDS
+            - ACTIVATE_BODY
+            - ACTIVATE_DECLARATION_MISMATCH
+            - ACTIVATE_PROFILE_MISMATCH
+            - ACTIVATION_ACTOR
+            - ACTIVATION_ACTOR_UNAUTHORIZED
+            - ACTIVATION_EVIDENCE_REQUIRED
+            - ALLOW_WITHOUT_PERMIT
+            - AMBIGUITY_FLAGS
+            - ARCHITECT_MESSAGE_CODE
+            - AUTHORITY_ACTIONS
+            - AUTHORITY_ACTION_SCOPE
+            - AUTHORITY_BINDING_MISMATCH
+            - AUTHORITY_CONNECTOR_MISMATCH
+            - AUTHORITY_EVIDENCE_REQUIRED
+            - AUTHORITY_EXPIRED
+            - AUTHORITY_GRANT_FIELDS
+            - AUTHORITY_IDENTIFIER
+            - AUTHORITY_ID_CONFLICT
+            - AUTHORITY_ISSUER_MISMATCH
+            - AUTHORITY_LOOKUP_FAILURE
+            - AUTHORITY_MESSAGE_TYPE
+            - AUTHORITY_NOT_YET_VALID
+            - AUTHORITY_REVOKED
+            - AUTHORITY_TARGETS
+            - AUTHORITY_TARGET_SCOPE
+            - AUTHORITY_TIME_ORDER
+            - AUTHORITY_UNKNOWN
+            - BODY_JSON
+            - BODY_LENGTH
+            - BODY_NESTING
+            - BODY_OBJECT
+            - BODY_STREAM
+            - BODY_TOO_LARGE
+            - CANONICAL_JSON_INVALID
+            - CHANGE_CONTROL
+            - CLOCK_VALUE
+            - CONNECTOR
+            - CONNECTOR_ID
+            - CONNECTOR_NOT_FOUND
+            - CONTROL_CLASS_OVERLAP
+            - CONTROL_RESOLUTION_FAILED
+            - CONTROL_RESOLUTION_INVALID
+            - CORE_ANCHOR_MISMATCH
+            - DECISION_UNKNOWN
+            - DECLARATION_ALREADY_ACTIVATED
+            - DECLARATION_EVIDENCE
+            - DECLARATION_FIELDS
+            - DECLARATION_ID
+            - DECLARATION_NOT_ACTIVE
+            - DECLARATION_OUTSIDE_VALIDITY
+            - DECLARATION_SCHEMA_VERSION
+            - DECLARATION_SEAL_FAILURE
+            - DECLARATION_TIME_ORDER
+            - DECLARATION_VERSION
+            - DOWNSTREAM_RECEIPT_FORBIDDEN
+            - DOWNSTREAM_RECEIPT_HASH
+            - DUPLICATE_ACTION_ID
+            - DUPLICATE_EFFECT_ID
+            - DUPLICATE_EVIDENCE_REQUIREMENT
+            - DUPLICATE_EVIDENCE_TYPE
+            - DUPLICATE_RESOURCE_ID
+            - ED25519_PRIVATE_KEY
+            - ED25519_PRIVATE_KEY_REQUIRED
+            - ED25519_PUBLIC_KEY
+            - ED25519_UNAVAILABLE
+            - EMPTY_SCOPE_CONSTRAINTS
+            - ENVIRONMENT_IDS
+            - EVENT_SIGNER_INVALID
+            - EVENT_SIGNER_REQUIRED
+            - EVENT_SUBJECT
+            - EVENT_TYPE
+            - EVIDENCE_ACTION_COVERAGE
+            - EVIDENCE_ACTION_IDS
+            - EVIDENCE_BUNDLE_FIELDS
+            - EVIDENCE_HASH
+            - EVIDENCE_INTENT_MISMATCH
+            - EVIDENCE_ITEM
+            - EVIDENCE_ITEMS
+            - EVIDENCE_MESSAGE_TYPE
+            - EVIDENCE_REFERENCE
+            - EVIDENCE_REQUIREMENT
+            - EVIDENCE_REQUIREMENTS
+            - EVIDENCE_REQUIREMENT_ID
+            - EVIDENCE_RESOLUTION_FAILED
+            - EVIDENCE_RESOLUTION_INVALID
+            - EVIDENCE_STATUS
+            - EVIDENCE_TIME_IN_FUTURE
+            - EVIDENCE_TYPE
+            - EVIDENCE_UNKNOWN_ACTION
+            - EXECUTION_BINDING_MISMATCH
+            - EXECUTION_CONNECTOR
+            - EXECUTION_CONNECTOR_MISMATCH
+            - EXECUTION_FIELDS
+            - EXECUTION_MESSAGE_TYPE
+            - EXECUTION_OUTCOME
+            - EXECUTION_PERMIT_HASH
+            - EXECUTION_PERMIT_MISMATCH
+            - EXECUTION_RECEIPT_MISSING
+            - EXECUTION_REPLAY_CONFLICT
+            - EXECUTION_ROUTE_PERMIT_HASH
+            - EXECUTION_STATE_ANCHOR
+            - EXECUTION_TIME_IN_FUTURE
+            - EXECUTION_TIME_PRECEDES_PERMIT
+            - FAILURE_POSTURE
+            - FIXED_FAILURE_POSTURE
+            - FORBIDDEN_OPERATOR_COVERAGE
+            - FORBIDDEN_OPERATOR_FIELDS
+            - GOVERNANCE
+            - GOVERNANCE_CHANGE_CONTROL
+            - GOVERNANCE_ID
+            - HARD_BLOCK_FLAGS
+            - HARD_BLOCK_IDS
+            - IDEMPOTENCY_CONFLICT
+            - IDEMPOTENCY_KEY_MISMATCH
+            - IDEMPOTENCY_KEY_REQUIRED
+            - IDEMPOTENCY_PERMIT_MISSING
+            - INSTANCE_SCOPE
+            - INTENT_BINDING
+            - INTENT_FIELDS
+            - INTENT_HASH
+            - INTENT_IDENTIFIER
+            - INTENT_MESSAGE_TYPE
+            - INTENT_SCOPE
+            - INTENT_SCOPE_DIMENSION
+            - INTENT_TIME_IN_FUTURE
+            - INTERFACES
+            - INTERFACE_ID
+            - INTERFACE_ROLE_OVERLAP
+            - INTERNAL_FAILURE
+            - INVALID_TIMESTAMP
+            - JSON_OBJECT_KEY_TYPE
+            - JSON_OBJECT_REQUIRED
+            - JSON_VALUE_TYPE
+            - LEDGER_CHAIN_FAILURE
+            - LEDGER_TAMPERED
+            - LIVE_GATE_OVERRIDE
+            - MANUAL_REVIEW_FLAGS
+            - MANUAL_REVIEW_IDS
+            - MAPPING_WITNESS
+            - NESTING_DEPTH_EXCEEDED
+            - NON_EXECUTABLE_WITH_PERMIT
+            - NOT_FOUND
+            - OBSERVER_PROJECTION_EXPANSION
+            - OBSERVER_PROJECTION_FIELDS
+            - OFF_LIMITS_SYSTEMS
+            - OPERATOR_BODY
+            - OPERATOR_GATE_DATA_FORBIDDEN
+            - PERMIT_ALREADY_CONSUMED
+            - PERMIT_EXPIRED
+            - PERMIT_HASH
+            - PERMIT_HASH_FAILURE
+            - PERMIT_KEY_ACTIVE
+            - PERMIT_KEY_NOT_REGISTERED
+            - PERMIT_KEY_REVOKED
+            - PERMIT_KEY_ROTATION_DUPLICATE
+            - PERMIT_KEY_UNKNOWN
+            - PERMIT_SIGNATURE_ENVELOPE
+            - PERMIT_SIGNATURE_FAILURE
+            - PERMIT_SIGNER_INVALID
+            - PERMIT_TTL
+            - PERMIT_UNKNOWN
+            - PREDECESSOR_HASH
+            - PREREQUISITE_IDS
+            - PREREQUISITE_RESULTS
+            - PROFILE_ACTION
+            - PROFILE_ACTIONS
+            - PROFILE_ACTION_ID
+            - PROFILE_BINDING
+            - PROFILE_CONTROLS
+            - PROFILE_CORE_MISMATCH
+            - PROFILE_DOMAIN
+            - PROFILE_EFFECT
+            - PROFILE_EFFECTS
+            - PROFILE_EFFECT_DESCRIPTION
+            - PROFILE_EFFECT_ID
+            - PROFILE_EFFECT_MUTATION_FLAG
+            - PROFILE_FIELDS
+            - PROFILE_HASH
+            - PROFILE_HASH_MISMATCH
+            - PROFILE_ID
+            - PROFILE_ID_MISMATCH
+            - PROFILE_RESOURCE
+            - PROFILE_RESOURCES
+            - PROFILE_RESOURCE_ID
+            - PROFILE_ROLES
+            - PROFILE_SCHEMA_VERSION
+            - PROFILE_SEAL_FAILURE
+            - PROFILE_VERSION
+            - PROFILE_VERSION_MISMATCH
+            - PROFILE_WITNESS_HASH
+            - PUBLIC_MESSAGE_CODE_INVALID
+            - REGISTRY_ACTIVATED_AT
+            - REGISTRY_CONNECTOR_ID
+            - REGISTRY_CORE_ANCHOR
+            - REGISTRY_DATA_EXPANSION
+            - REGISTRY_FORBIDDEN_COVERAGE
+            - REGISTRY_HASH
+            - REGISTRY_IDENTIFIER
+            - REGISTRY_NOT_HASH_ONLY
+            - REGISTRY_POLICY
+            - REGISTRY_PROJECTION_INVALID
+            - REGISTRY_RECEIPT_ROOT
+            - REGISTRY_REVOKED
+            - REGISTRY_SCHEMA_VERSION
+            - REGISTRY_STATUS
+            - REGISTRY_VERSION
+            - REQUEST_HASH
+            - REQUIRED_EVIDENCE_TYPES
+            - RESERVATION_INACTIVE
+            - RESOURCE_CLAIMS
+            - RESOURCE_CLAIM_AMOUNT
+            - RESOURCE_CLAIM_ID
+            - RESOURCE_CLAIM_RULE
+            - RESOURCE_LIMIT
+            - RESOURCE_LIMITS
+            - RESOURCE_LIMIT_COVERAGE
+            - RESOURCE_LIMIT_ID
+            - RESOURCE_LIMIT_MISSING_AT_COMMIT
+            - RESOURCE_LIMIT_ORDER
+            - RESOURCE_MAX_PER_INTENT
+            - RESOURCE_MAX_WINDOW
+            - RESOURCE_RESERVATION_FLAG
+            - RESOURCE_UNIT
+            - RESOURCE_WINDOW_LIMIT
+            - RESOURCE_WINDOW_SECONDS
+            - REVISION_AUTHORITIES
+            - REVOCATION_ACTOR
+            - REVOCATION_ACTOR_UNAUTHORIZED
+            - REVOCATION_DECLARATION_HASH
+            - REVOCATION_DECLARATION_MISMATCH
+            - REVOCATION_EVIDENCE_REQUIRED
+            - REVOCATION_FIELDS
+            - REVOCATION_GRANT_ID
+            - REVOCATION_IN_FUTURE
+            - REVOCATION_MESSAGE_TYPE
+            - REVOCATION_REASON
+            - ROLE_SCOPE_DEFINITION
+            - ROLE_SCOPE_MISMATCH
+            - SAFE_FALLBACK_ID
+            - SAFE_FALLBACK_NOT_ZERO_EFFECT
+            - SAFE_FALLBACK_UNKNOWN
+            - SCOPE_ACTION_IDS
+            - SCOPE_ACTION_TARGET_BINDINGS
+            - SCOPE_ACTION_TARGET_COVERAGE
+            - SCOPE_ACTION_TARGET_IDS
+            - SCOPE_ACTION_TARGET_RANGE
+            - SCOPE_CONSTRAINTS
+            - SCOPE_CONSTRAINT_VALUES
+            - SCOPE_DIMENSION_ID
+            - SCOPE_EFFECT_IDS
+            - SCOPE_EFFECT_OMISSION
+            - SCOPE_FORBIDDEN
+            - SCOPE_REQUIRED
+            - SCOPE_TARGET_IDS
+            - SCOPE_UNKNOWN_ACTION
+            - SCOPE_UNKNOWN_EFFECT
+            - SECRET_FIELD_FORBIDDEN
+            - SELECTOR_ID
+            - SIGNATURE_KEY_ID
+            - SIGNING_KEY_REQUIRED
+            - STATE_ANCHOR_CHANGED
+            - STATE_COLUMNS
+            - STATE_COMMITTED_RESOURCES
+            - STATE_COMMITTED_RESOURCE_FIELDS
+            - STATE_DECLARATION_MISMATCH
+            - STATE_EXECUTION_REPLAYS
+            - STATE_EXECUTION_REPLAYS_PAIR
+            - STATE_FIELDS
+            - STATE_GRANTS
+            - STATE_HASH_FAILURE
+            - STATE_IDEMPOTENCY
+            - STATE_IDEMPOTENCY_PAIR
+            - STATE_MAC_FAILURE
+            - STATE_PATH
+            - STATE_PATH_NOT_DURABLE
+            - STATE_PERMITS
+            - STATE_PERMIT_FIELDS
+            - STATE_PERMIT_KEY_MISMATCH
+            - STATE_PERMIT_SIGNATURE
+            - STATE_PERMIT_TTL_MISMATCH
+            - STATE_PROFILE_MISMATCH
+            - STATE_REVOKED_ACTIVE_KEY
+            - STATE_REVOKED_GRANTS
+            - STATE_REVOKED_PERMIT_KEYS
+            - STATE_SHAPE
+            - STATE_STATUS
+            - STATE_VERSION
+            - STRUCTURAL_BUDGET
+            - STRUCTURAL_CAPACITY
+            - STRUCTURAL_COST
+            - STRUCTURAL_DEBIT_UNAVAILABLE
+            - STRUCTURAL_PROVENANCE
+            - STRUCTURAL_UNIT
+            - TARGET_OFF_LIMITS_OVERLAP
+            - TIMEZONE_REQUIRED
+            - UNKNOWN_DISPOSITION
+            - UNKNOWN_EFFECT_CLASS
+            - UNKNOWN_RESOURCE_ID
+            - WITNESS_ACTIONS
+            - WITNESS_ACTION_COVERAGE
+            - WITNESS_BINDING
+            - WITNESS_BINDING_MISMATCH
+            - WITNESS_EFFECTS
+            - WITNESS_EFFECT_COVERAGE
+            - WITNESS_EVIDENCE
+            - WITNESS_HASH
+            - WITNESS_HASH_MISMATCH
+            - WITNESS_ID
+            - WITNESS_ID_MISMATCH
+            - WITNESS_METHOD
+            - WORKLOAD_IDENTITY_ISSUER
+        message:
+          type: string
+  responses:
+    ContractError:
+      description: Contract input is incomplete, contradictory, or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Idempotency, activation, or exactly-once conflict.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: The bound object does not exist in this declaration.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: >-
+        The transport identity presented no workload scope, or a scope that is
+        not the exact scope this route requires. The check runs before the
+        handler, so it fails closed regardless of body validity.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: >-
+        The request body exceeds the adapter's declared bound. The bound
+        protects the reference adapter against a hostile Content-Length.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: >-
+        The engine halted on an integrity failure, or the adapter caught a
+        fault it does not classify and answered with INTERNAL_FAILURE. In both
+        cases execution remains blocked and nothing was recorded for this
+        request. Declared on every operation: the adapter's last-resort guard
+        can answer on any route.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

@@ -1,0 +1,58 @@
+name: acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install pinned dependencies
+        run: python -m pip install --require-hashes -r requirements-lock.txt
+
+      - name: Run the acceptance suite
+        run: python -B tests/run_acceptance.py
+
+      - name: Check the local example and its components
+        run: python -B -m unittest discover -s examples/local_release -p "test_*.py" -v
+
+      - name: Run local example source mutations
+        run: |
+          python -B examples/local_release/mutate_scenario.py --scratch "${{ runner.temp }}"
+          python -B examples/local_release/mutate_document_release.py --scratch "${{ runner.temp }}"
+          python -B examples/local_release/mutate_exchange.py --scratch "${{ runner.temp }}"
+
+      - name: Check local Spectrum observations
+        run: python -B -m unittest discover -s examples/spectrum_observation -p "test_*.py" -v
+
+      - name: Run Spectrum observation source mutations
+        run: python -B examples/spectrum_observation/mutate_spectrum_observation.py --scratch "${{ runner.temp }}"
+
+      - name: Check local Spectrum source releases
+        run: python -B -m unittest discover -s examples/spectrum_release -p "test_*.py" -v
+
+      - name: Run source-release and document-session mutations
+        run: |
+          python -B examples/spectrum_release/mutate_spectrum_release.py --scratch "${{ runner.temp }}"
+          python -B examples/local_release/mutate_document_session.py --scratch "${{ runner.temp }}"
+
+      - name: Build the source bundle and verify it is manifest-bound
+        run: python -B tools/build_review_bundle.py --output "${{ runner.temp }}/review-bundle.md"

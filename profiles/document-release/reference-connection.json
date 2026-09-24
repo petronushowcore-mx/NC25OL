@@ -1,0 +1,361 @@
+{
+  "profile": {
+    "schema_version": "1.0.0",
+    "profile_id": "document.release.reference.v1",
+    "profile_version": "1.2.0",
+    "created_at": "2026-07-28T00:00:00Z",
+    "core_anchor": {
+      "file_name": "NC25_v3_0_patched_v4.tex",
+      "core_version": "3.0",
+      "doi": "10.17605/OSF.IO/NHTC5",
+      "sha256": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3"
+    },
+    "domain": {
+      "domain_name": "Document release reference profile",
+      "description": "A non-banking reference mapping for releasing one approved document to a declared repository. A production deployment must narrow the declaration to exact repositories, classifications, owners, controls, limits, and immutable evidence."
+    },
+    "action_alphabet": [
+      {
+        "action_id": "DOCUMENT_RELEASE",
+        "description": "Release one approved document to the declared repository.",
+        "effect_class_id": "DOCUMENT_STATE_MUTATION",
+        "structural_cost": 40,
+        "required_resource_ids": [
+          "document_units"
+        ]
+      },
+      {
+        "action_id": "NO_EFFECT_FALLBACK",
+        "description": "Record a non-mutating fallback without contacting a downstream repository.",
+        "effect_class_id": "NO_EFFECT",
+        "structural_cost": 0,
+        "required_resource_ids": []
+      }
+    ],
+    "effect_classes": [
+      {
+        "effect_class_id": "DOCUMENT_STATE_MUTATION",
+        "description": "An externally committed document-state mutation in the declared repository.",
+        "mutates_external_state": true
+      },
+      {
+        "effect_class_id": "NO_EFFECT",
+        "description": "No downstream call and no external state mutation.",
+        "mutates_external_state": false
+      }
+    ],
+    "resource_catalog": [
+      {
+        "resource_id": "document_units",
+        "unit": "approved documents",
+        "claim_rule": "POSITIVE_IF_EFFECTFUL",
+        "reservation_required": true
+      }
+    ],
+    "controls": {
+      "required_prerequisite_ids": [
+        "CONTENT_APPROVED",
+        "DESTINATION_AUTHORIZED"
+      ],
+      "hard_block_flag_ids": [
+        "RETENTION_HOLD",
+        "TARGET_DELISTED"
+      ],
+      "manual_review_flag_ids": [
+        "CLASSIFICATION_UNCERTAIN"
+      ],
+      "safe_fallback_action_id": "NO_EFFECT_FALLBACK"
+    },
+    "evidence_requirements": [
+      {
+        "requirement_id": "DOCUMENT_RELEASE_EVIDENCE",
+        "applies_to_action_ids": [
+          "DOCUMENT_RELEASE"
+        ],
+        "required_evidence_types": [
+          "APPROVAL_RECORD",
+          "TARGET_AUTHORIZATION"
+        ]
+      },
+      {
+        "requirement_id": "DOCUMENT_FALLBACK_EVIDENCE",
+        "applies_to_action_ids": [
+          "NO_EFFECT_FALLBACK"
+        ],
+        "required_evidence_types": [
+          "DECLARATION_BINDING"
+        ]
+      }
+    ],
+    "mapping_witness": {
+      "witness_id": "document-release-reference-witness-v1",
+      "method": "The reference profile maps each release action to one declared effect class, one bounded resource claim, explicit approval and destination controls, typed evidence, and a zero-effect fallback without importing banking-specific vocabulary or limits.",
+      "evidence_refs": [
+        {
+          "evidence_type": "REFERENCE_PROFILE_DESIGN",
+          "ref": "evidence://synthetic/document-release/profile-design/v1",
+          "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "evidence_type": "REFERENCE_CONTROL_MATRIX",
+          "ref": "evidence://synthetic/document-release/control-matrix/v1",
+          "sha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        }
+      ],
+      "covered_action_ids": [
+        "DOCUMENT_RELEASE",
+        "NO_EFFECT_FALLBACK"
+      ],
+      "covered_effect_class_ids": [
+        "DOCUMENT_STATE_MUTATION",
+        "NO_EFFECT"
+      ],
+      "witness_hash": "B2D6C3EE0FF57105E276E695A999901A4637A935964EC6245B373F4801547214"
+    },
+    "roles": {
+      "governance_scope": "nc25.governance",
+      "operator_scope": "nc25.operator",
+      "executor_scope": "nc25.executor",
+      "architect_scope": "nc25.architect",
+      "observer_projection_fields": [
+        "channel",
+        "message_code",
+        "event_time",
+        "subject_ref"
+      ],
+      "forbidden_operator_fields": [
+        "admissibility_score",
+        "architect_trace",
+        "boundary_geometry",
+        "gate_margin",
+        "gate_statistics",
+        "reason_vector",
+        "selector_score",
+        "sub_verdicts",
+        "threshold_vector"
+      ]
+    },
+    "failure_posture": {
+      "missing_required_data": "REFUSAL",
+      "ambiguity": "MANUAL_REVIEW"
+    },
+    "change_control": {
+      "material_fields_require_new_version": true,
+      "live_gate_override_allowed": false
+    },
+    "registry_policy": {
+      "mode": "HASH_ONLY",
+      "forbidden_fields": [
+        "architect_trace",
+        "control_plane_configuration",
+        "gate_geometry",
+        "personal_data",
+        "raw_evidence",
+        "raw_intent",
+        "reason_vector",
+        "reusable_credentials",
+        "sub_verdicts"
+      ]
+    }
+  },
+  "declaration": {
+    "schema_version": "1.0.0",
+    "declaration_id": "synthetic.document.release.connection",
+    "declaration_version": "1.2.0",
+    "predecessor_declaration_hash": "8AF9E68FE6B4F75207E9002C5966AC896F7AF904FD40C69D808410F86292CAC6",
+    "created_at": "2026-07-31T00:00:00Z",
+    "effective_from": "2026-07-31T00:00:00Z",
+    "expires_at": "2027-07-27T00:00:00Z",
+    "core_anchor": {
+      "file_name": "NC25_v3_0_patched_v4.tex",
+      "core_version": "3.0",
+      "doi": "10.17605/OSF.IO/NHTC5",
+      "sha256": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3"
+    },
+    "profile_binding": {
+      "profile_id": "document.release.reference.v1",
+      "profile_version": "1.2.0",
+      "profile_hash": "A320B14B3759BB9BD93088DBBCF4965FD92ABA1DE824A246C4869F3551FD7F1E"
+    },
+    "connector": {
+      "connector_id": "synthetic-document-release-connector",
+      "workload_identity_issuer": "synthetic-document-identity-issuer",
+      "environment_ids": [
+        "sandbox"
+      ]
+    },
+    "instance_scope": {
+      "action_ids": [
+        "DOCUMENT_RELEASE",
+        "NO_EFFECT_FALLBACK"
+      ],
+      "effect_class_ids": [
+        "DOCUMENT_STATE_MUTATION",
+        "NO_EFFECT"
+      ],
+      "target_system_ids": [
+        "document-sandbox-repository",
+        "local-fallback"
+      ],
+      "action_target_bindings": {
+        "DOCUMENT_RELEASE": [
+          "document-sandbox-repository"
+        ],
+        "NO_EFFECT_FALLBACK": [
+          "local-fallback"
+        ]
+      },
+      "scope_constraints": {
+        "repository": [
+          "synthetic-publication"
+        ],
+        "classification": [
+          "internal"
+        ]
+      }
+    },
+    "structural_budget": {
+      "selector_id": "synthetic-document-selector",
+      "capacity": 400,
+      "unit": "structural-cost-unit",
+      "provenance": "fully_stipulated"
+    },
+    "resource_limits": [
+      {
+        "resource_id": "document_units",
+        "max_per_intent": 10,
+        "max_committed_per_window": 100,
+        "window_seconds": 86400
+      }
+    ],
+    "governance": {
+      "profile_owner_id": "synthetic-document-profile-owner",
+      "declaration_owner_id": "synthetic-document-declaration-owner",
+      "approval_owner_id": "synthetic-document-approval-owner",
+      "authority_issuer_id": "synthetic-document-authority-issuer",
+      "revision_authority_ids": [
+        "synthetic-document-revision-board"
+      ],
+      "change_process_ref": "evidence://synthetic/document-release/change-process/v1",
+      "no_live_gate_override": true
+    },
+    "interfaces": {
+      "governance_service_id": "synthetic-document-governance-service",
+      "operator_service_id": "synthetic-document-operator-service",
+      "executor_service_id": "synthetic-document-executor-service",
+      "architect_store_id": "synthetic-document-architect-store",
+      "observer_projection_id": "synthetic-document-observer-projection",
+      "off_limits_system_ids": [
+        "production-document-repository",
+        "architect-private-store"
+      ]
+    },
+    "mapping_witness_binding": {
+      "witness_id": "document-release-reference-witness-v1",
+      "witness_hash": "B2D6C3EE0FF57105E276E695A999901A4637A935964EC6245B373F4801547214"
+    },
+    "evidence_refs": [
+      {
+        "evidence_type": "DECLARATION_APPROVAL",
+        "ref": "evidence://synthetic/document-release/declaration-approval/v1",
+        "sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+      },
+      {
+        "evidence_type": "IDENTITY_BOUNDARY",
+        "ref": "evidence://synthetic/document-release/identity-boundary/v1",
+        "sha256": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+      },
+      {
+        "evidence_type": "ATOMICITY_DESIGN",
+        "ref": "evidence://synthetic/document-release/atomicity-design/v1",
+        "sha256": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+      }
+    ]
+  },
+  "grant": {
+    "message_type": "authority_grant",
+    "grant_id": "synthetic-document-grant-001",
+    "subject_id": "synthetic-document-workload",
+    "connector_id": "synthetic-document-release-connector",
+    "binding": {
+      "profile_id": "document.release.reference.v1",
+      "profile_version": "1.2.0",
+      "profile_hash": "A320B14B3759BB9BD93088DBBCF4965FD92ABA1DE824A246C4869F3551FD7F1E",
+      "declaration_id": "synthetic.document.release.connection",
+      "declaration_version": "1.2.0",
+      "declaration_hash": "F69D18559079652DEA1DA8E675A06EE4F0CAA4355BE5A7D70FB53D467DD5868D"
+    },
+    "permitted_action_ids": [
+      "DOCUMENT_RELEASE",
+      "NO_EFFECT_FALLBACK"
+    ],
+    "target_system_ids": [
+      "document-sandbox-repository",
+      "local-fallback"
+    ],
+    "valid_from": "2026-07-27T00:00:00Z",
+    "valid_until": "2026-08-30T00:00:00Z",
+    "issued_by": "synthetic-document-authority-issuer",
+    "approval_evidence_ref": "evidence://synthetic/document-release/grant-001"
+  },
+  "intent": {
+    "message_type": "intent",
+    "intent_id": "synthetic-document-intent-001",
+    "idempotency_key": "synthetic-document-idempotency-001",
+    "connector_id": "synthetic-document-release-connector",
+    "requester_id": "synthetic-document-workload",
+    "authority_grant_id": "synthetic-document-grant-001",
+    "binding": {
+      "profile_id": "document.release.reference.v1",
+      "profile_version": "1.2.0",
+      "profile_hash": "A320B14B3759BB9BD93088DBBCF4965FD92ABA1DE824A246C4869F3551FD7F1E",
+      "declaration_id": "synthetic.document.release.connection",
+      "declaration_version": "1.2.0",
+      "declaration_hash": "F69D18559079652DEA1DA8E675A06EE4F0CAA4355BE5A7D70FB53D467DD5868D"
+    },
+    "action_id": "DOCUMENT_RELEASE",
+    "target_system_id": "document-sandbox-repository",
+    "scope": {
+      "repository": "synthetic-publication",
+      "classification": "internal"
+    },
+    "resource_claims": {
+      "document_units": 1
+    },
+    "received_at": "2026-08-01T10:00:00Z",
+    "payload_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "history_summary_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "state_anchor_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+    "prerequisite_results": {
+      "CONTENT_APPROVED": true,
+      "DESTINATION_AUTHORIZED": true
+    },
+    "hard_block_flags": {
+      "RETENTION_HOLD": false,
+      "TARGET_DELISTED": false
+    },
+    "manual_review_flags": {
+      "CLASSIFICATION_UNCERTAIN": false
+    },
+    "ambiguity_flags": []
+  },
+  "evidence": {
+    "message_type": "evidence_bundle",
+    "intent_id": "synthetic-document-intent-001",
+    "collected_at": "2026-08-01T09:59:50Z",
+    "items": [
+      {
+        "evidence_type": "APPROVAL_RECORD",
+        "ref": "evidence://synthetic/document-release/approval/001",
+        "sha256": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+        "status": "VALID"
+      },
+      {
+        "evidence_type": "TARGET_AUTHORIZATION",
+        "ref": "evidence://synthetic/document-release/target-authorization/001",
+        "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "status": "VALID"
+      }
+    ]
+  }
+}

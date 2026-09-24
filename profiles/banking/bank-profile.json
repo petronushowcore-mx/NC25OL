@@ -1,0 +1,189 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "banking.reference.v1",
+  "profile_version": "1.3.0",
+  "created_at": "2026-07-28T00:00:00Z",
+  "core_anchor": {
+    "file_name": "NC25_v3_0_patched_v4.tex",
+    "core_version": "3.0",
+    "doi": "10.17605/OSF.IO/NHTC5",
+    "sha256": "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3"
+  },
+  "domain": {
+    "domain_name": "Banking connection reference profile",
+    "description": "A reference mapping of a standard bank onboarding questionnaire structure into the universal action, effect, resource, control, evidence, and role types. A real bank must narrow and approve the instance declaration with exact enterprise identifiers and limits."
+  },
+  "action_alphabet": [
+    {
+      "action_id": "BANK_PAYMENT_POST",
+      "description": "Post one approved synthetic payment entry to the declared downstream ledger.",
+      "effect_class_id": "BANK_LEDGER_MUTATION",
+      "structural_cost": 100,
+      "required_resource_ids": [
+        "money_minor_units"
+      ]
+    },
+    {
+      "action_id": "BANK_PAYMENT_STATUS_READ",
+      "description": "Read the status of one payment through the declared read-only interface.",
+      "effect_class_id": "BANK_READ_ONLY_QUERY",
+      "structural_cost": 10,
+      "required_resource_ids": [
+        "query_units"
+      ]
+    },
+    {
+      "action_id": "NO_EFFECT_FALLBACK",
+      "description": "Record a non-mutating fallback outcome without contacting a downstream system.",
+      "effect_class_id": "NO_EFFECT",
+      "structural_cost": 0,
+      "required_resource_ids": []
+    }
+  ],
+  "effect_classes": [
+    {
+      "effect_class_id": "BANK_LEDGER_MUTATION",
+      "description": "An externally committed mutation of the declared bank ledger.",
+      "mutates_external_state": true
+    },
+    {
+      "effect_class_id": "BANK_READ_ONLY_QUERY",
+      "description": "A bounded read through a declared bank interface without downstream mutation.",
+      "mutates_external_state": false
+    },
+    {
+      "effect_class_id": "NO_EFFECT",
+      "description": "No downstream call and no external state mutation.",
+      "mutates_external_state": false
+    }
+  ],
+  "resource_catalog": [
+    {
+      "resource_id": "money_minor_units",
+      "unit": "ISO-4217 minor currency units",
+      "claim_rule": "POSITIVE_IF_EFFECTFUL",
+      "reservation_required": true
+    },
+    {
+      "resource_id": "query_units",
+      "unit": "bounded read requests",
+      "claim_rule": "POSITIVE",
+      "reservation_required": true
+    }
+  ],
+  "controls": {
+    "required_prerequisite_ids": [
+      "ACCOUNT_ACTIVE",
+      "KYC_VERIFIED",
+      "SANCTIONS_CLEAR"
+    ],
+    "hard_block_flag_ids": [
+      "ACCOUNT_FROZEN",
+      "OUT_OF_SCOPE",
+      "SANCTIONS_HIT"
+    ],
+    "manual_review_flag_ids": [
+      "IDENTITY_UNCERTAIN",
+      "RULE_CONFLICT"
+    ],
+    "safe_fallback_action_id": "NO_EFFECT_FALLBACK"
+  },
+  "evidence_requirements": [
+    {
+      "requirement_id": "BANK_PAYMENT_POST_EVIDENCE",
+      "applies_to_action_ids": [
+        "BANK_PAYMENT_POST"
+      ],
+      "required_evidence_types": [
+        "ACCOUNT_STATUS",
+        "KYC_STATUS",
+        "SANCTIONS_STATUS"
+      ]
+    },
+    {
+      "requirement_id": "BANK_PAYMENT_READ_EVIDENCE",
+      "applies_to_action_ids": [
+        "BANK_PAYMENT_STATUS_READ"
+      ],
+      "required_evidence_types": [
+        "ACCESS_AUTHORIZATION"
+      ]
+    },
+    {
+      "requirement_id": "BANK_FALLBACK_EVIDENCE",
+      "applies_to_action_ids": [
+        "NO_EFFECT_FALLBACK"
+      ],
+      "required_evidence_types": [
+        "DECLARATION_BINDING"
+      ]
+    }
+  ],
+  "mapping_witness": {
+    "witness_id": "bank-questionnaire-crosswalk-v1",
+    "method": "Each questionnaire section is mapped to a typed profile or declaration field, every action is paired with one declared effect class and required resources, and the bank-specific amount limits remain separate from the structural selector budget. The originating onboarding document of any concrete institution is not distributed with this package; the crosswalk carried in the package is the distributed witness.",
+    "evidence_refs": [
+      {
+        "evidence_type": "DOMAIN_QUESTIONNAIRE_CROSSWALK",
+        "ref": "profiles/banking/questionnaire-crosswalk.json",
+        "sha256": "ADE6CFDCF8122C3321A6476C72C76FCCAAC21D2E7D27C0874F583A63A000D1BA"
+      }
+    ],
+    "covered_action_ids": [
+      "BANK_PAYMENT_POST",
+      "BANK_PAYMENT_STATUS_READ",
+      "NO_EFFECT_FALLBACK"
+    ],
+    "covered_effect_class_ids": [
+      "BANK_LEDGER_MUTATION",
+      "BANK_READ_ONLY_QUERY",
+      "NO_EFFECT"
+    ],
+    "witness_hash": "81F9552562648773F84123BADD5957A3DA50A65ED47FB962AEC9E1D9518E1069"
+  },
+  "roles": {
+    "governance_scope": "nc25.governance",
+    "operator_scope": "nc25.operator",
+    "executor_scope": "nc25.executor",
+    "architect_scope": "nc25.architect",
+    "observer_projection_fields": [
+      "channel",
+      "message_code",
+      "event_time",
+      "subject_ref"
+    ],
+    "forbidden_operator_fields": [
+      "admissibility_score",
+      "architect_trace",
+      "boundary_geometry",
+      "gate_margin",
+      "gate_statistics",
+      "reason_vector",
+      "selector_score",
+      "sub_verdicts",
+      "threshold_vector"
+    ]
+  },
+  "failure_posture": {
+    "missing_required_data": "REFUSAL",
+    "ambiguity": "MANUAL_REVIEW"
+  },
+  "change_control": {
+    "material_fields_require_new_version": true,
+    "live_gate_override_allowed": false
+  },
+  "registry_policy": {
+    "mode": "HASH_ONLY",
+    "forbidden_fields": [
+      "architect_trace",
+      "control_plane_configuration",
+      "gate_geometry",
+      "personal_data",
+      "raw_evidence",
+      "raw_intent",
+      "reason_vector",
+      "reusable_credentials",
+      "sub_verdicts"
+    ]
+  }
+}

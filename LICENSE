@@ -1,0 +1,62 @@
+NC25OL - Navigational Cybernetics 2.5 Open Ledger
+Copyright (c) 2026 Maksim Barziankou (MxBv), The Urgrund Laboratheory
+
+This package is released under two licences, split by material.
+
+1. DOCUMENTATION AND SPECIFICATION — CC BY 4.0
+   SPDX-License-Identifier: CC-BY-4.0
+
+   Applies to: README.md, UNIVERSAL-CONNECTION-RUNBOOK.md, ACCEPTANCE-REPORT.md,
+   ADOPTERS.md, CHANGELOG.md, SECURITY.md, DOCX-AUDIT-PROJECTION.md,
+   profiles/PROFILE-AUTHORING-CHECKLIST.md, and the specification document
+   NC25OL Specification v0.0.docx.
+
+   You may share and adapt this material for any purpose, including
+   commercially, provided you give appropriate credit, link to the licence, and
+   indicate whether changes were made. The full licence text is at
+   https://creativecommons.org/licenses/by/4.0/legalcode
+
+   Attribution: Maksim Barziankou (MxBv), The Urgrund Laboratheory,
+   NC25OL - Navigational Cybernetics 2.5 Open Ledger, core anchor DOI 10.17605/OSF.IO/NHTC5.
+
+2. CODE, SCHEMAS, AND MACHINE-READABLE ARTEFACTS — MIT
+   SPDX-License-Identifier: MIT
+
+   Applies to: sdk/, tests/, tools/, core/schemas/, core/nc25-core-crosswalk.json,
+   protocol/, profiles/ JSON, examples/, SOURCE-MANIFEST.json,
+   PACKAGE-MANIFEST.json, CITATION.cff, requirements-lock.txt,
+   .github/workflows/ci.yml, .gitattributes, and .gitignore.
+
+   This file, LICENSE, states the terms and is not itself licensed under
+   either of them. Between the two lists above and this sentence, every file
+   the package ships is accounted for.
+
+   MIT License
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+NOT COVERED BY EITHER LICENCE
+
+   The Navigational Cybernetics 2.5 core itself is a separate work under its own
+   terms, identified here only by DOI 10.17605/OSF.IO/NHTC5 and SHA-256. It is
+   not distributed with this package.
+
+   Neither licence grants any right in the names Navigational Cybernetics 2.5,
+   NC2.5, PETRONUS, or The Urgrund Laboratheory beyond the attribution required
+   above.
