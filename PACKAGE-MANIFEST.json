@@ -21,7 +21,7 @@
     {
       "path": "ACCEPTANCE-REPORT.md",
       "byte_length": 5781,
-      "sha256": "52F7C7588FE3ECD76DDA8EEA7FFADB7AC2FDEA1BD769295CC963E41FC59EF07A"
+      "sha256": "D6CC0C83DAE46AC19141FF18C424135D419BE36DC351AA2EFE96EF3082DFA4A4"
     },
     {
       "path": "ADOPTERS.md",
@@ -310,8 +310,8 @@
     },
     {
       "path": "tests/test_contract_regressions.py",
-      "byte_length": 393544,
-      "sha256": "973393E3B8390175F5589A48A3EA1DBA01AF86206F795A45F78D16039F5A91F0"
+      "byte_length": 393546,
+      "sha256": "890DD082318EE666C79496DC342E733D5A52A08F7AB34A751B05C9A4C2F7D493"
     },
     {
       "path": "tests/test_otcs_bridge.py",

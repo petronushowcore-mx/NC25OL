@@ -5950,7 +5950,7 @@ class ContractRegressions(unittest.TestCase):
             ("REPORT_UNREADABLE: ACCEPTANCE-REPORT.md", "rebind", "report_absent", None),
             ("REPORT_UNREADABLE: ACCEPTANCE-REPORT.md", "rebind", "report_bytes", b"\xff\xfe# report"),
             ("EVIDENCE_JSON_INVALID: geometry.json", "update", "geometry_raw",
-             "[" * 5000 + "]" * 5000),
+             "[" * 50000 + "]" * 50000),
             ("FAILURE_SURFACE_ALL", "update", "baseline", [(("emission_points_all",), "set", -1)]),
             # The eight figures were `len(...)` of whatever the key held, and `len` is true
             # of a string and of a mapping as well as of a list. A bare string
