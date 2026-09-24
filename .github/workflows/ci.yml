@@ -2,7 +2,7 @@ name: acceptance
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/optional-observation-engine]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -56,3 +56,33 @@ jobs:
 
       - name: Build the source bundle and verify it is manifest-bound
         run: python -B tools/build_review_bundle.py --output "${{ runner.temp }}/review-bundle.md"
+
+  observation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Copy the Lean sources outside the package
+        run: cp -R modules/observation_engine "${{ runner.temp }}/observation-engine"
+      - name: Build the pinned Lean project
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: ${{ runner.temp }}/observation-engine
+          auto-config: false
+          build: true
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Verify proofs, executable cases and source mutations
+        run: python -B "${{ runner.temp }}/observation-engine/verify.py" --scratch "${{ runner.temp }}/lean-checks" --mutations
+      - name: Check observation admission and mutations
+        env:
+          NC25_OBSERVATION_ENGINE: ${{ runner.temp }}/observation-engine/.lake/build/bin/observation-engine
+        run: |
+          mkdir -p "${{ runner.temp }}/observation-mutations"
+          python -B -m unittest discover -s examples/observation_admission -p "test_*.py" -v
+          python -B examples/observation_admission/mutate_observation_admission.py --scratch "${{ runner.temp }}/observation-mutations" --jobs 2

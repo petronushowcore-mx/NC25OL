@@ -8,6 +8,13 @@ Every version binds an exact set of file hashes in `PACKAGE-MANIFEST.json`.
 
 ## Unreleased
 
+- Adds an optional observation module configured before Ledger startup, with
+  intent-bound queries, bounded subprocess execution and no fallback on failure.
+- Includes an independent Lean classifier and proofs for supplied finite cases;
+  ambiguous observations do not become automatic permission.
+- Preserves existing permit, idempotency and authority semantics; the module
+  performs no continuous monitoring or retroactive revocation.
+
 - Adds a synthetic local example composing an OTCS registration preview,
   document release and declaration projection/objection exchange.
 - Keeps preview generation separate from owner activation and execution

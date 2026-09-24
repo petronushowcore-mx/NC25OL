@@ -48,6 +48,23 @@ controls, evidence obligations and mapping witness.
 
 ---
 
+## Optional observation engine
+
+The [observation module](examples/observation_admission/README.md) connects a
+[Lean classifier](modules/observation_engine/README.md) to one Ledger prerequisite.
+A system integrator enables it explicitly before constructing the Ledger. It is
+disabled by default and the ordinary Python engine needs no Lean installation.
+
+The module checks whether a target is uniformly true among the supplied cases
+for this exact intent. Mixed or empty fibres require manual review; a false
+target blocks the prerequisite. Process failures stop new admission. Other
+prerequisites, authority, resource limits and permit checks still apply.
+
+This is an admission-time check over caller-supplied cases, not a proof of their
+truth or completeness. Replayed decisions and already-issued permits retain
+their ordinary lifetime; enabling the module does not revoke them. No external
+observer is connected by this module.
+
 ## Local document-release example
 
 [The local example](examples/local_release/README.md) combines a synthetic OTCS
@@ -278,12 +295,15 @@ instead carry live validity intervals resolved against trusted time.
   `ED25519_UNAVAILABLE` when it is absent).
 - `sdk/python/nc25_universal_adapter.py` — standard-library reference WSGI HTTP adapter that enforces the wire contract (scope, activation seal binding, idempotency, permit path binding, error mapping) over the engine.
 - `sdk/python/nc25_otcs_bridge.py` — permit-gated OTCS append bridge with a durable SQLite recovery outbox.
+- `sdk/python/nc25_observation.py` — optional observation resolver for one prerequisite during new admissions.
+- `modules/observation_engine/` — Lean classifier, proofs, JSON executable and verification command; built only when explicitly selected.
 - `profiles/banking/` — the banking use case expressed as one profile.
 - `profiles/document-release/` — a second executable reference profile.
 - `profiles/otcs/` — the OTCS registry profile, typed operation, evidence, and receipt fixture.
 - `examples/` — executable synthetic declaration, grant, intent, and evidence.
 - `examples/local_release/` — local document release and declaration exchange,
   with component and integration checks and source mutations.
+- `examples/observation_admission/` — opt-in integration example, admission tests and source mutations.
 - `tests/test_otcs_bridge.py` — authority-boundary, idempotency, and crash-seam regressions.
 - `tests/` — behavior, semantic contradiction, deliberate-break, contract
   conformance, contract regression, failure-surface ratchet, and package
@@ -541,7 +561,7 @@ relative path and, finding it there, runs the same checks in source mode
 ## Repository
 
 - `.github/workflows/ci.yml` runs the acceptance suite and the review-bundle
-  build, plus the local example checks and source mutations, on pushes and
+  build, plus the local example checks and source mutations, on pushes to `main` and the observation feature branch and on
   pull requests targeting `main`; the badge above reports
   its status. It runs the standalone configuration only: `NC25_SOURCES_ROOT` is
   not set there, so the external-source binding to the NC2.5 core reports
@@ -549,6 +569,10 @@ relative path and, finding it there, runs the same checks in source mode
   itself manifest-bound, deliberately: how the package checks itself is part
   of what ships, so a fork that changes it rebuilds the manifest with one
   command rather than shipping an unbound file.
+- A separate observation job builds the pinned Lean sources in a temporary
+  directory, checks theorem dependencies and classifier mutations, then runs
+  the optional module's admission and source-mutation checks. The ordinary
+  acceptance job remains independent of Lean.
 - `SECURITY.md` states what is in and out of scope and how to report a
   vulnerability privately.
 - `CITATION.cff` provides citation metadata; GitHub renders a "Cite this
@@ -572,7 +596,7 @@ SHA-256 recorded in `SOURCE-MANIFEST.json`. The core line carries DOI
 
 The specification and the documents listed under that heading in `LICENSE`
 are licensed CC BY 4.0. The reference engine, schemas, protocol contract,
-profiles, fixtures, tests and `examples/` directory are licensed MIT. See
+profiles, fixtures, tests, `examples/` and `modules/` directories are licensed MIT. See
 `LICENSE` for the exact split and the attribution string. The
 NC2.5 core is a separate work and is not distributed with this package.
 

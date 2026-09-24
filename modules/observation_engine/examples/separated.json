@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "target": "declared_policy_holds",
+  "worlds": [
+    {
+      "id": "first-skeleton",
+      "skeleton": "D1",
+      "observation": "same-visible-key",
+      "target_holds": true
+    },
+    {
+      "id": "second-skeleton",
+      "skeleton": "D2",
+      "observation": "same-visible-key",
+      "target_holds": false
+    }
+  ],
+  "query": {
+    "skeleton": "D1",
+    "observation": "same-visible-key"
+  }
+}

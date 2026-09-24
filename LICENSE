@@ -22,7 +22,7 @@ This package is released under two licences, split by material.
 2. CODE, SCHEMAS, AND MACHINE-READABLE ARTEFACTS — MIT
    SPDX-License-Identifier: MIT
 
-   Applies to: sdk/, tests/, tools/, core/schemas/, core/nc25-core-crosswalk.json,
+   Applies to: sdk/, tests/, tools/, modules/, core/schemas/, core/nc25-core-crosswalk.json,
    protocol/, profiles/ JSON, examples/, SOURCE-MANIFEST.json,
    PACKAGE-MANIFEST.json, CITATION.cff, requirements-lock.txt,
    .github/workflows/ci.yml, .gitattributes, and .gitignore.

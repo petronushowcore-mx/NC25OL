@@ -1,0 +1,19 @@
+import ObservationEngine
+
+#print axioms ObservationEngine.factorization_iff
+#print axioms ObservationEngine.collision_refutes_exact
+#print axioms ObservationEngine.homogeneous_unique
+#print axioms ObservationEngine.qStar_some_iff
+#print axioms ObservationEngine.qStar_sound
+#print axioms ObservationEngine.qStar_maximal
+#print axioms ObservationEngine.mixed_forces_unknown
+#print axioms ObservationEngine.seen_iff
+#print axioms ObservationEngine.classify_yes_iff
+#print axioms ObservationEngine.classify_no_iff
+#print axioms ObservationEngine.classify_unknown_iff
+#print axioms ObservationEngine.classify_outside_iff
+#print axioms ObservationEngine.classify_yes_sound
+#print axioms ObservationEngine.classify_no_sound
+#print axioms ObservationEngine.complete_yes_sound
+#print axioms ObservationEngine.classify_outside_iff_no_world
+#print axioms ObservationEngine.finite_agrees_qStar

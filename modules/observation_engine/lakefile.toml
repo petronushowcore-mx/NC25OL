@@ -1,0 +1,10 @@
+name = "observation-engine"
+version = "0.1.0"
+defaultTargets = ["ObservationEngine", "observation-engine"]
+
+[[lean_lib]]
+name = "ObservationEngine"
+
+[[lean_exe]]
+name = "observation-engine"
+root = "Main"

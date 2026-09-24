@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "target": "declared_policy_holds",
+  "worlds": [
+    {
+      "id": "completion-a",
+      "skeleton": "D1",
+      "observation": "same-visible-key",
+      "target_holds": true
+    },
+    {
+      "id": "completion-b",
+      "skeleton": "D1",
+      "observation": "same-visible-key",
+      "target_holds": true
+    }
+  ],
+  "query": {
+    "skeleton": "D1",
+    "observation": "same-visible-key"
+  }
+}
