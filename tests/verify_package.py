@@ -465,17 +465,18 @@ def package_version_mismatches(sections: dict[str, list[str]]) -> list[str]:
             f"report version {report_versions[0]} != package {package_version}"
         )
     # The README title is the adopter's entry point; it drifted once
-    # (v0.1 survived the 0.1 -> 0.2 bump), so it is ratcheted here too.
+    # (v0.1 survived the 0.1 -> 0.2 bump), so it is ratcheted here too. It
+    # carries the full version, as the front page shows it.
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     readme_titles = re.findall(
-        r"(?m)^# NC25OL - Navigational Cybernetics 2\.5 Open Ledger v(\d+\.\d+)$",
+        r"(?m)^# NC25OL - Navigational Cybernetics 2\.5 Open Ledger v(\d+\.\d+\.\d+)$",
         readme_text,
     )
     if len(readme_titles) != 1:
         problems.append(f"readme title matches={len(readme_titles)}")
-    elif readme_titles[0] != major_minor:
+    elif readme_titles[0] != package_version:
         problems.append(
-            f"readme title {readme_titles[0]} != package {major_minor}"
+            f"readme title {readme_titles[0]} != package {package_version}"
         )
     # Two more sites carry the version and nothing read them, so nothing held
     # them: citation metadata and the changelog heading. The ratchet exists

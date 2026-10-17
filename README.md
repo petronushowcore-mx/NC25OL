@@ -1,6 +1,10 @@
-# NC25OL - Navigational Cybernetics 2.5 Open Ledger v01.09
+# NC25OL - Navigational Cybernetics 2.5 Open Ledger v01.09.01
 
 **Explicit admission. Single-use permits. Recorded execution.**
+
+<p align="center">
+  <img src="assets/NC25OL-poster.gif" alt="NC25OL 01.09.01 poster" width="400">
+</p>
 
 [![Acceptance](https://github.com/petronushowcore-mx/NC25OL/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/petronushowcore-mx/NC25OL/actions/workflows/ci.yml)
 [![Python 3.11 and 3.12](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](#getting-started)

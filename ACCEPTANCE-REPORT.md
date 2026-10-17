@@ -56,7 +56,7 @@ fail-closed behavior.
 ## Bound bytes
 
 This report was generated for one exact tree. The manifest entries it
-certifies, every entry except this report, digest to `C730F32EB0BB54C6885B27ECE3E084589E73BEC3F6488F63AFACC021BB9C9D87`
+certifies, every entry except this report, digest to `A1A8279849E09689734BDE683AD2D831789E2E84CC81A4CE280D798A2A4FAACD`
 as path-ordered (path, SHA-256, byte length) triples; the specification
 document the geometry below describes has SHA-256 `E2A0AE67F215FF6B87CC1645C748AAE337760C8669DBB7321D5C118F1436B540`.
 The package verifier recomputes both from the shipped bytes and refuses

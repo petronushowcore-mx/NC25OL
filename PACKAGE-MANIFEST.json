@@ -21,7 +21,7 @@
     {
       "path": "ACCEPTANCE-REPORT.md",
       "byte_length": 5949,
-      "sha256": "417AB5B8C8C2D6699860AB320F42F720EF1BFA8E5CCB3D5A804179E76D980635"
+      "sha256": "77562C59EB49F8C6D0CCC6541F6E322D0D069AF64DAC96C411F9ABDF5C1F8086"
     },
     {
       "path": "ADOPTERS.md",
@@ -30,8 +30,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "byte_length": 18032,
-      "sha256": "944FAC20118B58D901E7E60D87C4159E62517BB0CD7CFD745E3FBAC708B276C2"
+      "byte_length": 18033,
+      "sha256": "ED4EDFE08B9D06D85F10D1CFC19DE40365B93B29E06C649989EC2C39E4D09240"
     },
     {
       "path": "CITATION.cff",
@@ -45,8 +45,8 @@
     },
     {
       "path": "LICENSE",
-      "byte_length": 3007,
-      "sha256": "72F470B9209F46BFD7147F7EEFC386B4FB94F05CFC9583DABFC287D9C4017DF9"
+      "byte_length": 3044,
+      "sha256": "35C6AF6EBD6AC2D77BB1DBCE10AB6C2287D342023D08B961D407A5B84FC61564"
     },
     {
       "path": "NC25OL Specification v01.09.docx",
@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "byte_length": 42473,
-      "sha256": "D03B70D1D4A5EE3749F6F5362E6A4735A6EF8D761BE5E5F89C8E7B08CFDA0CD7"
+      "byte_length": 42581,
+      "sha256": "D6D920E0AB0073E62FBF93F6DDFBA250A16DDC35F754CD33F816A0A3B19886C8"
     },
     {
       "path": "SECURITY.md",
@@ -72,6 +72,11 @@
       "path": "UNIVERSAL-CONNECTION-RUNBOOK.md",
       "byte_length": 25830,
       "sha256": "05A5D8317D224188A30DFEC53688E1D6DA0E15AC88C5E7BA52ABB5E3F3E8F803"
+    },
+    {
+      "path": "assets/NC25OL-poster.gif",
+      "byte_length": 3582052,
+      "sha256": "943E7027D89EF26303EC83BBA4C0B1361B6F1938F766E23932AEDC76FD01B426"
     },
     {
       "path": "core/nc25-core-crosswalk.json",
@@ -335,8 +340,8 @@
     },
     {
       "path": "tests/verify_package.py",
-      "byte_length": 65687,
-      "sha256": "4E0DD56464518F6CAE52DF60C99C0E357A1CED0DA633CD80DFF3288347BDC456"
+      "byte_length": 65763,
+      "sha256": "C296024A8FB36B8A315924662027AA7F00F09215BB62350DFE4E433037F82A89"
     },
     {
       "path": "tools/build_acceptance_report.py",
@@ -360,8 +365,8 @@
     },
     {
       "path": "tools/build_review_bundle.py",
-      "byte_length": 5339,
-      "sha256": "87214FF4ACF4077B76FE895D106185D64D79FE4055BA9FAC9777850DF5151E0A"
+      "byte_length": 5770,
+      "sha256": "6032C521DA8AAC1390384E6E7D009BCEA2356947AABBAD372177C76335B626FE"
     },
     {
       "path": "tools/build_universal_specification.py",

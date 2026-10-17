@@ -13,6 +13,12 @@ BINARY_DOCX_PLACEHOLDER = (
     "[BINARY DOCX OMITTED FROM TEXT BODY; SIZE AND SHA256 ABOVE ARE "
     "AUTHORITATIVE. DETERMINISTIC SOURCE: /tools/build_universal_specification.py]"
 )
+# The README poster is an image, so its bytes are not text either; the same
+# suffixes the Spectrum source-release example treats as images.
+IMAGE_SUFFIXES = (".gif", ".png", ".jpg", ".jpeg", ".webp")
+BINARY_IMAGE_PLACEHOLDER = (
+    "[BINARY IMAGE OMITTED FROM TEXT BODY; SIZE AND SHA256 ABOVE ARE AUTHORITATIVE]"
+)
 
 
 def sha256_hex(data: bytes) -> str:
@@ -104,8 +110,11 @@ def build_artifact(root: Path, output_path: Path) -> dict[str, Any]:
                 "CONTENT:",
             ]
         )
-        if Path(entry["path"]).suffix.lower() == ".docx":
+        suffix = Path(entry["path"]).suffix.lower()
+        if suffix == ".docx":
             parts.append(BINARY_DOCX_PLACEHOLDER)
+        elif suffix in IMAGE_SUFFIXES:
+            parts.append(BINARY_IMAGE_PLACEHOLDER)
         else:
             parts.append(entry["payload"].decode("utf-8").rstrip("\n"))
         parts.append("")

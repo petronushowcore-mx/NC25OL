@@ -9,9 +9,9 @@ paired with: 01.09.01 is paired with Spectrum `v00.09.01`. The first group is
 the edition of Ledger's coverage of Spectrum and develops separately from
 Spectrum's first group: `01` is the first ready source edition, and later
 changes of coverage take `02`, `03` and so on. A ready edition does not mean
-that every later Spectrum layer is covered. The README title, the file name of
-the specification document and its running header carry only the first two
-groups (`v01.09`); every other version field carries all three.
+that every later Spectrum layer is covered. The file name of the specification
+document and its running header carry only the first two groups (`v01.09`);
+the README title and every other version field carry all three.
 
 Versions up to 0.0.11 are pre-release; in them the second digit is not used,
 and each entry is a patch.
