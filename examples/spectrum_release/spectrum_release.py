@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import io
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import secrets
 import stat
 import subprocess
@@ -23,6 +23,9 @@ from nc25_universal_ledger import ContractViolation, UniversalConnectionLedger, 
 
 require = observation.require
 digest = observation.digest
+# A committed regular file whose path ends with one of these, compared without
+# regard to case, is checked like every other file but recorded instead of packaged.
+IMAGE_SUFFIXES = (".gif", ".png", ".jpg", ".jpeg", ".webp")
 
 
 def git_bytes(root, *args, input=None):
@@ -33,14 +36,20 @@ def git_bytes(root, *args, input=None):
 
 
 def source_files(root, revision):
-    """Read every committed regular file, requiring exact checkout/blob equality.
+    """Read every committed regular file of the root and XIV/XV, requiring exact checkout/blob equality.
 
-    Sources must remain quiescent. This is an observation, not an OS lock.
-    Symlinks and gitlinks other than the two declared layers are unsupported.
+    A file whose path ends with an image suffix (IMAGE_SUFFIXES) passes the same
+    checks but is recorded instead of packaged; the rule reads the path, not the
+    content. Root gitlinks other than XIV/XV are recorded by path and commit only;
+    their trees are not read.
+    Symlinks and gitlinks inside XIV or XV are unsupported. Sources must remain
+    quiescent. This is an observation, not an OS lock. Returns the snapshot, the
+    inventory (packaged files, excluded files and pinned-only layers, each sorted by
+    path) and the packaged member bytes.
     """
     root = Path(root).resolve()
     snapshot = observation.source_snapshot(root, revision)
-    members, records = {}, []
+    members, records, excluded, pinned = {}, [], [], []
     folded = set()
     for name, commit in snapshot["revisions"].items():
         prefix = "" if name == "spectrum" else "layers/" + name + "/"
@@ -53,13 +62,19 @@ def source_files(root, revision):
             mode, kind, oid = header.decode("ascii").split()
             relative = raw_path.decode("utf-8")
             if mode == "160000":
-                require(name == "spectrum" and relative in {"layers/XIV", "layers/XV"}
-                        and oid == snapshot["revisions"][relative.split("/")[1]], "SOURCE_GITLINK")
+                # Only the root pins layers. XIV and XV must be the snapshot commits;
+                # any other root gitlink is recorded by path and commit, never read.
+                require(name == "spectrum", "SOURCE_GITLINK")
+                if relative in {"layers/XIV", "layers/XV"}:
+                    require(oid == snapshot["revisions"][relative.split("/")[1]], "SOURCE_GITLINK")
+                else:
+                    pinned.append({"path": relative, "commit": oid})
                 continue
             require(mode in {"100644", "100755"} and kind == "blob", "SOURCE_FILE_TYPE")
-            parts = PurePosixPath(relative).parts
-            require(parts and not relative.startswith("/") and "\\" not in relative
-                    and all(p not in {".", "..", ".git"} and ":" not in p for p in parts), "SOURCE_PATH")
+            # Split the path as ls-tree prints it, without normalization: an absolute path has an empty first part.
+            parts = relative.split("/")
+            require("\\" not in relative
+                    and all(p not in {"", ".", "..", ".git"} and ":" not in p for p in parts), "SOURCE_PATH")
             full = prefix + relative
             require(full.casefold() not in folded and not full.casefold().startswith("release/"), "SOURCE_PATH_COLLISION")
             folded.add(full.casefold())
@@ -76,15 +91,21 @@ def source_files(root, revision):
             require(file.resolve().is_relative_to(root) and not file.is_symlink()
                     and file.is_file(), "SOURCE_FILE_PATH")
             require(file.read_bytes() == raw, "SOURCE_CHECKOUT_BYTES")
-            members[full] = raw
-            records.append({"path": full, "mode": mode, "git_blob": oid,
-                            "size": len(raw), "sha256": digest(raw)})
+            record = {"path": full, "mode": mode, "git_blob": oid, "size": len(raw), "sha256": digest(raw)}
+            if full.casefold().endswith(IMAGE_SUFFIXES):
+                excluded.append(dict(record, reason="IMAGE_SUFFIX"))
+            else:
+                members[full] = raw
+                records.append(record)
         require(not data.read(), "SOURCE_BLOB_TRAILING")
     require(observation.source_snapshot(root, revision) == snapshot, "SOURCE_CHANGED")
     files = dict(observation.MODULES, runner="layers/XV/harness/xiv_stitch.py")
     require(all(path in members and digest(members[path]) == snapshot["source_sha256"][name]
                 for name, path in files.items()), "SOURCE_MODULE_BINDING")
-    return snapshot, sorted(records, key=lambda r: r["path"]), members
+    inventory = {"files": sorted(records, key=lambda r: r["path"]),
+                 "excluded_files": sorted(excluded, key=lambda r: r["path"]),
+                 "pinned_layers_not_packaged": sorted(pinned, key=lambda r: r["path"])}
+    return snapshot, inventory, members
 
 
 def zip_bytes(members, modes):
@@ -118,7 +139,8 @@ def verify_archive(raw, expected):
 
 
 class PreparedRelease:
-    """One local collection; immutable artifact bytes held by a trusted caller.
+    """One observation; the source inventory is collected three times: when the release is prepared,
+    right after the observation and before submission. Immutable artifact bytes are held by a trusted caller.
 
     The inactive observation context and the release engine must initially agree.
     Activation is a separate owner action on the release engine. The observation
@@ -126,7 +148,8 @@ class PreparedRelease:
     """
     def __init__(self, root, revision):
         self.root, self.revision = Path(root).resolve(), revision
-        self.source, self.records, sources = source_files(self.root, revision)
+        self.source, self.inventory, sources = source_files(self.root, revision)
+        self.records = self.inventory["files"]
         fixture = json.loads((ROOT / "profiles/document-release/reference-connection.json").read_bytes())
         profile, declaration, _, _ = bind_fixture(
             *(fixture[k] for k in ("profile", "declaration", "grant", "intent")))
@@ -139,9 +162,9 @@ class PreparedRelease:
         require(self.report["observation"]["status"] == "VERIFIED", "OBSERVATION_NOT_VERIFIED")
         require(self.report["source"] == self.source, "OBSERVATION_SOURCE_BINDING")
         self.check_sources()
-        self.manifest = {"format": "nc25ol-spectrum-source-release/v1",
-            "scope": "ALL_COMMITTED_FILES_OF_SPECTRUM_AND_PINNED_XIV_XV",
-            "source": self.source, "files": self.records,
+        self.manifest = {"format": "nc25ol-spectrum-source-release/v2",
+            "scope": "COMMITTED_SOURCE_FILES_OF_SPECTRUM_AND_PINNED_XIV_XV",
+            "source": self.source, **self.inventory,
             "observation_sha256": digest(self.report_bytes),
             "authority": "SEPARATE_SYNTHETIC_OWNER_DECISION_REQUIRED"}
         self.members = dict(sources, **{"release/observation.json": self.report_bytes,
@@ -153,8 +176,9 @@ class PreparedRelease:
         self._attempted = False
 
     def check_sources(self):
-        current, records, _ = source_files(self.root, self.revision)
-        require(current == self.source and records == self.records, "RELEASE_SOURCE_CHANGED")
+        # The complete inventory: packaged and excluded files and pinned-only layers.
+        current, inventory, _ = source_files(self.root, self.revision)
+        require(current == self.source and inventory == self.inventory, "RELEASE_SOURCE_CHANGED")
 
     def open(self, directory):
         require(self._session is None, "RELEASE_SESSION_EXISTS")
@@ -208,11 +232,14 @@ def run(root, revision, directory):
         replay = session.gateway.recover(session.op["idempotency_key"])
         require(replay == first and session.target_counts() == (1, 1)
                 and session.engine.structural_remaining == 360, "REPLAY_CHANGED_EFFECT")
-        report = {"format": "nc25ol-spectrum-local-release-result/v1", "status": "COMMITTED",
+        report = {"format": "nc25ol-spectrum-local-release-result/v2", "status": "COMMITTED",
             "synthetic_authority": True, "synthetic_clock": "2026-08-01T10:00:00Z",
             "spectrum_observation": prepared.report["observation"], "source": prepared.source,
             "archive_sha256": digest(received), "archive_bytes": len(received),
-            "source_file_count": len(prepared.records), "manifest_sha256": digest(canonical_json(prepared.manifest)),
+            "source_file_count": len(prepared.records),
+            "excluded_file_count": len(prepared.inventory["excluded_files"]),
+            "pinned_layers_not_packaged": prepared.inventory["pinned_layers_not_packaged"],
+            "manifest_sha256": digest(canonical_json(prepared.manifest)),
             "observation_sha256": digest(prepared.report_bytes),
             "document_payload_hash": scenario.dr.payload_hash(session.op),
             "target_receipt": first["downstream"], "ledger_receipt": first["ledger_receipt"],

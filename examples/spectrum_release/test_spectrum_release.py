@@ -70,6 +70,18 @@ def archive(entries, mode=0o100644):
     return stream.getvalue()
 
 
+def repacked(raw):
+    """The same members, bytes and modes in a different, still valid ZIP: stored instead of deflated."""
+    stream = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(raw)) as src, zipfile.ZipFile(stream, 'w') as dst:
+        for entry in src.infolist():
+            info = zipfile.ZipInfo(entry.filename, entry.date_time)
+            info.create_system, info.external_attr = entry.create_system, entry.external_attr
+            info.compress_type = zipfile.ZIP_STORED
+            dst.writestr(info, src.read(entry))
+    return stream.getvalue()
+
+
 class Cases(unittest.TestCase):
     def setUp(self):
         scratch = Path(os.environ.get('SPECTRUM_RELEASE_TEST_SCRATCH', tempfile.gettempdir())).resolve()
@@ -87,15 +99,22 @@ class Cases(unittest.TestCase):
         self.trees = {'spectrum': [], 'XIV': [], 'XV': []}
         self.blobs = {}
         for full, raw in self.members.items():
-            file = self.root / full
-            file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_bytes(raw)
-            name, relative = (full.split('/')[1], '/'.join(full.split('/')[2:])) if full.startswith('layers/') else ('spectrum', full)
-            self.trees[name].append(('100644', 'blob', blob(raw), relative))
-            self.blobs[blob(raw)] = raw
+            self.commit(full, raw)
         self.trees['spectrum'].extend([('160000', 'commit', 'b' * 40, 'layers/XIV'),
                                        ('160000', 'commit', 'c' * 40, 'layers/XV')])
         self.batch_change = lambda raw: raw
+
+    def commit(self, full, raw, mode='100644'):
+        """Commit and check out one synthetic file, replacing a row at the same path; return its record."""
+        name, relative = (full.split('/')[1], '/'.join(full.split('/')[2:])) if full.startswith('layers/') else ('spectrum', full)
+        rows = self.trees[name]
+        index = next((i for i, row in enumerate(rows) if row[3] == relative), len(rows))
+        rows[index:index+1] = [(mode, 'blob', blob(raw), relative)]
+        self.blobs[blob(raw)] = raw
+        file = self.root / full
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(raw)
+        return {'path': full, 'mode': mode, 'git_blob': blob(raw), 'size': len(raw), 'sha256': sha(raw)}
 
     def git_bytes(self, root, *args, input=None):
         name = 'spectrum' if Path(root) == self.root else Path(root).name
@@ -147,18 +166,21 @@ class Cases(unittest.TestCase):
 
     def test_02_all_sources_include_unused_document(self):
         with self.synthetic():
-            snapshot, records, members = s.source_files(self.root, self.revision)
+            snapshot, inventory, members = s.source_files(self.root, self.revision)
         self.assertEqual(snapshot, self.snapshot)
         self.assertEqual(members, self.members)
         expected = [{'path': name, 'mode': '100644', 'git_blob': blob(raw), 'size': len(raw), 'sha256': sha(raw)}
                     for name, raw in sorted(self.members.items())]
-        self.assertEqual(records, expected)
+        self.assertEqual(inventory, {'files': expected, 'excluded_files': [], 'pinned_layers_not_packaged': []})
         self.assertIn('docs/unused.md', members)
 
-    def test_03_gitlink_requires_exact_pinned_layer(self):
-        self.trees['spectrum'][-2] = ('160000', 'commit', 'd'*40, 'layers/XIV')
-        with self.synthetic(), self.refused('SOURCE_GITLINK'):
-            s.source_files(self.root, self.revision)
+    def test_03_xiv_xv_gitlinks_require_exact_pinned_layers(self):
+        original = list(self.trees['spectrum'])
+        for index, path in ((-2, 'layers/XIV'), (-1, 'layers/XV')):
+            self.trees['spectrum'] = list(original)
+            self.trees['spectrum'][index] = ('160000', 'commit', 'd'*40, path)
+            with self.subTest(path=path), self.synthetic(), self.refused('SOURCE_GITLINK'):
+                s.source_files(self.root, self.revision)
 
     def test_04_batch_identity_framing_and_trailing_bytes(self):
         variants = [(lambda raw: b'0'*40+raw[40:], 'SOURCE_BLOB'),
@@ -181,6 +203,9 @@ class Cases(unittest.TestCase):
         for mode, kind, path, code in [('120000', 'blob', 'link', 'SOURCE_FILE_TYPE'),
                                      ('100644', 'blob', '../outside', 'SOURCE_PATH'),
                                      ('100644', 'blob', '.git/config', 'SOURCE_PATH'),
+                                     ('100644', 'blob', 'docs/./notes.md', 'SOURCE_PATH'),
+                                     ('100644', 'blob', 'docs//notes.md', 'SOURCE_PATH'),
+                                     ('100644', 'blob', '/absolute', 'SOURCE_PATH'),
                                      ('100644', 'blob', 'Release/observation.json', 'SOURCE_PATH_COLLISION'),
                                      ('100644', 'blob', 'readme.MD', 'SOURCE_PATH_COLLISION')]:
             with self.subTest(path=path):
@@ -252,7 +277,7 @@ class Cases(unittest.TestCase):
         def changed(*args):
             result = files(*args); calls.append(True)
             if len(calls) > 1:
-                for row in result[1]:
+                for row in result[1]['files']:
                     if row['path'] == 'docs/unused.md': row['sha256'] = '0'*64
             return result
         with self.synthetic(), patch.object(s, 'source_files', side_effect=changed), \
@@ -260,9 +285,10 @@ class Cases(unittest.TestCase):
 
     def test_16_manifest_binds_complete_sources_and_report(self):
         with self.synthetic(): prepared = self.collect()
-        expected = {'format': 'nc25ol-spectrum-source-release/v1',
-                    'scope': 'ALL_COMMITTED_FILES_OF_SPECTRUM_AND_PINNED_XIV_XV',
+        expected = {'format': 'nc25ol-spectrum-source-release/v2',
+                    'scope': 'COMMITTED_SOURCE_FILES_OF_SPECTRUM_AND_PINNED_XIV_XV',
                     'source': self.snapshot, 'files': prepared.records,
+                    'excluded_files': [], 'pinned_layers_not_packaged': [],
                     'observation_sha256': sha(prepared.report_bytes),
                     'authority': 'SEPARATE_SYNTHETIC_OWNER_DECISION_REQUIRED'}
         self.assertEqual(prepared.manifest, expected)
@@ -292,7 +318,9 @@ class Cases(unittest.TestCase):
             prepared = self.collect(); session = prepared.open(self.folder/'release')
             self.addCleanup(session.close)
             with patch.object(session, 'submit', return_value={'state': 'COMMITTED'}) as submit:
-                for bad in (prepared.archive+b'x', bytearray(prepared.archive)):
+                # The bytearray first: its bytes equal the payload, so only the package check refuses it, and
+                # without that check it reaches the gateway instead of being refused under another code.
+                for bad in (bytearray(prepared.archive), prepared.archive+b'x'):
                     with self.refused('RELEASE_PACKAGE_CHANGED'): prepared.submit(bad)
                 submit.assert_not_called()
                 self.assertEqual(prepared.submit(prepared.archive), {'state': 'COMMITTED'})
@@ -311,8 +339,8 @@ class Cases(unittest.TestCase):
         with self.synthetic():
             prepared = self.collect(); session = prepared.open(self.folder/'release')
             self.addCleanup(session.close)
-            current = (copy.deepcopy(self.snapshot), copy.deepcopy(prepared.records), dict(self.members))
-            for row in current[1]:
+            current = (copy.deepcopy(self.snapshot), copy.deepcopy(prepared.inventory), dict(self.members))
+            for row in current[1]['files']:
                 if row['path'] == 'docs/unused.md': row['sha256'] = '0'*64
             with patch.object(s, 'source_files', return_value=current), patch.object(session, 'submit') as submit, \
                  self.refused('RELEASE_SOURCE_CHANGED'): prepared.submit(prepared.archive)
@@ -359,6 +387,8 @@ class Cases(unittest.TestCase):
         self.assertEqual(result['before_activation'], 'DECLARATION_NOT_ACTIVE')
         self.assertEqual(result['source'], self.snapshot)
         self.assertEqual(result['source_file_count'], len(self.members))
+        self.assertEqual((result['format'], result['excluded_file_count'], result['pinned_layers_not_packaged']),
+                         ('nc25ol-spectrum-local-release-result/v2', 0, []))
         self.assertEqual(result['full_regime_w'], 'NOT_EVALUATED')
         self.assertIs(result['publicly_published'], False)
         self.assertIs(result['live_witnesses_connected'], False)
@@ -394,10 +424,14 @@ class Cases(unittest.TestCase):
                 def start(inner, *args, **kwargs):
                     super().start(*args, **kwargs)
                     if fault == 'target':
+                        # A valid archive with the same members and bytes, packed differently: the direct
+                        # byte comparison refuses it, and the archive checks after it would accept it.
                         call = inner.read_client.call
                         def altered(*a, **kw):
                             result = call(*a, **kw)
-                            result['content_base64'] = base64.b64encode(b'changed bytes').decode()
+                            if 'content_base64' in result:
+                                result['content_base64'] = base64.b64encode(
+                                    repacked(base64.b64decode(result['content_base64']))).decode()
                             return result
                         inner.read_client.call = altered
                 def reopen(inner):
@@ -439,10 +473,12 @@ class Cases(unittest.TestCase):
             git(folder, '-c', 'user.name=Synthetic Fixture', '-c', 'user.email=fixture@example.invalid',
                 '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'Synthetic source fixture')
             revisions['spectrum' if folder == self.root else folder.name] = git(folder, 'rev-parse', 'HEAD')
-        snapshot, records, members = s.source_files(self.root, revisions['spectrum'])
+        snapshot, inventory, members = s.source_files(self.root, revisions['spectrum'])
         self.assertEqual(snapshot['revisions'], revisions)
         self.assertEqual(members, self.members)
-        self.assertEqual({row['path']: row['git_blob'] for row in records}, {name: blob(raw) for name, raw in self.members.items()})
+        self.assertEqual({row['path']: row['git_blob'] for row in inventory['files']},
+                         {name: blob(raw) for name, raw in self.members.items()})
+        self.assertEqual((inventory['excluded_files'], inventory['pinned_layers_not_packaged']), ([], []))
         with self.refused('SOURCE_REVISION'): s.source_files(self.root, '0'*40)
         (self.root/'docs/unused.md').write_bytes(b'unused but changed\n')
         with self.refused('SOURCE_DIRTY'): s.source_files(self.root, revisions['spectrum'])
@@ -475,6 +511,114 @@ class Cases(unittest.TestCase):
             with patch.object(session, 'submit') as submit, self.refused('RELEASE_PAYLOAD_CHANGED'):
                 prepared.submit(prepared.archive)
             submit.assert_not_called()
+
+    def test_29_other_root_gitlinks_are_named_by_pin_only(self):
+        # Tree order is not path order here; the record is sorted by path.
+        self.trees['spectrum'] += [('160000', 'commit', 'f'*40, 'layers/Person'),
+                                   ('160000', 'commit', 'e'*40, 'layers/DoubleFibre')]
+        pinned = [{'path': 'layers/DoubleFibre', 'commit': 'e'*40}, {'path': 'layers/Person', 'commit': 'f'*40}]
+        with self.synthetic():
+            snapshot, inventory, members = s.source_files(self.root, self.revision)
+            prepared = self.collect()
+        self.assertEqual((snapshot, members, inventory['excluded_files']), (self.snapshot, self.members, []))
+        self.assertEqual(inventory['pinned_layers_not_packaged'], pinned)
+        self.assertEqual(prepared.manifest['pinned_layers_not_packaged'], pinned)
+        self.assertEqual(set(prepared.members), set(self.members) | {'release/manifest.json', 'release/observation.json'})
+
+    def test_30_binary_images_are_recorded_by_hash_not_packaged(self):
+        images = {'zz/last.webp': b'RIFF synthetic WEBP', 'assets/layers.GIF': b'GIF89a synthetic',
+                  'layers/XIV/figure.jpeg': b'\xff\xd8\xff synthetic JPEG', 'layers/XV/plot.JPG': b'\xff\xd8 plot',
+                  'layers/XV/x.png': b'\x89PNG\r\n\x1a\n synthetic'}
+        recorded = {path: self.commit(path, raw, '100755' if path.endswith('.jpeg') else '100644')
+                    for path, raw in images.items()}
+        # Near misses stay packaged: no extension, a later extension, another format, a longer extension.
+        texts = {'docs/png': b'No extension.\n', 'docs/figure.png.md': b'Text about a figure.\n',
+                 'docs/diagram.svg': b'<svg xmlns="http://www.w3.org/2000/svg"/>\n', 'docs/page.webpage': b'Text.\n'}
+        for path, raw in texts.items(): self.commit(path, raw)
+        with self.synthetic():
+            snapshot, inventory, members = s.source_files(self.root, self.revision)
+            prepared = self.collect()
+        # The collection visits the root before both layers; the record is sorted by path.
+        excluded = [dict(recorded[path], reason='IMAGE_SUFFIX') for path in
+                    ('assets/layers.GIF', 'layers/XIV/figure.jpeg', 'layers/XV/plot.JPG', 'layers/XV/x.png', 'zz/last.webp')]
+        packaged = dict(self.members, **texts)
+        self.assertEqual(inventory['excluded_files'], excluded)
+        self.assertEqual(prepared.manifest['excluded_files'], excluded)
+        self.assertEqual(members, packaged)
+        self.assertEqual(inventory['files'], [{'path': path, 'mode': '100644', 'git_blob': blob(raw), 'size': len(raw),
+                                               'sha256': sha(raw)} for path, raw in sorted(packaged.items())])
+        self.assertEqual(set(prepared.members), set(packaged) | {'release/manifest.json', 'release/observation.json'})
+
+    def test_31_excluded_image_checkout_bytes_are_still_checked(self):
+        raw = b'GIF89a synthetic image bytes'
+        self.commit('assets/layers.gif', raw)
+        (self.root/'assets/layers.gif').write_bytes(raw[:-1] + b'S')
+        # Snapshot is held fixed here to isolate the blob/checkout guard from Git status.
+        with self.synthetic(), self.refused('SOURCE_CHECKOUT_BYTES'):
+            s.source_files(self.root, self.revision)
+
+    def test_32_archive_with_an_excluded_image_is_refused(self):
+        raw = b'GIF89a synthetic image bytes'
+        self.commit('assets/layers.gif', raw)
+        with self.synthetic(): prepared = self.collect()
+        self.assertNotIn('assets/layers.gif', prepared.members)
+        s.verify_archive(prepared.archive, prepared.members)
+        with self.refused('ARCHIVE_MEMBERS'):
+            s.verify_archive(archive(list(prepared.members.items()) + [('assets/layers.gif', raw)]), prepared.members)
+
+    def test_33_gitlink_inside_xiv_or_xv_is_refused(self):
+        original = copy.deepcopy(self.trees)
+        for name in ('XIV', 'XV'):
+            self.trees = copy.deepcopy(original)
+            # The same path is accepted as a pinned-only layer of the root.
+            self.trees[name].append(('160000', 'commit', 'e'*40, 'layers/NCNC'))
+            with self.subTest(layer=name), self.synthetic(), self.refused('SOURCE_GITLINK'):
+                s.source_files(self.root, self.revision)
+
+    def test_34_changed_excluded_image_refused_after_collection(self):
+        self.commit('assets/layers.gif', b'GIF89a collected image')
+        with self.synthetic():
+            prepared = self.collect()
+            # Snapshot is held fixed here to isolate the inventory comparison from Git status.
+            self.commit('assets/layers.gif', b'GIF89a different image')
+            with self.refused('RELEASE_SOURCE_CHANGED'): prepared.check_sources()
+
+    def test_35_changed_pinned_only_gitlink_refused_after_collection(self):
+        self.trees['spectrum'].append(('160000', 'commit', 'e'*40, 'layers/NCNC'))
+        with self.synthetic():
+            prepared = self.collect()
+            self.trees['spectrum'][-1] = ('160000', 'commit', 'f'*40, 'layers/NCNC')
+            with self.refused('RELEASE_SOURCE_CHANGED'): prepared.check_sources()
+
+    def test_36_run_result_counts_excluded_files_and_names_pinned_layers(self):
+        self.commit('assets/layers.gif', b'GIF89a synthetic image')
+        self.commit('layers/XV/figure.png', b'\x89PNG synthetic image')
+        self.trees['spectrum'].append(('160000', 'commit', 'e'*40, 'layers/NCNC'))
+        with self.synthetic():
+            result = s.run(self.root, self.revision, self.folder/'delivery')
+        self.assertEqual(result['format'], 'nc25ol-spectrum-local-release-result/v2')
+        self.assertEqual((result['source_file_count'], result['excluded_file_count']), (len(self.members), 2))
+        self.assertEqual(result['pinned_layers_not_packaged'], [{'path': 'layers/NCNC', 'commit': 'e'*40}])
+        self.assertEqual(json.loads((self.folder/'delivery/result.json').read_bytes()), result)
+        with zipfile.ZipFile(io.BytesIO((self.folder/'delivery/spectrum-source-release.zip').read_bytes())) as z:
+            self.assertEqual(set(z.namelist()), set(self.members) | {'release/manifest.json', 'release/observation.json'})
+            manifest = json.loads(z.read('release/manifest.json'))
+        self.assertEqual([row['path'] for row in manifest['excluded_files']], ['assets/layers.gif', 'layers/XV/figure.png'])
+        self.assertEqual(manifest['pinned_layers_not_packaged'], result['pinned_layers_not_packaged'])
+
+    def test_37_archive_size_limit_is_inclusive_and_bounded_above(self):
+        # A valid ZIP exactly at half the gateway body is accepted and one byte more is refused;
+        # test 12 reaches only the empty and non-bytes cases, not the upper bound.
+        limit = s.scenario.dr.MAX_BODY // 2
+        overhead = len(archive([('a', b'')]))
+        for extra, refused in ((0, False), (1, True)):
+            members = {'a': b'x' * (limit - overhead + extra)}
+            raw = archive(list(members.items()))
+            self.assertEqual(len(raw), limit + extra)
+            if refused:
+                with self.refused('ARCHIVE_SIZE'): s.verify_archive(raw, members)
+            else:
+                s.verify_archive(raw, members)
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)

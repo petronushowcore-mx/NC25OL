@@ -2234,12 +2234,19 @@ class OTCSBridge:
                         last_error=type(exc).__name__,
                     )
                     raise
+                # The local execution is committed at the ledger's own time, as on the
+                # FAILED path above. The receipt's effective_at is the counterparty's
+                # time and stays in the stored receipt. Taken as the commit time, a
+                # receipt time more than five seconds ahead of this clock, or more
+                # than five seconds before the permit was issued, refused local
+                # finalization of an append OTCS had already made and sent it to
+                # reconciliation.
                 execution_request = self._execution_request(
                     row,
                     operation,
                     outcome="COMMITTED",
                     downstream_receipt_hash=receipt.receipt_digest.digest,
-                    committed_at=receipt.effective_at,
+                    committed_at=utc_text(self._engine.clock.now()),
                 )
                 row = transition(
                     project_id,

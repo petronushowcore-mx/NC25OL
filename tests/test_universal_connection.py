@@ -710,6 +710,37 @@ class ConnectionSuite:
             "RESOURCE_WINDOW_LIMIT",
         )
 
+    def test_the_resource_window_slides(self) -> None:
+        # A committed claim counts against its window only until window_seconds have passed.
+        # The boundary tests pin the inclusive edge; this one pins that old commitments age out.
+        declaration = copy.deepcopy(self.declaration)
+        window_seconds = None
+        for limit in declaration["resource_limits"]:
+            if limit["resource_id"] == self.fx.resource_id:
+                limit["max_per_intent"] = self.fx.claim
+                limit["max_committed_per_window"] = self.fx.claim
+                window_seconds = limit["window_seconds"]
+        self.assertIsNotNone(window_seconds)
+        engine, first_intent, _ = self.engine(declaration=declaration)
+        first = engine.evaluate_intent(first_intent, self.evidence, actor_scope="nc25.operator")
+        self.assertEqual(first["disposition"], "ALLOW")
+        engine.commit_execution(
+            self.execution_request(engine, first, first_intent),
+            actor_scope="nc25.executor",
+            route_permit_hash=first["permit_hash"],
+        )
+        # Inside the window the committed claim binds: the window is not simply open.
+        full_intent, full_evidence = unique_intent(first_intent, self.evidence, "window-full")
+        full = engine.evaluate_intent(full_intent, full_evidence, actor_scope="nc25.operator")
+        self.assertEqual(
+            engine.architect_decision(full["request_hash"], actor_scope="nc25.architect")["message_code"],
+            "RESOURCE_WINDOW_LIMIT",
+        )
+        self.clock.advance(seconds=window_seconds + 1)
+        later_intent, later_evidence = unique_intent(first_intent, self.evidence, "window-slid")
+        later = engine.evaluate_intent(later_intent, later_evidence, actor_scope="nc25.operator")
+        self.assertEqual(later["disposition"], "ALLOW")
+
     def test_commit_recomputes_the_window_for_every_claimed_resource(self) -> None:
         # The contract says the commit recomputes committed usage for EVERY
         # claimed resource. No shipped action requires two, so on every shipped
@@ -892,6 +923,33 @@ class ConnectionSuite:
                         route_permit_hash=outcome["permit_hash"],
                     )
 
+    def test_a_fresh_intent_under_a_revoked_grant_is_refused(self) -> None:
+        # The test above observes the invalidation of permits that already exist. That loop
+        # runs apart from the grant check, so a grant check consulting the wrong revocation
+        # set passes it. A FRESH intent evaluated after the revocation is the observable of
+        # the grant check itself.
+        engine, intent, grant = self.engine()
+        engine.revoke_grant(
+            {
+                "message_type": "authority_revocation",
+                "grant_id": grant["grant_id"],
+                "declaration_hash": engine.declaration_hash,
+                "revoked_at": "2026-08-01T10:00:00Z",
+                "revoked_by": self.fx.authority_issuer,
+                "reason_code": "SYNTHETIC_REVOCATION",
+                "evidence_ref": "evidence://synthetic/revocation/002",
+            },
+            actor_scope="nc25.governance",
+        )
+        fresh_intent, fresh_evidence = unique_intent(intent, self.evidence, "after-revocation")
+        result = engine.evaluate_intent(fresh_intent, fresh_evidence, actor_scope="nc25.operator")
+        self.assertEqual(result["disposition"], "REFUSAL")
+        self.assertFalse(result["permit_hash"])
+        self.assertEqual(
+            engine.architect_decision(result["request_hash"], actor_scope="nc25.architect")["message_code"],
+            "AUTHORITY_REVOKED",
+        )
+
     def test_state_anchor_change_blocks_commit(self) -> None:
         engine, intent, _ = self.engine()
         result = engine.evaluate_intent(intent, self.evidence, actor_scope="nc25.operator")
@@ -981,6 +1039,19 @@ class ConnectionSuite:
             "^PROFILE_SEAL_FAILURE(:|$)",
         ):
             narrow_engine.observer_projection(actor_scope="nc25.architect")
+
+    def test_registry_projection_is_a_closed_field_set(self) -> None:
+        # The test above reaches only the forbidden-name path. One extra top-level key that is
+        # NOT a forbidden name must still refuse: the field set is closed, not a minimum.
+        engine, _, _ = self.engine()
+        record = engine.registry_record(
+            engine.declaration["connector"]["connector_id"], actor_scope="nc25.architect"
+        )
+        extra = "extra_projection_field"
+        self.assertNotIn(extra, set(engine.profile["registry_policy"]["forbidden_fields"]))
+        record[extra] = "synthetic"
+        with self.assertRaisesRegex(IntegrityViolation, "^REGISTRY_DATA_EXPANSION(:|$)"):
+            engine._assert_registry_projection(record)
 
     def test_role_scope_must_be_explicit(self) -> None:
         # Claim one: every public operation refuses without an explicit role.

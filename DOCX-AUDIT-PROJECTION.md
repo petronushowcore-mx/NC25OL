@@ -6,9 +6,9 @@ relationships, content types and core metadata. The package manifest identifies 
 ## Source binding
 
 - Format: `nc25-docx-audit-projection/v1`
-- Source: `NC25OL Specification v0.0.docx`
-- Source bytes: `68442`
-- Source SHA-256: `FE6D25D0253E9F6F952E696440531CA838866D8B26B9FAF52F60E6FEC7A5D840`
+- Source: `NC25OL Specification v01.09.docx`
+- Source bytes: `68458`
+- Source SHA-256: `E2A0AE67F215FF6B87CC1645C748AAE337760C8669DBB7321D5C118F1436B540`
 - Generator: `tools/build_docx_audit_projection.py`
 
 ## ZIP member inventory
@@ -24,11 +24,11 @@ relationships, content types and core metadata. The package manifest identifies 
 | `docProps/core.xml` | 946 | `9937E898E47823EF9DDC97A8B81A0ABF6F560C4EFC27EE1E7BA3F12F2C04102C` |
 | `docProps/thumbnail.jpeg` | 8324 | `96367138DC44CE09BF2C8F0F8E49348A1478D2C5C0AF69BBC2BBC38B63CDCEAD` |
 | `word/_rels/document.xml.rels` | 1613 | `92BA0B0C1DCEF764CD7BA71FAA371AA1714446753442B3F3F2804A50A330FF41` |
-| `word/document.xml` | 401225 | `088F6B82F71408C11341B60723900C052D4569A76E0981B754B5198A99F8C499` |
+| `word/document.xml` | 401265 | `A29A735E983A053123EEFEA61D3A1E44EC16F009418DB67FCF8E6EE1A987FCDB` |
 | `word/fontTable.xml` | 2811 | `79385FB7F60247507ECAFFC292E9EBD52EA0657B8634F629BA6FCCC54011D6BB` |
 | `word/footer1.xml` | 1690 | `5AE994C4D3889A1FC58D88009A7F8F63C216AAC94713254E567358CF3BB1EA20` |
 | `word/footer2.xml` | 1494 | `182E82C76996BFE2986520193E30C014C84D0FA4A666EBB74C01C59EFEDD9ACC` |
-| `word/header1.xml` | 1458 | `4A8D5205F60DC419EF747DF7B3B9D1AE82C8A6D7DC3ED9AB1651CC48813DBED2` |
+| `word/header1.xml` | 1460 | `A63AAD68FC811F71FCA966B7E7B5B04CD94C593AF95E60E5B36C6C89247CECE9` |
 | `word/numbering.xml` | 6017 | `B00FDB78F6FC6AC21DF06F7B0C3686117D50E8D6B5374493E61AA3040F85F83D` |
 | `word/settings.xml` | 2535 | `51A0D348FE85965C66E4748A03C3C0D055D78455514F03CB121C334AF7D73689` |
 | `word/styles.xml` | 350352 | `FE70D9E4CB2887AF38BFF2FC2D0A2BC5F64BEE8A0DC94BA870161B1E2764B0D5` |
@@ -105,9 +105,9 @@ relationships, content types and core metadata. The package manifest identifies 
 5. Document
 6. Value
 7. Version
-8. 0.0.11
+8. 01.09.01
 9. Date
-10. 23 September 2026
+10. 17 October 2026
 11. Author
 12. Maksim Barziankou (MxBv)
 13. Affiliation
@@ -799,7 +799,7 @@ relationships, content types and core metadata. The package manifest identifies 
 699. Coverage
 700. Expected result
 701. Functional behavior
-702. 31 positive and negative state-machine tests, each run against all three shipped profiles
+702. 34 positive and negative state-machine tests, each run against all three shipped profiles
 703. All pass on all three profiles
 704. Semantic contradictions
 705. 15 profile, declaration, role, and input tests
@@ -814,7 +814,7 @@ relationships, content types and core metadata. The package manifest identifies 
 714. 89 focused tests derived from the executable suite
 715. Each pins one contract fact: a defect the engine once had, or a refusal code that no other check witnessed
 716. OTCS bridge
-717. 67 tests over the permit-gated append seam, including every declared refusal code of its own vocabulary
+717. 68 tests over the permit-gated append seam, including every declared refusal code of its own vocabulary
 718. Each refusal answers with its own code, and the declared vocabulary equals the measured one
 719. Failure-surface ratchet
 720. Layered closed-world vocabularies, both emission-point counts with the dynamic gap enumerated, runtime-observed witnesses, and architect decisions
@@ -942,7 +942,7 @@ relationships, content types and core metadata. The package manifest identifies 
 842. PACKAGE-MANIFEST.json
 843. SHA-256 and byte-length coverage of shipped package files
 844. requirements-lock.txt
-845. Pinned schema, YAML, and DOCX tool dependencies
+845. Pinned schema, YAML, and DOCX tool dependencies, plus the optional cryptography runtime
 846. LICENSE
 847. Per-file documentation and code licensing
 848. core/nc25-core-crosswalk.json
@@ -1003,4 +1003,4 @@ relationships, content types and core metadata. The package manifest identifies 
 
 ### `word/header1.xml`
 
-1. NC25OL  •  v0.0
+1. NC25OL  •  v01.09

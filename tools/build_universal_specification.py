@@ -44,7 +44,7 @@ def _package_version() -> str:
 
 SPEC_VERSION = _package_version()
 SPEC_VERSION_MAJOR_MINOR = ".".join(SPEC_VERSION.split(".")[:2])
-SPEC_DATE_TEXT = "23 September 2026"
+SPEC_DATE_TEXT = "17 October 2026"
 
 CONFORMANCE_CHECK_COUNT = literal_collection_size(ROOT / "tests" / "test_contract_conformance.py", "EXPECTED_CONFORMANCE_IDS")
 # The two sets are counted apart, because the acceptance report names them
@@ -1338,7 +1338,7 @@ def add_appendices(doc: Document, crosswalk: dict) -> None:
             ("README.md", "Reader entry point and claim boundary"),
             ("SOURCE-MANIFEST.json", "Immutable external-input hashes"),
             ("PACKAGE-MANIFEST.json", "SHA-256 and byte-length coverage of shipped package files"),
-            ("requirements-lock.txt", "Pinned schema, YAML, and DOCX tool dependencies"),
+            ("requirements-lock.txt", "Pinned schema, YAML, and DOCX tool dependencies, plus the optional cryptography runtime"),
             ("LICENSE", "Per-file documentation and code licensing"),
             ("core/nc25-core-crosswalk.json", "Exact core source anchors"),
             ("core/schemas/profile.schema.json", "Domain profile contract"),

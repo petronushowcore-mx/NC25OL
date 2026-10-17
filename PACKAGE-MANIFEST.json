@@ -20,8 +20,8 @@
     },
     {
       "path": "ACCEPTANCE-REPORT.md",
-      "byte_length": 5781,
-      "sha256": "B1A1640CC01E7FC314C9A9926F83D3D97B129CAA983DC8EDF48C4EAAB7D5E92B"
+      "byte_length": 5949,
+      "sha256": "417AB5B8C8C2D6699860AB320F42F720EF1BFA8E5CCB3D5A804179E76D980635"
     },
     {
       "path": "ADOPTERS.md",
@@ -30,33 +30,33 @@
     },
     {
       "path": "CHANGELOG.md",
-      "byte_length": 15914,
-      "sha256": "280F6E7488B755B99E75D01D01062A8795C6045C512C383B7EB439DAC591618E"
+      "byte_length": 18032,
+      "sha256": "944FAC20118B58D901E7E60D87C4159E62517BB0CD7CFD745E3FBAC708B276C2"
     },
     {
       "path": "CITATION.cff",
-      "byte_length": 1203,
-      "sha256": "D4A511F1398B952B58F566BA735B4BD484599DA6F82356B2C45DA5E27F7481F6"
+      "byte_length": 1205,
+      "sha256": "69CD0314683487527F97A8FFCCC5575FC50421666140AA66099D6E20AFD671BB"
     },
     {
       "path": "DOCX-AUDIT-PROJECTION.md",
-      "byte_length": 61602,
-      "sha256": "82E1384CBE5D53E3F3B671009D69A2C555E4B96AA2DDA667D3113260521A281A"
+      "byte_length": 61646,
+      "sha256": "AE065413D89245B9F6AEF677CD46C0847F78335BC0919E56BEBF5690E6293D04"
     },
     {
       "path": "LICENSE",
-      "byte_length": 3005,
-      "sha256": "1CEABF2EED3BD82D7C477DA762D6DB3A483AD730A40EA9E740388E013AA3843A"
+      "byte_length": 3007,
+      "sha256": "72F470B9209F46BFD7147F7EEFC386B4FB94F05CFC9583DABFC287D9C4017DF9"
     },
     {
-      "path": "NC25OL Specification v0.0.docx",
-      "byte_length": 68442,
-      "sha256": "FE6D25D0253E9F6F952E696440531CA838866D8B26B9FAF52F60E6FEC7A5D840"
+      "path": "NC25OL Specification v01.09.docx",
+      "byte_length": 68458,
+      "sha256": "E2A0AE67F215FF6B87CC1645C748AAE337760C8669DBB7321D5C118F1436B540"
     },
     {
       "path": "README.md",
-      "byte_length": 41734,
-      "sha256": "261301BA2EDFC5E4D37B8E7AC2C1E3AADCF213B5ABE8A803ACCDFB918C4E3780"
+      "byte_length": 42473,
+      "sha256": "D03B70D1D4A5EE3749F6F5362E6A4735A6EF8D761BE5E5F89C8E7B08CFDA0CD7"
     },
     {
       "path": "SECURITY.md",
@@ -65,13 +65,13 @@
     },
     {
       "path": "SOURCE-MANIFEST.json",
-      "byte_length": 1586,
-      "sha256": "236BD9B8E09A78108C16EE6AB524BD7C7F905F9619D0BB69587893C5A220F782"
+      "byte_length": 1588,
+      "sha256": "FD8484EAB874C0C331A07A89CEB12EC03FF2D088E8C9BB85D85AAD7E63CA0FD0"
     },
     {
       "path": "UNIVERSAL-CONNECTION-RUNBOOK.md",
-      "byte_length": 25311,
-      "sha256": "CD5CC880D3FE1968C3E3B9F520C7782AD215E7D51AD6225C49CE3C2B762B9D43"
+      "byte_length": 25830,
+      "sha256": "05A5D8317D224188A30DFEC53688E1D6DA0E15AC88C5E7BA52ABB5E3F3E8F803"
     },
     {
       "path": "core/nc25-core-crosswalk.json",
@@ -100,8 +100,8 @@
     },
     {
       "path": "examples/local_release/README.md",
-      "byte_length": 7777,
-      "sha256": "0B515AE00F8604F28B55DC5C0AFD35E4B974E5D5826A863F5F3EA1E40428EFDD"
+      "byte_length": 7759,
+      "sha256": "BE6C2432A8C234A9D34C2C2209C3B723312E12E0E9B1F16E6F6752BB8DD0756C"
     },
     {
       "path": "examples/local_release/document_release.py",
@@ -190,33 +190,33 @@
     },
     {
       "path": "examples/spectrum_release/README.md",
-      "byte_length": 4863,
-      "sha256": "F1F73E0DACCBB3C3900A9CF10AEEB91BD61B32FFA113DAEE36AACA9C828826C8"
+      "byte_length": 7967,
+      "sha256": "0C42C383811CB2F9D2C9AF755579C710D9B4384192D10A190507EB5315A92AB5"
     },
     {
       "path": "examples/spectrum_release/RESULT.md",
-      "byte_length": 4457,
-      "sha256": "B23FBD0C1E2323A9DB41B1A97140A3678509B7931F741CDA7E3B7DE5D932EF85"
+      "byte_length": 5963,
+      "sha256": "F9E0628E9359BA04368BEF8D569FC8B4FD8AA284B39E7558B562E7A8842B7E1A"
     },
     {
       "path": "examples/spectrum_release/mutate_spectrum_release.py",
-      "byte_length": 12823,
-      "sha256": "ADE0D9A762AEAB7348F5B121FEC86F62AD73195A3F1451FD87486BA67518CDC4"
+      "byte_length": 15794,
+      "sha256": "4C89383DFD6DC645E44D6A6EA058C8850BDDD5D11455F6ABB4F204AB96D3F448"
     },
     {
       "path": "examples/spectrum_release/result.json",
-      "byte_length": 3191,
-      "sha256": "26F94E416F3178DB02DACC3F22936FCCD265939DE6716B419F14ED76E4B27BF0"
+      "byte_length": 3632,
+      "sha256": "BFEFE23E257127B7939EBB00BC6EAC66C2CBA327713C25196084BC00B656C138"
     },
     {
       "path": "examples/spectrum_release/spectrum_release.py",
-      "byte_length": 13166,
-      "sha256": "5778BD8F58D90F37D5D48BF3FD405EB4B8728AAEC4CB8E0686B2F9B0666AAB09"
+      "byte_length": 15004,
+      "sha256": "421F67CCB064D3A1BB55E612906CF8CE24613DC689309FA0780E17F99BE98A39"
     },
     {
       "path": "examples/spectrum_release/test_spectrum_release.py",
-      "byte_length": 27962,
-      "sha256": "15E1AB6F2FEF66D3F5DE1DCAAFF293CCC4D942B3FE3E2DAEE6E3156ED9A020C8"
+      "byte_length": 37722,
+      "sha256": "2C0C815CB8D817E905700942C5EBBC50D2046ACCFA0A81D2FF6400E60882153E"
     },
     {
       "path": "examples/synthetic-authority-grant.json",
@@ -265,8 +265,8 @@
     },
     {
       "path": "protocol/universal-connection.openapi.yaml",
-      "byte_length": 33271,
-      "sha256": "D552E9AFB88ED5361360EC71B0A24699770AEBE6304F2EB517F7E0AAFF3C6AE2"
+      "byte_length": 33273,
+      "sha256": "963FDE8AADD019F3AC009B1F6D1B4309FB57DFD99D9DFFC08F969CDD811E087A"
     },
     {
       "path": "requirements-lock.txt",
@@ -275,8 +275,8 @@
     },
     {
       "path": "sdk/python/nc25_otcs_bridge.py",
-      "byte_length": 117042,
-      "sha256": "F7DCDF45900CE602EFC7FB97B0AD6E1F0739EB22A79A2FA79E43C554C4312E49"
+      "byte_length": 117591,
+      "sha256": "AAB77A52BB79B18537E40730A6ACA6C168DD6A1FD583D7C39BF3AEFB4C373CE8"
     },
     {
       "path": "sdk/python/nc25_universal_adapter.py",
@@ -285,8 +285,8 @@
     },
     {
       "path": "sdk/python/nc25_universal_ledger.py",
-      "byte_length": 177512,
-      "sha256": "DF8846ECE623A9BE55CA9CB83583BBAD734006587A2638C253020C2DE4DB55C1"
+      "byte_length": 178012,
+      "sha256": "066567A1FF81D10DCC322497C4972B79ABA0FA808F0D5857172DF7CD397DE2CA"
     },
     {
       "path": "tests/check_failure_surface.py",
@@ -296,7 +296,7 @@
     {
       "path": "tests/failure-surface-baseline.json",
       "byte_length": 44187,
-      "sha256": "816D0DD716A304D9935D76351ECF7BA58BC660DE77A22C85739A4F3010CCBF0E"
+      "sha256": "D399D12DE4325E8CA48C2E387BE2223838F0BD7E99BF570ABA4DE83073676B15"
     },
     {
       "path": "tests/run_acceptance.py",
@@ -310,13 +310,13 @@
     },
     {
       "path": "tests/test_contract_regressions.py",
-      "byte_length": 393546,
-      "sha256": "890DD082318EE666C79496DC342E733D5A52A08F7AB34A751B05C9A4C2F7D493"
+      "byte_length": 394368,
+      "sha256": "F6519EC4EA3DC6C542795A82564DF80ED646CC004FDAC42AB9E6C39B9327EF43"
     },
     {
       "path": "tests/test_otcs_bridge.py",
-      "byte_length": 195040,
-      "sha256": "74EB04B42603D0BD3AEFDAAD30F3D22623FCBEB6E1BA8AC65781742D4F512FBE"
+      "byte_length": 198039,
+      "sha256": "269AEAEDA2ACB6BCE0866E87DEB6D20C68323ED2EFCB8C8A9B394091A5C724DB"
     },
     {
       "path": "tests/test_safety_mutations.py",
@@ -330,13 +330,13 @@
     },
     {
       "path": "tests/test_universal_connection.py",
-      "byte_length": 61130,
-      "sha256": "0634E45637C5222F8296440B28E3E5B84B2BBECEDE217163FEF42298CD55502A"
+      "byte_length": 65156,
+      "sha256": "578A8B7D821FD371DCA979C27F8739DFA8770A0355A2A8BF5C915C7DCD9F82B8"
     },
     {
       "path": "tests/verify_package.py",
-      "byte_length": 65657,
-      "sha256": "9FE8073E3BD258D2EBBBD85790D9F4DAA36961BF881F4D0FFDC21EC2008A5EF7"
+      "byte_length": 65687,
+      "sha256": "4E0DD56464518F6CAE52DF60C99C0E357A1CED0DA633CD80DFF3288347BDC456"
     },
     {
       "path": "tools/build_acceptance_report.py",
@@ -365,8 +365,8 @@
     },
     {
       "path": "tools/build_universal_specification.py",
-      "byte_length": 77547,
-      "sha256": "21798B21E58128B5318A243E9099F4F322F3084D1C254622724DA7075A439E2D"
+      "byte_length": 77585,
+      "sha256": "DCC1F9E19CA539EE8C48BF113C001AE020030AF89CB2A884DC3FD0497C497D66"
     },
     {
       "path": "tools/failure_surface.py",

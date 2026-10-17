@@ -1,9 +1,10 @@
 # Spectrum and NC25OL: one local source release
 
-On 23 September 2026, Spectrum's supplied XIV/XV fixtures were executed from
-pinned source trees. NC25OL then admitted a separate operation: storing the
-complete source ZIP and its observation in an authenticated local document target.
-The original machine result is [result.json](result.json).
+On 15 October 2026, Spectrum's supplied XIV/XV fixtures were executed from the
+pinned source trees of the Tectonica Spectrum release `v00.09.01`. NC25OL then
+admitted a separate operation: storing the source ZIP and its observation in an
+authenticated local document target. The original machine result is
+[result.json](result.json).
 
 ## Observed result and limits
 
@@ -30,28 +31,50 @@ example did not upload its source archive to a public service.
 
 | Repository | Commit |
 | --- | --- |
-| [Spectrum](https://github.com/petronushowcore-mx/TECTONICA) | `c884b02a26adc188bb71ff42ce59f19322562e5a` |
+| [Spectrum](https://github.com/petronushowcore-mx/TECTONICA), tag `v00.09.01` | `874b91f8e847c13e04ec18851c23100c04bf1da6` |
 | XIV submodule | `d03e16a3094996bf5d2947e3b1ee073b102573ee` |
 | XV submodule | `73b6a0c25bf0a92cc64ff3357d08d9e60b398f7d` |
 
-The observed archive contained 56 committed source files, plus its manifest and
-observation. Its size was 1005288 bytes and SHA-256 was
-`09bba8c533469f3a666157ca14a167756b0d16b3989892d06d3d1ebe4b927465`.
+The observed archive contained 86 committed source files of the root and the
+XIV and XV layers, plus its manifest and observation. Its size was 624281 bytes
+and its SHA-256 was
+`1c17b4b4a343f1b0f3f98d513904179aa6c22fd9dbc75d4f7b8b5a1fbd7718e2`.
 This result records that local artifact; the archive is not included here.
 `result.json` records its manifest and observation hashes and both receipts.
 `document_payload_hash` is the gateway's hash of document name and encoded
 bytes, not the ZIP SHA-256.
 
+Two committed files of the root end with an image suffix. The manifest records
+them instead of packaging them:
+
+| Path | Size | Git blob | SHA-256 |
+| --- | --- | --- | --- |
+| `assets/layers.gif` | 3141531 | `ba161674f4ad3dcecd0393738e7d778ea8310c9a` | `95d513ea3e5a440fd40beba5df473b445b338a1023014e725bf7be5572d8f196` |
+| `assets/layers.png` | 1351911 | `f959ac0041cae11720459bc5af6084fb3038c6c4` | `47aa96bae7a4ee5055ef1dd1448375276a3b09eb98ba6e8808ff455db072f58c` |
+
+The other five root gitlinks are recorded by path and commit only; their trees
+were not read, packaged or run:
+
+| Path | Commit |
+| --- | --- |
+| `layers/DoubleFibre` | `fed7eed1736d29733bdee0b4b000eed2e87d37cd` |
+| `layers/Identity` | `6b981f322f9b4ae5fb6181f77f27b8ef759096d5` |
+| `layers/NCNC` | `f93e44c162c8143c5c45fb7c558784ce6f5ff7a5` |
+| `layers/Person` | `37f6598edeb036c531b04f4b855203df8499c953` |
+| `layers/PoA` | `7b46eac803cd4073e5478bb383fc9b1f384001b7` |
+
 ## Reproduce
 
-Use Python 3.11 or 3.12. Create a separate Spectrum checkout without newline
-transformations and select the root commit above; its gitlinks select both layers:
+Use Python 3.11 or 3.12; the recorded run used Python 3.12.9 in a new
+environment installed from `requirements-lock.txt`. Create a separate Spectrum
+checkout without newline transformations: the root at the tag, then the two
+layers at the root's gitlinks. The other gitlink directories stay empty.
+`git clone --revision` needs Git 2.49 or later.
 
 ```text
-git -c core.autocrlf=false clone https://github.com/petronushowcore-mx/TECTONICA.git spectrum
-git -C spectrum config core.autocrlf false
-git -C spectrum checkout --detach c884b02a26adc188bb71ff42ce59f19322562e5a
-git -C spectrum -c core.autocrlf=false submodule update --init --recursive
+git clone -c core.autocrlf=false -c core.eol=lf --branch v00.09.01 https://github.com/petronushowcore-mx/TECTONICA.git spectrum
+git clone -c core.autocrlf=false -c core.eol=lf --revision=d03e16a3094996bf5d2947e3b1ee073b102573ee https://github.com/petronushowcore-mx/NC2.5-ONTOSigma-XIV-Cross-Layer-Forgetful-Separation-corpus.git spectrum/layers/XIV
+git clone -c core.autocrlf=false -c core.eol=lf --revision=73b6a0c25bf0a92cc64ff3357d08d9e60b398f7d https://github.com/petronushowcore-mx/NC2.5-ONTOSigma-XV-Spin-Channel-and-Nestability-corpus.git spectrum/layers/XV
 ```
 
 From the NC25OL package root, with absolute paths to that checkout and a new
@@ -60,7 +83,7 @@ output directory outside both source trees:
 ```text
 python -m pip install --require-hashes -r requirements-lock.txt
 python -B tests/verify_package.py
-python -B examples/spectrum_release/spectrum_release.py --spectrum-root /absolute/spectrum --spectrum-revision c884b02a26adc188bb71ff42ce59f19322562e5a --output /absolute/new-run
+python -B examples/spectrum_release/spectrum_release.py --spectrum-root /absolute/spectrum --spectrum-revision 874b91f8e847c13e04ec18851c23100c04bf1da6 --output /absolute/new-run
 python -B -m unittest discover -s examples/spectrum_release -p "test_*.py" -v
 python -B examples/spectrum_release/mutate_spectrum_release.py --scratch /absolute/scratch
 ```

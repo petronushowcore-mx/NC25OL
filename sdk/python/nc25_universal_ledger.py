@@ -2822,8 +2822,16 @@ class UniversalConnectionLedger:
         if grant_id in self.grants:
             if grant_id in self.revoked_grants:
                 raise ContractViolation("AUTHORITY_REVOKED", grant_id)
-            if sha256_hex(self.grants[grant_id]) == grant_hash:
-                return (grant_hash, False) if with_status else grant_hash
+            # The replay identity follows the wire rule for hashes: a declared
+            # SHA-256 is accepted in either case, so a re-issue differing only in
+            # the case of one is the same grant and replays with the hash first
+            # recorded. Copies are normalized; the grant stays as it was issued.
+            stored = self.grants[grant_id]
+            if sha256_hex(_normalize_declared_hash_case(stored)) == sha256_hex(
+                _normalize_declared_hash_case(grant)
+            ):
+                stored_hash = sha256_hex(stored)
+                return (stored_hash, False) if with_status else stored_hash
             raise ContractViolation("AUTHORITY_ID_CONFLICT", grant_id)
         self.ledger.append(
             "AUTHORITY_GRANTED",

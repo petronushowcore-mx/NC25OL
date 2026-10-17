@@ -447,12 +447,13 @@ def package_version_mismatches(sections: dict[str, list[str]]) -> list[str]:
         problems.append(f"docx files found={len(docx_names)}")
     elif not docx_names[0].endswith(f"v{major_minor}.docx"):
         problems.append(f"docx filename does not carry v{major_minor}")
-    # The report carries the FULL version, not major.minor. The second digit is
-    # unused by convention, so major.minor is constant across every patch - and
-    # a report compared on it satisfies the check unchanged after a patch bump,
-    # which is exactly how a report generated for an earlier byte-set passed
-    # here. The patch digit is the only one that moves, and it is the one that
-    # identifies the bound set of file hashes, so it is the one compared.
+    # The report carries the FULL version, not major.minor. Up to 0.0.11 the
+    # second digit was unused, so major.minor stayed constant across every patch
+    # - and a report compared on it satisfied the check unchanged after a patch
+    # bump, which is exactly how a report generated for an earlier byte-set
+    # passed here. A patch-only change still leaves major.minor equal, and the
+    # full version identifies the bound set of file hashes, so the full version
+    # is the one compared.
     report_versions = re.findall(
         r"(?m)^Version: `(\d+\.\d+\.\d+)`$",
         (ROOT / "ACCEPTANCE-REPORT.md").read_text(encoding="utf-8"),

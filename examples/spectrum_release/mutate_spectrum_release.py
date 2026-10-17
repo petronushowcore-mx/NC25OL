@@ -15,18 +15,21 @@ HERE = Path(__file__).resolve().parent
 LEDGER_ROOT = Path(os.environ.get('NC25_LEDGER_ROOT', HERE.parents[1])).resolve()
 MODULE = 'spectrum_release'
 TEST = 'test_spectrum_release'
-EXPECTED_TESTS = 28
+EXPECTED_TESTS = 37
 CASES = [
     ('git_exit_ignored', 1, 'result.returncode == 0', 'True'),
     ('unused_file_omitted', 2, 'members[full] = raw', 'if full != "docs/unused.md": members[full] = raw'),
-    ('gitlink_pin_ignored', 3, 'and oid == snapshot["revisions"][relative.split("/")[1]]', 'and True'),
+    ('gitlink_pin_ignored', 3, 'oid == snapshot["revisions"][relative.split("/")[1]]', 'True'),
     ('blob_identity_ignored', 4, 'actual_oid == oid and kind == "blob"', 'kind == "blob"'),
     ('blob_kind_ignored', 4, 'actual_oid == oid and kind == "blob"', 'actual_oid == oid'),
     ('blob_separator_ignored', 4, r'len(raw) == int(size) and data.read(1) == b"\n"', 'len(raw) == int(size) and bool(data.read(1) or True)'),
     ('blob_trailing_ignored', 4, 'require(not data.read(), "SOURCE_BLOB_TRAILING")', 'require(True, "SOURCE_BLOB_TRAILING")'),
     ('unused_checkout_mismatch_ignored', 5, 'file.read_bytes() == raw', 'True'),
     ('source_type_ignored', 6, 'mode in {"100644", "100755"} and kind == "blob"', 'True'),
-    ('source_parent_path_ignored', 6, 'all(p not in {".", "..", ".git"} and ":" not in p for p in parts)', 'True'),
+    ('source_parent_path_ignored', 6, 'all(p not in {"", ".", "..", ".git"} and ":" not in p for p in parts)', 'True'),
+    # The earlier reading: PurePosixPath collapses empty and "." parts, so the check never sees them.
+    ('source_path_normalized', 6, 'parts = relative.split("/")', 'parts = __import__("pathlib").PurePosixPath(relative).parts'),
+    ('honest_path_parts_overrefused', 2, '":" not in p for p in parts', '":" not in p and "." not in p for p in parts'),
     ('release_namespace_case_sensitive', 6, 'not full.casefold().startswith("release/")', 'not full.startswith("release/")'),
     ('case_collision_ignored', 6, 'full.casefold() not in folded', 'True'),
     ('file_existence_ignored', 6, 'and file.is_file()', 'and True'),
@@ -41,9 +44,13 @@ CASES = [
     ('zip_bytes_ignored', 11, 'entry.file_size == len(wanted) and archive.read(entry) == wanted', 'True'),
     ('zip_size_ignored', 12, 'type(raw) is bytes and 0 < len(raw) <= scenario.dr.MAX_BODY // 2', 'True'),
     ('zip_type_ignored', 12, 'and stat.S_ISREG(entry.external_attr >> 16)', 'and True'),
+    # Only the upper bound removed: the empty and non-bytes refusals of test 12 still hold, so the
+    # first red has to be the boundary test.
+    ('zip_upper_bound_ignored', 37, 'type(raw) is bytes and 0 < len(raw) <= scenario.dr.MAX_BODY // 2',
+     'type(raw) is bytes and 0 < len(raw)'),
     ('nonverified_observation_accepted', 13, 'self.report["observation"]["status"] == "VERIFIED"', 'True'),
     ('observation_source_ignored', 14, 'self.report["source"] == self.source', 'True'),
-    ('unused_records_ignored', 15, 'current == self.source and records == self.records', 'current == self.source'),
+    ('unused_records_ignored', 15, 'current == self.source and inventory == self.inventory', 'current == self.source'),
     ('post_collect_check_omitted', 15, 'self.check_sources()\n        self.manifest', 'self.manifest'),
     ('manifest_observation_hash_wrong', 16, '"observation_sha256": digest(self.report_bytes)', '"observation_sha256": "0" * 64'),
     ('registry_association_ignored', 17, 'registry == self.report["association"]["ledger_registry"]', 'True'),
@@ -64,9 +71,35 @@ CASES = [
     ('existing_output_allowed', 25, 'not directory.exists(), "RUN_DIRECTORY_EXISTS"', 'True, "RUN_DIRECTORY_EXISTS"'),
     ('changed_archive_open_allowed', 27, 'type(self.archive) is bytes and digest(self.archive) == self._archive_digest', 'True'),
     ('different_operation_payload_allowed', 28, 'scenario.dr.operation(self._session.op) == package', 'True'),
+    ('other_root_gitlink_refused', 29, 'pinned.append({"path": relative, "commit": oid})', 'require(False, "SOURCE_GITLINK")'),
+    ('other_root_gitlink_unrecorded', 29, 'pinned.append({"path": relative, "commit": oid})', 'pass'),
+    ('pinned_layers_unsorted', 29, '"pinned_layers_not_packaged": sorted(pinned, key=lambda r: r["path"])',
+     '"pinned_layers_not_packaged": pinned'),
+    ('manifest_pinned_layers_dropped', 29, '**self.inventory,', '**dict(self.inventory, pinned_layers_not_packaged=[]),'),
+    ('images_packaged', 30, 'full.casefold().endswith(IMAGE_SUFFIXES)', 'False'),
+    ('image_rule_case_sensitive', 30, 'full.casefold().endswith(IMAGE_SUFFIXES)', 'full.endswith(IMAGE_SUFFIXES)'),
+    ('excluded_record_without_hashes', 30, 'dict(record, reason="IMAGE_SUFFIX")',
+     '{"path": full, "mode": mode, "reason": "IMAGE_SUFFIX"}'),
+    ('excluded_files_unsorted', 30, '"excluded_files": sorted(excluded, key=lambda r: r["path"])', '"excluded_files": excluded'),
+    ('manifest_excluded_files_dropped', 30, '**self.inventory,', '**dict(self.inventory, excluded_files=[]),'),
+    ('excluded_checkout_bytes_ignored', 31, 'file.read_bytes() == raw',
+     'file.read_bytes() == raw or full.casefold().endswith(IMAGE_SUFFIXES)'),
+    ('archive_ignores_image_members', 32, 'entries = archive.infolist()',
+     'entries = [e for e in archive.infolist() if not e.filename.casefold().endswith(IMAGE_SUFFIXES)]'),
+    ('layer_gitlink_accepted', 33, 'require(name == "spectrum", "SOURCE_GITLINK")', 'pass'),
+    ('excluded_files_not_rechecked', 34, 'inventory == self.inventory',
+     'dict(inventory, excluded_files=None) == dict(self.inventory, excluded_files=None)'),
+    ('pinned_layers_not_rechecked', 35, 'inventory == self.inventory',
+     'dict(inventory, pinned_layers_not_packaged=None) == dict(self.inventory, pinned_layers_not_packaged=None)'),
+    ('result_excluded_count_dropped', 36, '"excluded_file_count": len(prepared.inventory["excluded_files"])',
+     '"excluded_file_count": 0'),
+    ('result_pinned_layers_dropped', 36, '"pinned_layers_not_packaged": prepared.inventory["pinned_layers_not_packaged"]',
+     '"pinned_layers_not_packaged": []'),
     ('honest_source_overrefused', 2, 'file.read_bytes() == raw', 'file.read_bytes() != raw'),
     ('honest_zip_size_overrefused', 9, '0 < len(raw) <= scenario.dr.MAX_BODY // 2', '0 < len(raw) < 10'),
     ('honest_zip_members_overrefused', 9, 'len(entries) == len(expected)', 'len(entries) != len(expected)'),
+    ('honest_text_files_excluded', 30, 'full.casefold().endswith(IMAGE_SUFFIXES)',
+     'any(suffix in full.casefold() for suffix in IMAGE_SUFFIXES)'),
 ]
 
 

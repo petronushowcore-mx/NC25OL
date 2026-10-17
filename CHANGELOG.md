@@ -1,12 +1,22 @@
 # Changelog
 
-All notable changes to this package are recorded here. Versions before 1.0.0
-are pre-release; the second digit is not used in these entries, and each entry
-is a patch. Tags of the form `v0.N.M` that exist in the repository history
-belong to a numbering this changelog does not use and are not entries here.
-Every version binds an exact set of file hashes in `PACKAGE-MANIFEST.json`.
+All notable changes to this package are recorded here. Every version binds an
+exact set of file hashes in `PACKAGE-MANIFEST.json`.
 
-## Unreleased
+From 01.09.01 a version has three groups with leading zeros, `LL.MM.PP`. The
+last two groups are those of the Tectonica Spectrum release the version is
+paired with: 01.09.01 is paired with Spectrum `v00.09.01`. The first group is
+the edition of Ledger's coverage of Spectrum and develops separately from
+Spectrum's first group: `01` is the first ready source edition, and later
+changes of coverage take `02`, `03` and so on. A ready edition does not mean
+that every later Spectrum layer is covered. The README title, the file name of
+the specification document and its running header carry only the first two
+groups (`v01.09`); every other version field carries all three.
+
+Versions up to 0.0.11 are pre-release; in them the second digit is not used,
+and each entry is a patch.
+
+## 01.09.01
 
 - Adds a synthetic local example composing an OTCS registration preview,
   document release and declaration projection/objection exchange.
@@ -14,6 +24,30 @@ Every version binds an exact set of file hashes in `PACKAGE-MANIFEST.json`.
   authority; records uncertain cross-system completion as reconciliation.
 - Pins the projected declaration to its initial bytes and active engine binding.
 - Runs the example's component and integration checks and source mutations in CI.
+- The local Spectrum source release example packages the committed source files
+  of the pinned root and the XIV and XV layers. Files whose path ends with
+  `.gif`, `.png`, `.jpg`, `.jpeg` or `.webp`, compared without regard to case, are
+  recorded under `excluded_files` by path, mode, Git blob, size and SHA-256 with
+  the reason `IMAGE_SUFFIX` instead of packaged. Other root gitlinks are recorded
+  by path and commit under `pinned_layers_not_packaged` and are not read.
+- Its manifest and result move to the formats
+  `nc25ol-spectrum-source-release/v2` and
+  `nc25ol-spectrum-local-release-result/v2`; the result adds
+  `excluded_file_count` and `pinned_layers_not_packaged`. Records written in
+  format v1 remain records of their own runs; no converter is provided.
+- Adds connection tests for a fresh intent under a revoked grant, a resource
+  window that slides and a closed registry field set, run for every shipped
+  profile.
+- The recorded source release (`examples/spectrum_release/RESULT.md`) uses
+  Tectonica Spectrum `v00.09.01`: its root and its XIV and XV layers.
+- The OTCS bridge commits a completed append at the ledger's own time, as it
+  records a failed one; the receipt's effective time stays in the stored
+  receipt. A receipt time more than five seconds ahead of the ledger clock, or
+  more than five seconds before the permit was issued, no longer sends a
+  completed append to reconciliation.
+- A grant re-issued with a declared hash in another case replays the first
+  issue, as the wire rule for hashes states, instead of failing with
+  `AUTHORITY_ID_CONFLICT`.
 
 ## 0.0.11
 

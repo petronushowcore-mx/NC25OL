@@ -290,6 +290,66 @@ class OTCSBridgeRegressions(unittest.TestCase):
             event["event_hash"],
         )
 
+    def test_a_receipt_time_off_the_ledger_clock_still_commits(self) -> None:
+        # The local execution is committed at the ledger's own time; the
+        # receipt's effective_at is the counterparty's and is kept in the stored
+        # receipt. The clock is fixed, so the permit is issued at the same
+        # instant: six seconds ahead of the clock or before the permit lies
+        # outside the engine's five-second bounds, so a bridge that took the
+        # receipt's time as the commit time sent these completed appends to
+        # reconciliation.
+        for label, effective_at in (
+            ("ahead", "2026-08-01T10:00:06Z"),
+            ("behind", "2026-08-01T09:59:54Z"),
+        ):
+            with self.subTest(receipt_time=label):
+                engine = UniversalConnectionLedger(
+                    self.bundle["profile"],
+                    self.bundle["declaration"],
+                    signing_key=b"synthetic-reference-signing-key",
+                    clock=FixedClock(datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc)),
+                    state_path=self.temporary_root / f"receipt-time-{label}-ledger.sqlite",
+                )
+                engine.activate(
+                    self.bundle["declaration"]["governance"]["approval_owner_id"],
+                    "evidence://synthetic/otcs/declaration-activation",
+                    actor_scope=ROLE_GOVERNANCE,
+                )
+                engine.issue_grant(
+                    copy.deepcopy(self.bundle["grant"]), actor_scope=ROLE_GOVERNANCE
+                )
+                receipt = copy.deepcopy(self.bundle["downstream_receipt"])
+                receipt["effective_at"] = effective_at
+                client = FakeOTCSClient(receipt)
+                bridge = OTCSBridge(
+                    engine,
+                    client,
+                    self.temporary_root / f"receipt-time-{label}-outbox.sqlite",
+                )
+                result = bridge.execute(
+                    self.bundle["bridge_operation"],
+                    self.bundle["intent"],
+                    self.bundle["evidence"],
+                )
+                self.assertEqual(result["status"], "COMMITTED")
+                self.assertEqual(client.effects, 1)
+                stored = bridge.outbox_record(
+                    self.bundle["bridge_operation"]["project_id"],
+                    self.bundle["bridge_operation"]["idempotency_key"],
+                )
+                self.assertEqual(stored["state"], "LOCAL_COMMITTED")
+                self.assertEqual(
+                    stored["execution_request"]["committed_at"], "2026-08-01T10:00:00Z"
+                )
+                self.assertEqual(stored["receipt"]["effective_at"], effective_at)
+                self.assertEqual(
+                    sum(
+                        event["event_type"] == "EXECUTION_RECORDED"
+                        for event in engine.ledger.events_copy()
+                    ),
+                    1,
+                )
+
     def test_ambiguous_retry_reissues_request_but_not_effect(self) -> None:
         client = FakeOTCSClient(self.bundle["downstream_receipt"])
 

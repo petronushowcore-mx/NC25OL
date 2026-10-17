@@ -909,7 +909,7 @@
       "test_contract_regressions",
       "test_otcs_bridge"
     ],
-    "unittest_test_count": 260,
+    "unittest_test_count": 270,
     "unwitnessed_bridge_codes": [],
     "unwitnessed_codes": [],
     "witnessed_bridge_codes": [

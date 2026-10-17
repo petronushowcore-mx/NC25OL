@@ -184,8 +184,8 @@ executor adapter MUST compare the path `permit_hash` with
 
 The evaluator performs this order:
 
-1. verify the local ledger chain;
-2. verify active profile and declaration hashes;
+1. verify active profile and declaration hashes;
+2. verify the local ledger chain;
 3. reject forbidden operator inputs;
 4. verify idempotency;
 5. verify grant existence, scope, time, and revocation;
@@ -292,11 +292,13 @@ The optional shared registry may contain only:
 - core anchor;
 - status and activation time;
 - revocation state;
-- latest receipt root and local ledger head hash;
-- the registry policy and its forbidden-field list.
+- latest receipt root and local ledger head hash.
 
 The reference projection emits exactly that closed set of fields; a record
-whose field set differs is refused as `REGISTRY_DATA_EXPANSION`.
+whose field set differs is refused as `REGISTRY_DATA_EXPANSION`. The profile's
+registry policy is not a field of the record: its forbidden-field list is
+scanned against the record before it is emitted, and a record that carries a
+forbidden key is refused the same way.
 
 It must not contain raw intent, raw evidence, personal data, reusable
 credentials, gate geometry, sub-verdicts, reason vectors, or control-plane
@@ -489,7 +491,7 @@ Treat the engine clock as authoritative. Reject intent, evidence, or revocation 
 
 ## Resource-window boundary
 
-Committed usage is measured over the closed interval `[now - window_seconds, now]`. A debit timestamped exactly at the lower boundary still counts; it ages out only after the boundary has passed.
+Committed usage is the sum of every committed debit timestamped at or after `now - window_seconds`; the window has no upper cut. While the engine clock does not step backwards, that is the closed interval `[now - window_seconds, now]`. A debit timestamped exactly at the lower boundary still counts; it ages out only after the boundary has passed. If the clock steps backwards, a debit timestamped after the new `now` still counts, so the step can only add to the sum: it may refuse a request early, and it never admits one that the closed interval would refuse.
 
 ## Registry revocation semantics
 

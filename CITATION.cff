@@ -9,7 +9,7 @@ abstract: >-
   with a standard-library reference engine, wire contract, and executable
   conformance suite.
 type: software
-version: "0.0.11"
+version: "01.09.01"
 license:
   - MIT
   - CC-BY-4.0

@@ -17,7 +17,7 @@ synthetic owner submission, verifies it, and selects public fields and the exact
 referenced grant, consent and disclosure texts. The Python consumer checks the
 preview markers and those text hashes. It trusts the locally chosen producer;
 it does not authenticate an arbitrary file as an OTCS submission. Use synthetic
-data only. OTCS originates with Chris Perkins and the Open Trust Commons project;
+data only. OTCS originates with the Open Trust Commons project;
 this composition is a separate NC25OL contribution.
 
 `scenario.DocumentSession(path, document_bytes, document_id='document',

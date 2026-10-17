@@ -1,4 +1,4 @@
-# NC25OL - Navigational Cybernetics 2.5 Open Ledger v0.0
+# NC25OL - Navigational Cybernetics 2.5 Open Ledger v01.09
 
 **Explicit admission. Single-use permits. Recorded execution.**
 
@@ -7,7 +7,7 @@
 [![Code licence MIT](https://img.shields.io/badge/Code-MIT-2563EB)](LICENSE)
 [![Document licence CC BY 4.0](https://img.shields.io/badge/Documents-CC%20BY%204.0-7257C8)](LICENSE)
 
-[Quickstart](#getting-started) · [Spectrum result](examples/spectrum_release/RESULT.md) · [Runbook](UNIVERSAL-CONNECTION-RUNBOOK.md) · [Specification](NC25OL%20Specification%20v0.0.docx) · [Scope and limits](#boundary-of-the-claim) · [Licences](LICENSE)
+[Quickstart](#getting-started) · [Spectrum result](examples/spectrum_release/RESULT.md) · [Runbook](UNIVERSAL-CONNECTION-RUNBOOK.md) · [Specification](NC25OL%20Specification%20v01.09.docx) · [Scope and limits](#boundary-of-the-claim) · [Licences](LICENSE)
 
 NC25OL provides a domain-neutral connection contract for placing an execution
 boundary in front of an external adapter while preserving the declared NC2.5
@@ -68,8 +68,11 @@ session. It provides no execution authority or deployment conformance proof.
 ## Local Spectrum source release
 
 [The source-release example](examples/spectrum_release/README.md) packages the
-complete pinned Spectrum and XIV/XV source trees with a finite-fixture observation,
-then releases the exact ZIP through the local document gateway. The
+committed source files of the pinned Spectrum root and its XIV/XV layers with a
+finite-fixture observation, then releases the exact ZIP through the local document
+gateway. Committed files with an image suffix are recorded in its manifest by path,
+mode, Git blob, size and SHA-256 instead of packaged, and other root layers are named by
+path and commit only. The
 [recorded result](examples/spectrum_release/RESULT.md) includes exact source
 versions and commands for reproducing the experiment. The example checks denial
 before separate owner activation, exact target bytes and recovery without another
@@ -84,10 +87,10 @@ disposition, and the executor may commit only through the valid permit.
 
 ## OTCS authority boundary
 
-[OTCS](https://github.com/open-trust-commons/otcs-registry) is the separate
-registry project created by Chris Perkins. The NC25OL profile, bridge and
-reference examples in this package are contributions by Maksim Barziankou
-(MxBv); OTCS retains its own authorship and governance.
+[OTCS](https://github.com/open-trust-commons/otcs-registry) is a separate
+registry project. The NC25OL profile, bridge and reference examples in this
+package are contributions by Maksim Barziankou (MxBv); OTCS retains its own
+authorship and governance.
 
 The OTCS bridge is built inside this ledger. The active NC2.5 profile and
 declaration define the admissibility atmosphere, and this evaluator alone
@@ -161,7 +164,7 @@ The expected terminal result is `ACCEPTANCE_STEPS=8/8 PASS`, reported with
 `PACKAGE_CHECKS=61/61` and `EXTERNAL_SOURCE_CHECKS=NOT_RUN`: the NC2.5 core is a
 separate work and is not shipped here, so its five external-source checks do not
 run. Those five checks compare a core file against the file name, SHA-256, byte
-length, and line count recorded in `SOURCE-MANIFEST.json`; they do not read its
+length, and line count recorded in `SOURCE-MANIFEST.json`; they do not interpret its
 contents. The bound revision is not part of the public deposit under DOI
 10.17605/OSF.IO/NHTC5, which carries an earlier revision of the core, so the
 strict run is open to a holder of the bound file rather than to a reader of the
@@ -217,8 +220,8 @@ Each surface declares its vocabulary where that surface's reader looks, and the
 three places differ for a reason. The engine's codes are declared in the
 contract its consumer reads: `Error.code` in the OpenAPI document, checked
 against the live scan by a package check. That vocabulary is closed for what the
-wire delivers, and the wire refuses a body nested past the limit, or carrying an
-integer longer than the parser's digit limit, before it parses. Called
+wire delivers, and the wire refuses a body nested past the limit before it parses,
+and one carrying an integer longer than the parser's digit limit as it parses. Called
 in-process, the engine trusts the shape of what it is handed: a list nested past
 the limit in a resource claim, or an object whose own string conversion raises,
 can leave it as a raw exception. The bridge has no wire contract — it raises
@@ -239,12 +242,12 @@ To read the whole package as a single hash-bound file rather than by navigating
 the tree, build the review bundle:
 
 ```text
-py -3 -B tools/build_review_bundle.py --output <path outside the package>
+python -B tools/build_review_bundle.py --output <path outside the package>
 ```
 
 ## Start here
 
-1. Read `NC25OL Specification v0.0.docx`.
+1. Read `NC25OL Specification v01.09.docx`.
 2. Read `UNIVERSAL-CONNECTION-RUNBOOK.md`.
 3. Select or create a profile under `profiles/`.
 4. Complete a declaration using
@@ -592,7 +595,7 @@ value as `route_permit_hash` to `commit_execution`; mismatch fails with
 
 ## Resource-window boundary
 
-Committed usage is measured over the closed interval `[now - window_seconds, now]`. A debit timestamped exactly at the lower boundary still counts; it ages out only after the boundary has passed.
+Committed usage is the sum of every committed debit timestamped at or after `now - window_seconds`; the window has no upper cut. While the engine clock does not step backwards, that is the closed interval `[now - window_seconds, now]`. A debit timestamped exactly at the lower boundary still counts; it ages out only after the boundary has passed. If the clock steps backwards, a debit timestamped after the new `now` still counts, so the step can only add to the sum: it may refuse a request early, and it never admits one that the closed interval would refuse.
 
 ## Registry revocation semantics
 
@@ -650,3 +653,8 @@ can be read end to end without navigating the tree: it accepts only files bound
 by `PACKAGE-MANIFEST.json`, adds the manifest itself to the bundle, rejects
 stale hashes, and rejects output paths inside the package. Identical package
 bytes produce identical bundle bytes and SHA-256.
+
+## Note
+
+OTCS is Chris Perkins's project. The bridge to it, the NC25OL profile and the
+reference examples in this package were made by Maksim Barziankou (MxBv).

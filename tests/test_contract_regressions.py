@@ -3479,6 +3479,21 @@ class ContractRegressions(unittest.TestCase):
             )
             self.assertEqual(engine.ledger.head()["event_count"], before)
 
+        with self.subTest(claim="a re-issue differing only in the case of a declared hash is a replay"):
+            engine, _intent, grant = fixture.engine()
+            before = engine.ledger.head()["event_count"]
+            recased = copy.deepcopy(grant)
+            for key in ("profile_hash", "declaration_hash"):
+                recased["binding"][key] = recased["binding"][key].lower()
+            # The sample must differ from the grant, or this case would only
+            # repeat the identical re-issue above.
+            self.assertNotEqual(sha256_hex(recased), sha256_hex(grant))
+            self.assertEqual(
+                engine.issue_grant(recased, actor_scope=ROLE_GOVERNANCE),
+                sha256_hex(grant),
+            )
+            self.assertEqual(engine.ledger.head()["event_count"], before)
+
         # Each sample violates one public authority condition. Equality to the
         # specific code witnesses the engine refusal, not only its HTTP copy.
         grant_cases = (
