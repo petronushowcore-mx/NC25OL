@@ -44,7 +44,7 @@ def _package_version() -> str:
 
 SPEC_VERSION = _package_version()
 SPEC_VERSION_MAJOR_MINOR = ".".join(SPEC_VERSION.split(".")[:2])
-SPEC_DATE_TEXT = "17 October 2026"
+SPEC_DATE_TEXT = "18 October 2026"
 
 CONFORMANCE_CHECK_COUNT = literal_collection_size(ROOT / "tests" / "test_contract_conformance.py", "EXPECTED_CONFORMANCE_IDS")
 # The two sets are counted apart, because the acceptance report names them

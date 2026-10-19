@@ -88,7 +88,7 @@ producer ran the code.
 
 ## Run
 
-Use Python 3.11 or 3.12 with Ledger's pinned dependencies installed. Supply a
+Use Python 3.11, 3.12 or 3.14 with Ledger's pinned dependencies installed. Supply a
 clean Spectrum checkout with both layers at the root's gitlinks and an explicitly
 chosen full root commit. Its working bytes must equal committed bytes, including
 line endings. A checkout whose Git filters transform bytes is refused; use a

@@ -16,6 +16,17 @@ sys.path.insert(0, str(ROOT / "tools"))
 import failure_surface  # noqa: E402
 sys.path.pop(0)
 
+# A virtual environment made in the package root (`python -m venv .venv`) is not part of
+# the package. Every walk of the package root below leaves these out, at the root only, as
+# tools/build_package_manifest.py does; the regression suite plants both and asserts the
+# verifier and the builder agree.
+ENVIRONMENT_DIRECTORIES = frozenset({".venv", "venv"})
+
+
+def in_environment_directory(relative: Path) -> bool:
+    """Is this package-relative path inside a root-level virtual environment?"""
+    return len(relative.parts) > 1 and relative.parts[0] in ENVIRONMENT_DIRECTORIES
+
 
 EXPECTED_PROFILE_HASH = (
     "D0467762926BF45A856431BF8038044852681456D1FBBAEEEBC80A4EC1674C6F"
@@ -68,13 +79,13 @@ ALL_PACKAGE_CHECK_IDS = STANDALONE_PACKAGE_CHECK_IDS | EXTERNAL_SOURCE_CHECK_IDS
 class Checks:
     """Every declared check reports exactly one verdict, whatever else fails.
 
-    `require` used to raise on the first failure, which meant one failing check
-    took every later check with it: a single stray `.pyc` from an ordinary test
-    run silenced the rest and reddened under a name unrelated to the work in
-    hand. Moving that one scan to the end fixed that one plant and left the
-    class open, because any other unlisted file did the same thing.
+    `require` does not raise on the first failure: raising would let one failing
+    check take every later check with it, so a single stray `.pyc` from an
+    ordinary test run would silence the rest and redden under a name unrelated
+    to the work in hand. Moving one scan to the end would fix one plant and
+    leave the class open, because any other unlisted file does the same thing.
 
-    The property this class now holds is the one that can be held: not "no check
+    The property this class holds is the one that can be held: not "no check
     silences another" - a check whose precondition an earlier failure destroyed
     has nothing true to say - but "no check is ever missing from the record".
     A check that cannot run reports BLOCKED and names what blocked it, so the
@@ -193,9 +204,9 @@ def resolve_source_root() -> tuple[Path | None, str]:
 
     Resolved once, from the environment and the tree, and used both to run the
     checks and to decide which ids a crashed run must still account for.
-    Inferring the mode from which checks happened to speak - the earlier form -
-    silently narrowed the declared set whenever a crash landed before the
-    external checks, which is the one case the verdict invariant exists for.
+    Inferring the mode from which checks happened to speak would silently narrow
+    the declared set whenever a crash lands before the external checks, which is
+    the one case the verdict invariant exists for.
     """
     configured_root = os.environ.get("NC25_SOURCES_ROOT")
     if configured_root:
@@ -297,13 +308,11 @@ def docx_acceptance_count_mismatches(document_paragraphs: list[str]) -> list[str
         # summed figure would certify a suite shape that no longer exists.
         "otcs_bridge": (
             # The whole generated sentence, because the match is a fullmatch:
-            # a truncated pattern cannot match the paragraph at all, so from
-            # the commit that introduced this clause - the same commit that
-            # introduced the sentence, already in its long form - it reported
-            # `matches=0` and never once compared the count it exists to
-            # compare: it was born unable to match. Its red read as a stale
-            # document, which is the most expensive way for a check to fail -
-            # it named a real defect elsewhere and hid its own behind it.
+            # a truncated pattern cannot match the paragraph at all, and would
+            # report `matches=0` without ever comparing the count it exists to
+            # compare. Its red would read as a stale document, which is the most
+            # expensive way for a check to fail - it names a defect elsewhere
+            # and hides its own behind it.
             r"(\d+) tests over the permit-gated append seam, including every"
             r" declared refusal code of its own vocabulary",
             counts.test_method_count(
@@ -512,6 +521,67 @@ def package_version_mismatches(sections: dict[str, list[str]]) -> list[str]:
         ]
         if stale:
             problems.append(f"{name} stale spec mentions: {stale}")
+    problems.extend(spectrum_pair_mismatches(package_version))
+    return problems
+
+
+def spectrum_pair_mismatches(package_version: str) -> list[str]:
+    """The Spectrum release this version pairs with, as every carrier in the package states it.
+
+    The pairing rule (CHANGELOG, `LL.MM.PP`) gives the release from the version; the recorded
+    source release in examples/spectrum_release must be a run on exactly that release. Three
+    carriers state one fact: the pairing line of the current CHANGELOG section, the RESULT.md
+    prose, table and reproduction commands, and result.json. When the version moves, RESULT.md
+    can stay on the previous pair while the other carriers move; this compares them. The commit
+    is read from RESULT.md, never written here."""
+    problems: list[str] = []
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    section = re.search(
+        rf"(?ms)^## {re.escape(package_version)}\n(.*?)(?=^## |\Z)", changelog
+    )
+    if section is None:
+        return [f"changelog has no section {package_version}"]
+    tags = re.findall(r"Paired with Spectrum `(v\d{2}\.\d{2}\.\d{2})`", section.group(1))
+    if len(tags) != 1:
+        return [f"changelog {package_version}: Spectrum pairing lines={len(tags)}"]
+    tag = tags[0]
+    if tag.split(".")[1:] != package_version.split(".")[1:]:
+        problems.append(f"pairing rule: {package_version} is not paired with {tag}")
+    result_md = (ROOT / "examples" / "spectrum_release" / "RESULT.md").read_text(
+        encoding="utf-8"
+    )
+    prose = re.findall(r"Tectonica Spectrum release `(v\d{2}\.\d{2}\.\d{2})`", result_md)
+    if prose != [tag]:
+        problems.append(f"RESULT.md prose names {prose}, CHANGELOG pairs {tag}")
+    rows = re.findall(
+        r"(?m)^\| \[Spectrum\]\([^)]*\), tag `(v\d{2}\.\d{2}\.\d{2})` \| `([0-9a-f]{40})` \|$",
+        result_md,
+    )
+    if len(rows) != 1:
+        problems.append(f"RESULT.md Spectrum rows={len(rows)}")
+        return problems
+    row_tag, commit = rows[0]
+    if row_tag != tag:
+        problems.append(f"RESULT.md table names {row_tag}, CHANGELOG pairs {tag}")
+    branches = re.findall(
+        r"--branch (v\d{2}\.\d{2}\.\d{2}) https://github\.com/petronushowcore-mx/TECTONICA\.git",
+        result_md,
+    )
+    if branches != [tag]:
+        problems.append(f"RESULT.md clones {branches}, CHANGELOG pairs {tag}")
+    revisions = re.findall(r"--spectrum-revision ([0-9a-f]{40})", result_md)
+    if revisions != [commit]:
+        problems.append(f"RESULT.md runs on {revisions}, its table names {commit}")
+    try:
+        result = json.loads(
+            (ROOT / "examples" / "spectrum_release" / "result.json").read_text(encoding="utf-8")
+        )
+        recorded = result["source"]["revisions"]["spectrum"]
+    except (ValueError, KeyError, TypeError) as exc:
+        problems.append(f"result.json Spectrum revision unreadable: {type(exc).__name__}")
+    else:
+        if recorded != commit:
+            problems.append(f"result.json ran on {recorded}, RESULT.md names {commit}")
     return problems
 
 
@@ -546,12 +616,10 @@ def acceptance_report_row_mismatches() -> list[str]:
         "Failure-surface ratchet": 1,
     }
     problems: list[str] = []
-    # The row labels belong to the report builder. Until this clause the
-    # verifier kept a second transcription of them and nothing held the two
-    # together, so a row could vanish from the checker without any red: that
-    # is precisely how the bridge row shipped unchecked for a day, and the
-    # omission was found by reading rather than by a failing test. Derive the
-    # builder's set and refuse a difference in either direction - a label
+    # The row labels belong to the report builder. A second transcription of
+    # them here would be held to nothing, so a row could vanish from the
+    # checker without any red. Derive the builder's set and refuse a
+    # difference in either direction - a label
     # asserted here but no longer emitted is as much a defect as one emitted
     # and no longer asserted.
     #
@@ -658,20 +726,16 @@ def acceptance_report_ratchet_figures_mismatches() -> list[str]:
     )
     # Every match, not the first. `report_row` a few lines up already refuses
     # a label that appears other than exactly once, and these two sentences
-    # were the pair that did not: a correct sentence left standing earlier in
-    # the file satisfies a search while the section a reader actually reaches
+    # are held the same way: a correct sentence left standing earlier in the
+    # file satisfies a search while the section a reader actually reaches
     # carries different numbers. A decoy is cheap; the refusal costs one line.
     matches = list(re.finditer(
         # `code[s]?` on every slot the writer agrees with `plural()`, which is
-        # five of them. Until this line the reader spelled a fixed `codes` in
-        # those five and accepted either form in one - and the one it accepted
-        # happened to be the only figure currently equal to one. Any other
-        # figure falling to one would have made the writer emit the singular
-        # and this reader answer "sentence missing": a false red on a truthful
-        # report. The bridge slot was the last exemption and is one no longer:
-        # an exemption maintained in two files is a rule with a hole in it, so
-        # every slot now reads the same way and the writer agrees all seven
-        # nouns with their counts.
+        # five of them. A fixed `codes` would answer "sentence missing" as soon
+        # as a figure falls to one and the writer emits the singular: a false
+        # red on a truthful report. No slot is exempt - an exemption maintained
+        # in two files is a rule with a hole in it - so every slot reads the
+        # same way and the writer agrees all seven nouns with their counts.
         r"(\d+) engine refusal code[s]? and (\d+) wire error code[s]? in the"
         r" closed world; raise and helper-emission points all=(\d+),"
         r" static=(\d+), dynamic=(\d+); (\d+) engine refusal code[s]?"
@@ -926,6 +990,7 @@ def _run_checks(
         if path.is_file()
         and path.relative_to(ROOT).as_posix() != "PACKAGE-MANIFEST.json"
         and path.relative_to(ROOT).parts[:1] != (repository_directory,)
+        and not in_environment_directory(path.relative_to(ROOT))
         and not (set(path.relative_to(ROOT).parts) & excluded_parts)
         and path.suffix.lower() not in excluded_suffixes
     }
@@ -1171,12 +1236,12 @@ def _run_checks(
 
         # Guarded by the verdicts themselves, not by having reached this line.
         # `require` records and returns - that is the property the class above
-        # exists to hold - so until this guard the line printed PASS after the
-        # very failures it claimed to summarise: a core present with the wrong
-        # bytes recorded FAIL core_sha256, FAIL core_bytes, FAIL core_lines,
-        # and then announced that the external-source checks passed. The
-        # acceptance runner reads this line as the evidence that the run was
-        # the release configuration, so the lie did not stay local.
+        # exists to hold - so a line printed on reaching it would say PASS after
+        # the very failures it claims to summarise: a core present with the wrong
+        # bytes records FAIL core_sha256, FAIL core_bytes, FAIL core_lines, and
+        # the line would then announce that the external-source checks passed.
+        # The acceptance runner reads this line as the evidence that the run was
+        # the release configuration, so such a lie would not stay local.
         external_verdict = (
             "PASS"
             if EXTERNAL_SOURCE_CHECK_IDS <= checks.passed_ids
@@ -1395,6 +1460,7 @@ def _run_checks(
         path.read_text(encoding="utf-8")
         for path in ROOT.rglob("*.md")
         if path.is_file() and path.name != "DOCX-AUDIT-PROJECTION.md"
+        and not in_environment_directory(path.relative_to(ROOT))
     )
     checks.require(
         re.search(r'\."|,"', markdown) is None,
@@ -1466,17 +1532,13 @@ def _run_checks(
         "acceptance_report_ratchet_figures_current",
     )
 
-    # Deliberately LAST, and the reason is the failure mode rather than the
-    # rule. Running a suite without -B leaves compiled copies beside the source;
-    # they must never travel with the package, because undeclared build output
-    # sits outside the exact PACKAGE-MANIFEST coverage set. This scan once stood
-    # first, and `require` then raised on the first failure, so one stray .pyc
-    # from the ordinary way of iterating on a test switched off every other
-    # check in this file and reported it under an unrelated name. `require` no
-    # longer raises - it records a verdict per check and `finish` reports them
-    # all - so that particular silencing cannot recur. The scan stays last for
-    # the reason that survives: nothing here depends on the tree being clean,
-    # so its failure is the one that costs no other check's coverage.
+    # Deliberately LAST. Running a suite without -B leaves compiled copies
+    # beside the source; they must never travel with the package, because
+    # undeclared build output sits outside the exact PACKAGE-MANIFEST coverage
+    # set. `require` records a verdict per check and `finish` reports them all,
+    # so one stray .pyc cannot switch off another check. The scan stays last
+    # because nothing here depends on the tree being clean, so its failure is
+    # the one that costs no other check's coverage.
     #
     # A nested repository directory is scanned too. The manifest excludes a
     # repository directory ONLY at the root, so files under one at depth are
@@ -1491,6 +1553,7 @@ def _run_checks(
         for path in ROOT.rglob("*")
         if path.is_file()
         and path.relative_to(ROOT).parts[:1] != (".git",)
+        and not in_environment_directory(path.relative_to(ROOT))
         and (
             path.suffix.lower() in {".pyc", ".pyo", ".bak", ".tmp", ".orig", ".rej"}
             or set(path.relative_to(ROOT).parts) & artefact_directories
@@ -1502,14 +1565,12 @@ def _run_checks(
 
 def main() -> None:
     checks = Checks()
-    # ONE resolution, passed to both consumers. The docstring on
-    # `resolve_source_root` has said "resolved once … and used both to run the
-    # checks and to decide which ids a crashed run must still account for"
-    # while the function was in fact called twice, independently: here for the
-    # declared-id set and again inside `_run_checks` for the run itself. One
-    # rule evaluated twice is not one resolution, and between the two calls the
-    # environment or the tree can move - which would make a crashed run account
-    # for a different set of ids than the run had been performing.
+    # ONE resolution, passed to both consumers, as the docstring on
+    # `resolve_source_root` says: "resolved once … and used both to run the
+    # checks and to decide which ids a crashed run must still account for".
+    # One rule evaluated twice is not one resolution: between two calls the
+    # environment or the tree can move, and a crashed run would then account
+    # for a different set of ids than the run was performing.
     source_root, source_mode = resolve_source_root()
     external = source_root is not None
     try:

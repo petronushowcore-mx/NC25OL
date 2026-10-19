@@ -93,8 +93,8 @@ class RaisingSetDict(dict):
 # nothing, both as `<label>:<n>` - is ONE entry per call site, and deleting either
 # raise changes neither the world nor the observed set. What witnesses the second
 # raise is not this equality but the by-name row whose exact text only it produces
-# (a sole claim with a malformed digest, `REBIND_MANIFEST_DIGEST:0`); the break that
-# removed it reddened exactly that row.
+# (a sole claim with a malformed digest, `REBIND_MANIFEST_DIGEST:0`); removing that
+# raise reddens exactly that row.
 # The owner a module-level raise is filed under. It is not a function name, and it cannot
 # collide with one: the generator's raises at import fire before any driver exists, so they
 # are read and named rather than left as lines the reader could not classify.
@@ -1031,7 +1031,7 @@ class ContractRegressions(unittest.TestCase):
                 ROOT,
                 pkg,
                 ignore=shutil.ignore_patterns(
-                    ".git", "__pycache__", "*.pyc", ".pytest_cache"
+                    ".git", "__pycache__", "*.pyc", ".pytest_cache", ".venv", "venv"
                 ),
             )
             manifest_path = pkg / "PACKAGE-MANIFEST.json"
@@ -1049,8 +1049,7 @@ class ContractRegressions(unittest.TestCase):
         Reads the verdict of each NAMED check rather than counting lines. A count
         cannot distinguish "nothing was silenced" from "one check was silenced
         and another fired for the first time", and it drifts for reasons that
-        have nothing to do with the property — which is how the first two
-        attempts at this test were both wrong in opposite directions.
+        have nothing to do with the property.
         """
         import subprocess
 
@@ -1077,7 +1076,7 @@ class ContractRegressions(unittest.TestCase):
     @staticmethod
     def _rebind_acceptance_report(package: Path) -> None:
         # A copy whose manifest was rebuilt after a change is a tree the
-        # shipped report was not generated for, and the verifier now refuses
+        # shipped report was not generated for, and the verifier refuses
         # that report by its bound digests. A test that wants the copy's
         # verifier fleet green must therefore re-bind the copy's report to
         # the copy's bytes - the same two digests the generator would write,
@@ -1100,19 +1099,21 @@ class ContractRegressions(unittest.TestCase):
         shutil.copytree(
             ROOT,
             destination,
+            # A local virtual environment in the checkout is not package content; copying
+            # it would only slow every copy and drag its files into the copy's manifest.
             ignore=shutil.ignore_patterns(
-                ".git", "__pycache__", "*.pyc", ".pytest_cache"
+                ".git", "__pycache__", "*.pyc", ".pytest_cache", ".venv", "venv"
             ),
         )
         return destination
 
     def test_every_declared_check_reports_its_own_verdict(self) -> None:
         # One failing check must cost exactly its own verdict. The package
-        # verifier evaluates 50+ checks; while a failure aborted the sequence,
-        # a single stray .pyc from an ordinary `python tests/...` run made every
-        # later check vanish and the run redden under a name unrelated to the
-        # developer's work. Moving that scan to the end fixed one plant and left
-        # the class open: any other unlisted file still silenced the rest.
+        # verifier evaluates 50+ checks; if a failure aborted the sequence, a
+        # single stray .pyc from an ordinary `python tests/...` run would make
+        # every later check vanish and the run redden under a name unrelated to
+        # the developer's work. Moving that scan to the end would close one plant
+        # and leave the class open: any other unlisted file would silence the rest.
         #
         # The property asserted here is the one that can actually be closed:
         # every declared check reports exactly one verdict, whatever fails. Not
@@ -1128,12 +1129,11 @@ class ContractRegressions(unittest.TestCase):
             # test that started from a stale copy would be measuring that
             # instead of the property.
             #
-            # An earlier version of this test tolerated pre-existing failures
-            # instead, to avoid that coupling. Measured, that was worse: with
-            # `require` restored to raising, one early failure blocks 47 checks,
-            # and a tolerated baseline absorbs all 47 - so the check went GREEN
-            # under the exact regression it exists to catch. The baseline must
-            # therefore be all-PASS, not merely recorded.
+            # Tolerating pre-existing failures instead, to avoid that coupling,
+            # is worse, measured: with `require` raising, one early failure
+            # blocks 47 checks, and a tolerated baseline absorbs all 47 - so the
+            # check would go GREEN under the exact regression it exists to catch.
+            # The baseline must therefore be all-PASS, not merely recorded.
             import subprocess
 
             build = subprocess.run(
@@ -1193,6 +1193,96 @@ class ContractRegressions(unittest.TestCase):
             )
             self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr[-2000:])
             self._rebind_acceptance_report(package)
+
+            # The pair with Spectrum (verify_package.spectrum_pair_mismatches): the version
+            # names the Spectrum release it pairs with, and the recorded source release must
+            # be a run on that release. When the version moves, RESULT.md can stay on the
+            # previous pair. The plants have the shape of that regression: the RESULT.md
+            # table left on the previous release, and a result.json from a run on another
+            # commit. Each must redden package_version_consistency and nothing else.
+            result_md_path = package / "examples" / "spectrum_release" / "RESULT.md"
+            result_json_path = package / "examples" / "spectrum_release" / "result.json"
+            result_md_bytes = result_md_path.read_bytes()
+            result_json_bytes = result_json_path.read_bytes()
+            row = re.search(rb"tag `(v\d{2}\.\d{2}\.)(\d{2})` \| `([0-9a-f]{40})`", result_md_bytes)
+            self.assertIsNotNone(row, "RESULT.md carries no Spectrum row")
+            stem, revision, commit = row.group(1), int(row.group(2)), row.group(3)
+            previous = stem + b"%02d" % (revision - 1 if revision > 0 else revision + 1)
+            other = bytes(reversed(commit))
+            for label, path, original, planted in (
+                ("RESULT.md table on the previous release", result_md_path, result_md_bytes,
+                 result_md_bytes.replace(b"tag `" + stem + row.group(2) + b"`", b"tag `" + previous + b"`", 1)),
+                ("result.json from a run on another commit", result_json_path, result_json_bytes,
+                 result_json_bytes.replace(commit, other, 1)),
+            ):
+                self.assertNotEqual(planted, original, label)
+                path.write_bytes(planted)
+                rebuilt = subprocess.run(
+                    [sys.executable, "-B", str(package / "tools" / "build_package_manifest.py")],
+                    cwd=package,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr[-2000:])
+                self._rebind_acceptance_report(package)
+                with self.subTest(pair=label):
+                    paired, pair_verdicts = self._package_verdicts(package)
+                    self.assertNotEqual(paired.returncode, 0, "a broken Spectrum pair must fail the run")
+                    self.assertEqual(set(pair_verdicts), set(declared))
+                    self.assertEqual(
+                        {name for name, kind in pair_verdicts.items() if kind != "PASS"},
+                        {"package_version_consistency"},
+                    )
+                path.write_bytes(original)
+            rebuilt = subprocess.run(
+                [sys.executable, "-B", str(package / "tools" / "build_package_manifest.py")],
+                cwd=package,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr[-2000:])
+            self._rebind_acceptance_report(package)
+
+            # A virtual environment made in the package root is not package content. On
+            # 01.09.01 `python -m venv .venv` in the package root failed no_build_artefacts and
+            # package_manifest_coverage, and the acceptance run stopped on
+            # BOUND_DOCUMENT_COUNT:3, because the builder took in the environment's .docx
+            # templates. Planted as such an environment is: its
+            # marker, bytecode in a cache directory, a document, and markdown that the
+            # punctuation scan would refuse. Both names, through the builder, the report
+            # binding and every verifier walk; an exclusion missing on either side is red.
+            for name in (".venv", "venv"):
+                site = package / name / "lib" / "site-packages" / "docx"
+                (site / "templates").mkdir(parents=True)
+                (site / "__pycache__").mkdir()
+                (package / name / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+                (site / "templates" / "default.docx").write_bytes(b"PK\x03\x04planted")
+                (site / "__pycache__" / "planted.cpython-312.pyc").write_bytes(b"\x00planted")
+                (site / "NOTES.md").write_text('A "quoted."\n', encoding="utf-8")
+                with self.subTest(environment=name):
+                    rebuilt = subprocess.run(
+                        [sys.executable, "-B", str(package / "tools" / "build_package_manifest.py")],
+                        cwd=package,
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr[-2000:])
+                    built = json.loads((package / "PACKAGE-MANIFEST.json").read_text(encoding="utf-8"))
+                    self.assertEqual(
+                        [entry["path"] for entry in built["files"]
+                         if entry["path"].split("/", 1)[0] == name],
+                        [],
+                        "the manifest took in a root-level virtual environment",
+                    )
+                    self._rebind_acceptance_report(package)
+                    result, verdicts = self._package_verdicts(package)
+                    self.assertEqual(
+                        {label for label, kind in verdicts.items() if kind != "PASS"},
+                        set(),
+                        "a root-level virtual environment reddened the package checks",
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+                shutil.rmtree(package / name)
 
             artefact = package / "tests" / "__pycache__"
             artefact.mkdir(parents=True, exist_ok=True)
@@ -1266,9 +1356,9 @@ class ContractRegressions(unittest.TestCase):
 
         def replace_architect_code(package: Path) -> None:
             # Targeted by ROLE, not by textual order: the emission site is the
-            # occurrence outside the ARCHITECT_DECISION_CODES declaration. An
-            # earlier version took the last occurrence, which rested on an
-            # incidental ordering fact of the file.
+            # occurrence outside the ARCHITECT_DECISION_CODES declaration. Taking
+            # the last occurrence would rest on an incidental ordering fact of
+            # the file.
             path = package / "sdk" / "python" / "nc25_universal_ledger.py"
             source = path.read_text(encoding="utf-8")
             literal = '"BINDING_MISMATCH"'
@@ -1356,10 +1446,10 @@ class ContractRegressions(unittest.TestCase):
             # raise to the engine and ONE witness for it inside an existing
             # semantic test - inside, so no test count moves - regenerates the
             # copy's baseline with that witness recorded, and only then
-            # neuters it. An earlier form neutered the shipped suite's single
-            # witness of INTENT_SCOPE_DIMENSION, which held only as long as no
-            # other suite witnessed that code; a second witness silenced the
-            # loss and the plant reported nothing - measured.
+            # neuters it. Neutering the shipped suite's single witness of
+            # INTENT_SCOPE_DIMENSION instead would hold only as long as no other
+            # suite witnesses that code; a second witness silences the loss and
+            # the plant reports nothing - measured.
             engine = package / "sdk" / "python" / "nc25_universal_ledger.py"
             with engine.open("a", encoding="utf-8") as handle:
                 handle.write(
@@ -1502,12 +1592,11 @@ class ContractRegressions(unittest.TestCase):
             path = package / "sdk" / "python" / "nc25_otcs_bridge.py"
             source = path.read_text(encoding="utf-8")
             # Anchored on where the set OPENS, not on whichever member happens
-            # to sit last before the brace. The earlier anchor named that last
-            # member, so adding one code to the exclusion list moved the brace
-            # away from it and the plant could no longer be planted. The count
-            # assertion is what made that legible: without it the replace
-            # would have been a no-op, the ratchet would have found nothing,
-            # and the row would still have failed - but on a missing marker,
+            # to sit last before the brace. An anchor on the last member moves
+            # whenever one code is added to the exclusion list, and the plant
+            # then lands nowhere. The count assertion makes that legible:
+            # without it the replace would be a no-op, the ratchet would find
+            # nothing, and the row would still fail - but on a missing marker,
             # which names the ratchet rather than the anchor that moved.
             anchor = "OTCS_INTERNAL_ONLY_CODES = frozenset(\n    {\n"
             self.assertEqual(source.count(anchor), 1)
@@ -1696,14 +1785,13 @@ class ContractRegressions(unittest.TestCase):
         fixture = self.fixture()
         engine, _intent, _grant = fixture.engine()
         app = wire.UniversalConnectionHttpAdapter(engine)
-        # Three universes since the bridge became a closed world of its own.
-        # This test says nothing about the bridge, so its universe is empty -
-        # but the argument is required, and passing two killed this case
-        # outright: it raised TypeError before reaching a single assertion,
-        # so the claim it guards went unchecked while the suite still listed
-        # it. The failure was loud and still went unheard, because the tool's
-        # own recorded run excludes this case by name - only a full acceptance
-        # run reaches it, and one had not been run green before the commit.
+        # Three universes, one per closed world: the engine, the wire and the
+        # bridge. This test says nothing about the bridge, so its universe is
+        # empty - but the argument is required, and a call with two raises
+        # TypeError before a single assertion, so the claim this case guards
+        # would go unchecked while the suite still lists it. The tool's own
+        # recorded run excludes this case by name; only a full acceptance run
+        # reaches it.
         observation = failure_surface._Observation(
             {"PERMIT_UNKNOWN"}, set(), set()
         )
@@ -1903,10 +1991,11 @@ class ContractRegressions(unittest.TestCase):
     def test_profile_validator_refuses_each_code_by_name(self) -> None:
         # The class sweep over validate_profile: one row per refusal code the
         # function owns, each asserting THAT code and not merely "refused".
-        # Validation runs top to bottom, so every row was measured before it
-        # was written - a corruption caught by an earlier guard would pin the
-        # wrong fact and look green doing it. Routed through the validator
-        # directly: it runs first in the constructor, before any state exists.
+        # Validation runs top to bottom, so each row's corruption must reach
+        # the code the row names: one caught by an earlier guard would pin
+        # that guard's fact instead, and look green doing it. Routed through
+        # the validator directly: it runs first in the constructor, before
+        # any state exists.
         #
         # Identifier-list helper refusals are exercised below as well. Shared
         # core-anchor, timestamp and secret checks have separate tests.
@@ -2075,11 +2164,10 @@ class ContractRegressions(unittest.TestCase):
         validate_declaration(fixture.declaration, fixture.profile)
 
     def test_intent_validator_refuses_each_code_by_name(self) -> None:
-        # The intent's own shape guards, swept by code. This is the second
-        # half of the manual-review finding: a resolver row proves the control
-        # SURFACE is overridden, but MANUAL_REVIEW_FLAGS itself is raised only
-        # here, on an intent whose flag set disagrees with the profile's, and
-        # no row anywhere asserted it. Its siblings had the same gap.
+        # The intent's own shape guards, swept by code. A resolver row proves the
+        # control SURFACE is overridden, but MANUAL_REVIEW_FLAGS itself is raised
+        # only here, on an intent whose flag set disagrees with the profile's, so
+        # this sweep asserts it and each of its siblings by name.
         fixture = self.fixture()
         engine, intent, _grant = fixture.engine()
         rows = (
@@ -2132,12 +2220,12 @@ class ContractRegressions(unittest.TestCase):
     def test_request_identity_normalises_declared_hashes_only(self) -> None:
         # The identity of a request is what the idempotency guard compares, so
         # what it includes decides who may replay whose result. Normalising by
-        # SHAPE - any 64-hex string, whatever field it sat in - made identity
-        # blind to the case of opaque identifiers, and two measured harms
-        # followed: one logical payment could be authorised and executed TWICE
-        # under one identity with two stored entries, and two different
-        # principals sharing one key replayed each other's permit past the
-        # authority check. Narrowing to the DECLARED fields closes both while
+        # SHAPE - any 64-hex string, whatever field it sits in - would make
+        # identity blind to the case of opaque identifiers, with two measured
+        # harms: one logical payment authorised and executed TWICE under one
+        # identity with two stored entries, and two different principals
+        # sharing one key replaying each other's permit past the authority
+        # check. Narrowing to the DECLARED fields closes both while
         # keeping the published rule "a hash is accepted in either case".
         fixture = self.fixture()
 
@@ -2187,9 +2275,9 @@ class ContractRegressions(unittest.TestCase):
             lowered = copy.deepcopy(intent)
             # The NESTED binding hashes, and each one is asserted to actually
             # change when lowered. The fixture's top-level hashes are runs of
-            # digits, which have no case at all: lowering them changed nothing,
-            # so this row was green with normalisation removed entirely -
-            # a sample outside the class it claims to test.
+            # digits, which have no case at all: lowering them changes nothing,
+            # so a row built on them stays green with normalisation removed
+            # entirely - a sample outside the class it claims to test.
             for field in ("profile_hash", "declaration_hash"):
                 value = lowered["binding"][field]
                 self.assertNotEqual(
@@ -2402,7 +2490,7 @@ class ContractRegressions(unittest.TestCase):
             # and answers 200. Encoding a character and then dropping another
             # one builds a 63-character selector, which the shape check refuses
             # on its own - the row would pass with the double decode restored
-            # and certify nothing. Measured: an earlier form of this row did.
+            # and certify nothing, measured.
             encoded_first = f"%{ord(permit_hash[0]):02X}"
             status, body = call(
                 "GET",
@@ -2760,8 +2848,8 @@ class ContractRegressions(unittest.TestCase):
             ):
                 # "invalid utf-8 text" is stored through a CAST, because a bytes parameter
                 # binds as a BLOB: only the CAST produces a TEXT column the driver cannot
-                # decode, which is the form that used to fail inside the driver at the
-                # fetch - before this guard, and outside the vocabulary altogether.
+                # decode, which is the form that fails inside the driver at the fetch -
+                # outside the vocabulary altogether - unless the store decodes text itself.
                 for form in ("non-ASCII text", "bytes", "invalid utf-8 text"):
                     path = Path(temporary) / f"{column}-{form.replace(' ', '-')}.sqlite"
                     stored, stored_declaration, _grant, stored_intent = bound_objects()
@@ -2934,8 +3022,8 @@ class ContractRegressions(unittest.TestCase):
                 # sitting in the same table.
                 self.assertEqual(head(keyless), head(empty))
 
-            # Control, two halves, each with its own claim - stated separately because an
-            # earlier version credited the first with what only the second does. A store
+            # Control, two halves, each with its own claim - stated separately because the
+            # first does not do what only the second does. A store
             # raising IntegrityViolation unconditionally would satisfy "some refusal was
             # seen", since IntegrityViolation IS a ContractViolation; what it cannot do is
             # answer two different hostile inputs with two different codes, or read an
@@ -2958,14 +3046,11 @@ class ContractRegressions(unittest.TestCase):
             # code", while this says the SWEEP - every stored column against every hostile
             # form on both surfaces, which its own loops bound at len(state_columns) x
             # len(stored_forms) x 2 - actually arrived at both guards. The bound is written
-            # as those loops rather than as a figure: the figure that stood here was 5132,
-            # taken from a probe of mine that printed the WHOLE test's running case counter
-            # at this point. The replacement said "the sweep's own share of it is fifty",
-            # which is the same mistake one size smaller: `state_columns` is READ from the
-            # stored row and asserted `>= 5`, an inequality on purpose, so the product is
-            # fifty only while that table has exactly five columns and is sixty the day a
-            # sixth is added - with the assertion still green and the sentence still
-            # saying fifty. The bound is a product of a runtime read, and that is all a
+            # as those loops rather than as a figure: `state_columns` is READ from the
+            # stored row and asserted `>= 5`, an inequality on purpose, so any figure here
+            # holds only while that table has exactly the columns it has today, and stays
+            # in the sentence, unchanged, the day a column is added - with the assertion
+            # still green. The bound is a product of a runtime read, and that is all a
             # comment can truthfully say about it.
             # A sweep whose construction went wrong could
             # leave every pinned row green and measure nothing, and that is the only thing
@@ -3035,13 +3120,13 @@ class ContractRegressions(unittest.TestCase):
                             state_path=path,
                         ).ledger_head(ROLE_ARCHITECT)
 
-            # The five columns and no KEY, which the names alone did not ask for. A create
+            # The five columns and no KEY, which the names alone do not ask for. A create
             # does nothing when a table of the name is already there and retrofits no
-            # constraint, so such a table passed the column guard and was written into -
-            # and this store's key is the table itself, being WITHOUT ROWID. Measured on
-            # the outbox, the same question one module over: without its key two rows
-            # sharing the identifiers lived in the table and the reader answered with
-            # whichever came first.
+            # constraint, so such a table passes the column names, and without the key
+            # check it would be written into - and this store's key is the table itself,
+            # being WITHOUT ROWID. Measured on the outbox, the same question one module
+            # over: without its key two rows sharing the identifiers live in the table and
+            # the reader answers with whichever comes first.
             keyless = Path(temporary) / "without-key.sqlite"
             with closing(sqlite3.connect(keyless)) as connection:
                 connection.execute(
@@ -3061,9 +3146,9 @@ class ContractRegressions(unittest.TestCase):
             # The table gone entirely, which is a third fact under the same code. The store
             # opens a connection per operation - `read` and `begin_immediate` both do - so a
             # database deleted between calls is recreated empty by the driver and its table
-            # is simply not there. `PRAGMA table_xinfo` answers that with no rows, which used
-            # to read as every declared column missing: a detail describing a malformed
-            # table where there was none.
+            # is simply not there. `PRAGMA table_xinfo` answers that with no rows, which a
+            # reader of the column list alone takes for every declared column missing: a
+            # detail describing a malformed table where there is none.
             vanishing_path = Path(temporary) / "vanishing.sqlite"
             shutil.copyfile(pristine_path, vanishing_path)
             vanished_reader = UniversalConnectionLedger(
@@ -3112,8 +3197,8 @@ class ContractRegressions(unittest.TestCase):
             # rather than escaping as a driver error. Two forms, because the driver
             # distinguishes them and the refusal must not collapse them into one word.
             #
-            # Which statement refuses each was measured rather than assumed, and it is not
-            # the one the shape suggests: the foreign bytes raise at `PRAGMA
+            # Which statement refuses each is not the one the shape suggests: the foreign
+            # bytes raise at `PRAGMA
             # schema_version`, the corrupt schema page at `PRAGMA synchronous=FULL`, both
             # inside the four-statement prologue of `_connect`. Neither reaches the guard
             # on the create, which on this store is shadowed by that prologue and says so
@@ -3292,24 +3377,22 @@ class ContractRegressions(unittest.TestCase):
                 ("bytes", b"x" * 64),
                 ("list", []),
                 # The third exit verify() names in its docstring - a value that
-                # cannot be canonicalised at all - was claimed to be covered here
-                # and was not: none of the forms above can reach it. A non-finite
-                # number can, wherever the field is one canonical_json walks.
+                # cannot be canonicalised at all - is one none of the forms above can
+                # reach. A non-finite number can, wherever the field is one
+                # canonical_json walks.
                 ("non-finite number", float("nan")),
-                # A mapping whose KEY is not text - the third exit the verifier's
-                # docstring names, and the one this list did not have while that
-                # sentence said it did. `canonical_json` re-raises a
+                # A mapping whose KEY is not text - a second form of that exit, which
+                # the verifier's docstring names. `canonical_json` re-raises a
                 # ContractViolation untouched, so what leaves is the walk's own
                 # JSON_OBJECT_KEY_TYPE rather than CANONICAL_JSON_INVALID; in a
                 # field that is not walked it is simply a non-string, like the
                 # forms above.
                 ("mapping with a non-text key", {1: "x"}),
-                # Deeper than the deep copy verify() used to take of every body
-                # field before walking it. That copy ran ahead of the guard, so
-                # this form left as a bare RecursionError - measured, through
-                # verify() and through the public read - while the walk refuses a
-                # structure past MAX_NESTING_DEPTH by its own code. The list held
-                # `[]` and nothing deeper, so nothing in it could reach that band.
+                # Deeper than the recursion limit: a deep copy of a body field taken
+                # before the walk would raise a bare RecursionError ahead of the
+                # guard - through verify() and through the public read - while the
+                # walk refuses a structure past MAX_NESTING_DEPTH by its own code.
+                # The forms above stop at `[]`, which cannot reach that band.
                 ("structure past the recursion limit", _nested_list(600)),
             ):
                 engine, _intent, _grant = base_fixture.engine()
@@ -3378,11 +3461,11 @@ class ContractRegressions(unittest.TestCase):
         self,
     ) -> None:
         # Repeat semantics on the authority surface, pinned on the engine.
-        # A repeated revocation used to append a second AUTHORITY_REVOKED
-        # event on every retry and, through the release it triggers, rewrite
-        # the reason a permit had already been invalidated for. A grant whose
-        # window had already closed was accepted at issue and entered the
-        # chain as an authority that was never live.
+        # A repeated revocation is idempotent: a second AUTHORITY_REVOKED event
+        # on every retry would, through the release it triggers, rewrite the
+        # reason a permit had already been invalidated for. A grant whose
+        # window has already closed is refused at issue, because accepting it
+        # would enter the chain as an authority that was never live.
         fixture = self.fixture()
 
         def revocation(engine, grant, revoked_at="2026-08-01T10:00:01Z"):
@@ -3592,11 +3675,11 @@ class ContractRegressions(unittest.TestCase):
                     issued["grant_hash"])
 
     def test_permit_ttl_seconds_is_the_effective_lifetime(self) -> None:
-        # The sealed ttl_seconds used to be the CONFIGURED nominal even when
-        # expires_at was capped by the grant or the declaration, so a reader
-        # of one signed permit computing issued_at + ttl_seconds could land
-        # three hundred seconds past the real expiry. It is now the effective
-        # lifetime: issued_at + ttl_seconds == expires_at, to the second.
+        # The sealed ttl_seconds is the EFFECTIVE lifetime, not the configured
+        # nominal: when expires_at is capped by the grant or the declaration, a
+        # nominal ttl would let a reader of one signed permit computing
+        # issued_at + ttl_seconds land three hundred seconds past the real
+        # expiry. Pinned: issued_at + ttl_seconds == expires_at, to the second.
         fixture = self.fixture()
 
         def issued(grant_valid_until: str | None = None):
@@ -3758,11 +3841,11 @@ class ContractRegressions(unittest.TestCase):
     def test_wrong_typed_values_refuse_with_their_declared_code(self) -> None:
         # A CLASS sweep, not two tests for two fixes. The package's central
         # claim is that every refusal is a code from a published vocabulary,
-        # and a value of the wrong TYPE used to leave that vocabulary
-        # altogether: `.replace` on a non-string timestamp raised
-        # AttributeError, and testing an unhashable value for set membership
-        # raised TypeError. Both reached the caller as a bare Python exception
-        # carrying no code at all - over the wire, as an unhandled fault.
+        # and a value of the wrong TYPE is where that vocabulary is easiest to
+        # leave: `.replace` on a non-string timestamp raises AttributeError,
+        # and testing an unhashable value for set membership raises TypeError.
+        # Unguarded, both reach the caller as a bare Python exception carrying
+        # no code at all - over the wire, as an unhandled fault.
         #
         # Rows are split by how the value arrives. The two validators run
         # before anything is built, so they are reachable by construction and
@@ -4042,11 +4125,11 @@ class ContractRegressions(unittest.TestCase):
         # Each row gets its OWN engine and permit: if a break lets one row's
         # commit succeed, a shared permit would be consumed and the next row
         # would answer EXECUTION_REPLAY_CONFLICT - a red that certifies the
-        # wrong fact. Measured: that is exactly what a shared engine did.
+        # wrong fact, which is what a shared engine answers.
         # Each bound is pinned from BOTH sides - one second inside the
         # tolerance is accepted, one second outside is refused - because a
         # row an hour away stays green when the tolerance widens from five
-        # seconds to an hour, and that mutation was measured green here.
+        # seconds to an hour.
         # The last two rows advance the clock after the permit is issued:
         # a commit at 10:00:10 is accepted only if the lower bound is anchored
         # to the permit's issued_at, and refused if it is anchored to `now`
@@ -5089,15 +5172,15 @@ class ContractRegressions(unittest.TestCase):
                 "total": len(GATE_ROWS),
             },
             # The step list is DERIVED from the gate rows rather than written
-            # out again. It was written out, and an added step broke this
-            # fixture rather than the thing the fixture guards - a second
-            # writer of one list, found the moment the eighth step arrived.
+            # out again: a list written out twice is a second writer of one
+            # list, and an added step would break this fixture rather than the
+            # thing the fixture guards.
             #
             # Deliberately impossible figures, and that property survives the
             # derivation. What this fixture tests is that the generator carries
             # ITS INPUT into the report, so the numbers must not be mistakable
-            # for live counts: an earlier edition read as a stale copy of real
-            # figures and invited exactly that misreading. The ids pinned above
+            # for live counts: plausible figures read as a stale copy of real
+            # ones and invite exactly that misreading. The ids pinned above
             # are the exceptions, each for the reason given there.
             "steps": [
                 {
@@ -5330,9 +5413,9 @@ class ContractRegressions(unittest.TestCase):
     def test_every_rendered_count_takes_its_noun_through_plural(self) -> None:
         """No count in the generator's text is printed beside a noun frozen in the plural.
 
-        The helper's docstring lists the nouns that bypass it, and that list was read against
-        the code by hand, round after round, and was wrong the last time: the core section's
-        `bytes` and `lines` were frozen and unlisted. This is the reading made mechanical.
+        The helper's docstring lists the nouns that bypass it, and a list read against the code
+        by hand can miss a frozen noun, as the plant below does with `bytes` and `lines`. This
+        makes the reading mechanical.
         The plants are the control in both directions - a frozen noun is named, and a noun
         through the helper, a function word and a `key=` label are not - so an empty answer
         on the generator is the scan finding nothing, not the scan seeing nothing.
@@ -5513,12 +5596,10 @@ class ContractRegressions(unittest.TestCase):
         # code a row declares, and it is held to the closed world that
         # generator_refusal_sites reads from the generator's source.
         #
-        # Not covered here, by name: none. And the list of what stays outside has shrunk
-        # to one, because two of its three entries were closed rather than conceded -
-        # this comment went on naming them for a round after they were. The indexed reads
-        # of the failure-surface baseline are `.get` calls now, so an absent key refuses
+        # Not covered here, by name: none. The indexed reads
+        # of the failure-surface baseline are `.get` calls, so an absent key refuses
         # as FAILURE_SURFACE_* like a malformed one; a file that is missing, unreadable,
-        # not UTF-8, not JSON or nested past the parser's limit is named by
+        # not UTF-8, not JSON or nested past the reader's depth bound is named by
         # EVIDENCE_FILE_UNREADABLE or EVIDENCE_JSON_INVALID, and rows below drive all
         # five shapes; the report itself, read by both halves, is named by
         # REPORT_UNREADABLE and driven absent and not UTF-8 through each. What remains
@@ -5527,9 +5608,7 @@ class ContractRegressions(unittest.TestCase):
         # a locked destination, a full disk - which keeps its OSError on purpose: the
         # vocabulary names inputs that are malformed, and an environment that will not
         # take the output is not an input. The residue case drives that failure and
-        # asserts the OSError. A conceded exclusion that keeps producing findings was a
-        # gap, not a boundary; this list said "only bound_bytes" while the report was
-        # read bare in two places.
+        # asserts the OSError.
         module = sys.modules[update_report.__module__]
         source_path = Path(inspect.getsourcefile(module)).resolve()
         sites, unclassified = generator_refusal_sites(source_path.read_text(encoding="utf-8"))
@@ -5592,7 +5671,7 @@ class ContractRegressions(unittest.TestCase):
                     # Bytes, not text: the third escape, for evidence whose problem is
                     # below the level of characters. `_raw` writes a string and cannot
                     # express a file that is not UTF-8 at all, which is one of the two
-                    # shapes that used to walk out of the reader unnamed.
+                    # shapes the reader must name rather than let out raw.
                     path.write_bytes(operations)
                     continue
                 if target == f"{label}_absent":
@@ -5658,20 +5737,18 @@ class ContractRegressions(unittest.TestCase):
                 raised = exc
             # Two claims, returned apart because they do not apply to the same rows. "The
             # report is unchanged" is a claim about a REFUSAL; a successful run is supposed
-            # to change it. "No temporary remains" holds on EVERY path, and while the two
-            # travelled as one predicate the second went wherever the first could not be
-            # asserted - so on the control rows, the only rows where the generator actually
-            # succeeds, nothing looked at the temporary at all.
-            # Returned apart in the values as well as in the prose. The first form of this
-            # kept the conjunction in the second value while adding the third - and since
-            # `no_temporary` is asserted FIRST at every row, the conjunction was thereafter
-            # equal to `unchanged` and the half of its message about a temporary file could
+            # to change it. "No temporary remains" holds on EVERY path; as one predicate
+            # with the first, the second would go wherever the first cannot be asserted -
+            # so on the control rows, the only rows where the generator actually succeeds,
+            # nothing would look at the temporary at all.
+            # Returned apart in the values as well as in the prose: `no_temporary` is
+            # asserted FIRST at every row, so a conjunction kept in the second value would
+            # equal `unchanged`, and the half of its message about a temporary file could
             # never be the reason it fired. A message advertising a cause it cannot have is
             # the same defect one layer up.
-            # Every `.tmp` beside the report, not the one name. The writer's temporary was
-            # `<report>.tmp` and this checked that name; the writer now takes a name of its
-            # own per call, and a check of the old name would have gone on passing while
-            # measuring nothing - the predicate has to follow the class, not the spelling.
+            # Every `.tmp` beside the report, not one name: the writer takes a name of its
+            # own per call, and a check of a fixed name would pass while measuring nothing -
+            # the predicate has to follow the class, not the spelling.
             no_temporary = not list(report.parent.glob("*.tmp"))
             # For an absent report "unchanged" means still absent: a refusal must not
             # create the file it refused to read.
@@ -5748,19 +5825,17 @@ class ContractRegressions(unittest.TestCase):
             self.assertIsNone(
                 raised, "an invocation of another file was refused as this one")
             self.assertTrue(no_temporary, "a successful update left its temporary file")
-        # And the same across two lines. The widening that closed the one-line form
-        # replaced the `[^\n]*` that had been the line bound, and `\s` matches a newline,
-        # so a launcher on one line and the script path on the next matched as one
-        # invocation - measured. A control, not a refusal row, because these two lines are
-        # prose the report is allowed to carry.
+        # And the same across two lines. The pattern's line bound is the point: `\s`
+        # matches a newline, so a pattern without a bound reads a launcher on one line and
+        # the script path on the next as one invocation. A control, not a refusal row,
+        # because these two lines are prose the report is allowed to carry.
         with self.subTest(control="a launcher and a path on two lines are two sentences"):
             raised, _untouched, _report, no_temporary = drive(
                 "control-prose-two-lines", "update", "report",
-                # No punctuation after the launcher and none before the path: the first
-                # form of this control ended the line with `py.`, and the full stop
-                # blocked the match on its own, so the control passed for a reason that
-                # had nothing to do with the line bound - a fixture outside the class its
-                # own name claims. These two lines are the measured form.
+                # No punctuation after the launcher and none before the path: a full stop after
+                # `py` blocks the match on its own, so a control ending the line with `py.` would
+                # pass for a reason that has nothing to do with the line bound - a fixture outside
+                # the class its own name claims.
                 [("## Bound bytes",
                   "the Windows launcher is `py`\n"
                   "`tests/run_acceptance.py` is the script it would run\n\n## Bound bytes",
@@ -5778,9 +5853,8 @@ class ContractRegressions(unittest.TestCase):
             ("ACCEPTANCE_COMPLETED_UTC", "update", "acceptance", [(("completed_utc",), "set", "2030-02-03")]),
             ("ACCEPTANCE_COMPLETED_UTC", "update", "acceptance", [(("completed_utc",), "set", "٢٠٣٠-02-03T04:05:06Z")]),
             # The right shape, no such moment: month ninety-nine, day ninety-nine, hour
-            # twenty-five, minute and second sixty-one. It passed while the shape test was
-            # the whole check, and would have been printed as the report's verification
-            # date.
+            # twenty-five, minute and second sixty-one. A shape test alone passes it, and the
+            # report would print it as its verification date.
             ("ACCEPTANCE_COMPLETED_UTC", "update", "acceptance", [(("completed_utc",), "set", "2030-99-99T25:61:61Z")]),
             ("ACCEPTANCE_STEP_GATE", "update", "acceptance", [(("acceptance_steps",), "set", [])]),
             ("STEP_PASSED", "update", "acceptance", [(("acceptance_steps", "passed"), "set", -1)]),
@@ -5821,12 +5895,9 @@ class ContractRegressions(unittest.TestCase):
             ("GEOMETRY_PAGE_SIZE_ENTRY", "update", "geometry", [(geometry_sizes, "set", [[612.0]])]),
             ("GEOMETRY_PAGE_SIZE_ENTRY", "update", "geometry", [(geometry_sizes, "set", [[612.0, True]])]),
             # A width JSON admits and a C double does not. `math.isfinite` converts its
-            # argument, so this raised OverflowError out of the guard that names this very
-            # input. The conversion was KEPT and its overflow made the answer - a number
-            # that cannot be a double is not a finite double - which is what
-            # `_finite_double` says and does. This comment said the conversion had been
-            # removed: a description of a fix considered and not made, sitting beside the
-            # row whose value still takes that exact path.
+            # argument and raises OverflowError on this input; the conversion is kept and
+            # its overflow made the answer - a number that cannot be a double is not a
+            # finite double - which is what `_finite_double` says and does.
             ("GEOMETRY_PAGE_SIZE_ENTRY", "update", "geometry", [(geometry_sizes, "set", [[10 ** 309, 792.0]])]),
             ("GEOMETRY_PAGE_SIZE_ENTRY", "update", "geometry", [(geometry_sizes, "set", [[0, 792.0]])]),
             ("GEOMETRY_PAGE_SIZE_ENTRY", "update", "geometry", [(geometry_sizes, "set", [[float("nan"), 792.0]])]),
@@ -5840,33 +5911,33 @@ class ContractRegressions(unittest.TestCase):
             ("CORE_LINES", "update", "source_manifest", [(core_input + ("line_count",), "set", "14228")]),
             ("ACCEPTANCE_CORE_INPUT_SHAPE", "update", "source_manifest", [(core_input + ("file_name",), "set", 7)]),
             ("ACCEPTANCE_CORE_INPUT_SHAPE", "update", "source_manifest", [(core_input + ("sha256",), "set", "a" * 64)]),
-            # A NUMBER whose decimal form is sixty-four digits. The guard matched
-            # `str(core_sha)` against a hex pattern, so this value satisfied a test for a
-            # digest and would have been printed into the report as one - the check was
-            # run on text the check itself manufactured. The row
-            # drives the value and not the conversion, so it stays true however the guard
-            # is written.
+            # A NUMBER whose decimal form is sixty-four digits. Matched as `str(core_sha)`
+            # against a hex pattern, this value satisfies a test for a digest and would be
+            # printed into the report as one - a check run on text the check itself
+            # manufactures. The row drives the value and not the conversion, so it stays true
+            # however the guard is written.
             ("ACCEPTANCE_CORE_INPUT_SHAPE", "update", "source_manifest", [(core_input + ("sha256",), "set", 10 ** 63)]),
             # The manifest's version, which a shared helper re-reads and indexes bare further
-            # down: absent, it raised KeyError from inside that helper; a number, it raised
-            # AttributeError. Both drove the generator out of its vocabulary from a module
-            # the closed world does not read. And `inputs`, iterated: a number there raised
-            # TypeError from the loop.
+            # down: absent, it would raise KeyError from inside that helper, and a number
+            # AttributeError - both outside the generator's vocabulary, from a module the closed
+            # world does not read. And `inputs`, iterated: a number there would raise TypeError
+            # from the loop.
             ("SOURCE_MANIFEST_PACKAGE_VERSION", "update", "source_manifest", [(("package_version",), "delete", None)]),
             ("SOURCE_MANIFEST_PACKAGE_VERSION", "update", "source_manifest", [(("package_version",), "set", 3)]),
             ("SOURCE_MANIFEST_INPUTS", "update", "source_manifest", [(("inputs",), "set", 7)]),
-            # The core's NAME, which is a string and was asked nothing else, and which the
+            # The core's NAME, which is a string and is asked nothing else, and which the
             # generator puts into the report AFTER the command guard has read the template.
-            # Measured on a copy of the package: this value left the template clean, passed
-            # the guard, and stood in the report the run wrote, with the run reported as a
-            # success. The guard asks the final text now, which is what this row drives.
+            # Measured on a copy of the package: asked only of the template, this value
+            # leaves it clean, passes the guard, and stands in the report the run writes,
+            # with the run reported as a success. The guard asks the final text, which is
+            # what this row drives.
             ("REPORT_CANONICAL_COMMAND", "update", "source_manifest", [(core_input + ("file_name",), "set", "core.md`; py -3 tests/run_acceptance.py; `x")]),
             # A gate row nobody declares. Each declared row is rewritten exactly once,
-            # which says nothing about an extra one: measured, the written report carried
-            # nine rows under a terminal line reading `8/8`.
+            # which says nothing about an extra one: measured, without this refusal the
+            # written report carries nine rows under a terminal line reading `8/8`.
             ("REPORT_GATE_ROWS", "update", "report", [("| Package integrity checks |", "| Retired gate | `1/1 PASS` |\n| Package integrity checks |", 1)]),
-            # A code name written twice in the baseline. `len` counted entries, so the
-            # figure the report calls a count of codes was a count of lines.
+            # A code name written twice in the baseline. `len` counts entries, so without
+            # this refusal the figure the report calls a count of codes would be a count of lines.
             ("FAILURE_SURFACE_ENGINE_CODES", "update", "baseline", [(("engine_refusal_codes",), "set", ["X", "X"])]),
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("python -B tests/run_acceptance.py", "python tests/run_acceptance.py", 1)]),
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "py -3 tests/run_acceptance.py\n\n## Bound bytes", 1)]),
@@ -5875,43 +5946,40 @@ class ContractRegressions(unittest.TestCase):
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "py -B tests/run_acceptance.py\n\n## Bound bytes", 1)]),
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "py.exe -3 -B tests\\run_acceptance.py\n\n## Bound bytes", 1)]),
             # Upper case is the same invocation on Windows, where a command and a path are
-            # resolved without regard to case; before the pattern was matched that way this
-            # row passed the guard.
+            # resolved without regard to case, so the pattern is matched that way; a
+            # case-sensitive match lets this row pass the guard.
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "PY -3 -B TESTS\\run_acceptance.py\n\n## Bound bytes", 1)]),
-            # The launcher named by its path. The two exemptions used to be one character
-            # class that also held the separators, and this spelling then matched nothing.
+            # The launcher named by its path. One character class holding both exemptions
+            # and the separators would match nothing for this spelling.
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "C:\\Windows\\py.exe -3 -B tests\\run_acceptance.py\n\n## Bound bytes", 1)]),
             # The launcher's windowed twin, installed beside `py.exe` by the same installer
-            # and running the same script. A boundary written for `py` alone let both of its
-            # spellings past; these two rows are what stops that being found a sixth time.
+            # and running the same script. A boundary written for `py` alone lets both of its
+            # spellings past; these two rows pin both.
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "pyw -3 -B tests\\run_acceptance.py\n\n## Bound bytes", 1)]),
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "pyw.exe -3 -B tests\\run_acceptance.py\n\n## Bound bytes", 1)]),
-            # The same invocation with the path quoted. The class that keeps a quote out of
-            # the path's own characters was also keeping out the one it OPENS with, so both
-            # quote forms walked past - measured. A path of several directories was measured
-            # at the same time and did not walk past, so nothing was widened for it.
+            # The same invocation with the path quoted. A class that keeps a quote out of the
+            # path's own characters must still admit the one the path OPENS with, or both
+            # quote forms walk past - measured. A path of several directories, measured the
+            # same way, does not walk past, so nothing is widened for it.
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "py -3 -B \"tests/run_acceptance.py\"\n\n## Bound bytes", 1)]),
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "py -3 -B 'tests/run_acceptance.py'\n\n## Bound bytes", 1)]),
-            # A switch whose value is DETACHED. The switch group took a switch token and a
-            # value attached to it, so this spelling matched nothing and passed - under a
-            # comment claiming any launcher spelling is refused, not one form of it. It is
-            # the fifth spelling found one at a time, and it is pinned here so it is the
-            # last.
+            # A switch whose value is DETACHED. A switch group that takes a switch token
+            # only with its value attached matches nothing for this spelling and lets it
+            # pass; the pattern admits the detached form, and this row pins it.
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "py -3 -X utf8 tests/run_acceptance.py\n\n## Bound bytes", 1)]),
-            # The other switch that takes a detached value. Named because the pattern now
+            # The other switch that takes a detached value. Named because the pattern
             # allows a value after `-X` and `-W` only, and a row for one of the two leaves
             # the other's half of the alternation unwitnessed.
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "py -3 -W ignore tests/run_acceptance.py\n\n## Bound bytes", 1)]),
             # The end-of-options marker, which the launcher honours: measured, `py -3 --
-            # script.py` runs the script. It walked past while a switch needed a character
-            # after its dashes other than a dash; the hyphen in the switch's class is what
+            # script.py` runs the script. A switch that needs a character after its dashes
+            # other than a dash lets it walk past; the hyphen in the switch's class is what
             # lets the bare marker read as one, and the break for this row removes it.
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("## Bound bytes", "py -3 -- tests/run_acceptance.py\n\n## Bound bytes", 1)]),
-            # The canonical command was required by an unbounded substring test, so a line
-            # that CONTAINS it without being it satisfied the requirement - and the
-            # launcher pattern does not catch this one either, naming `py` and `pyw` rather
-            # than an arbitrary prefix. The report could then certify a command it did not
-            # carry.
+            # An unbounded substring test for the canonical command would let a line that
+            # CONTAINS it without being it satisfy the requirement - and the launcher
+            # pattern does not catch this one either, naming `py` and `pyw` rather than an
+            # arbitrary prefix. The report could then certify a command it does not carry.
             ("REPORT_CANONICAL_COMMAND", "update", "report", [("python -B tests/run_acceptance.py", "notpython -B tests/run_acceptance.py", 1)]),
             # A longer NAME, not a longer line. Both patterns were bounded on the left
             # only, so `run_acceptance.pyx` - a different file - satisfied the requirement
@@ -5940,32 +6008,38 @@ class ContractRegressions(unittest.TestCase):
             ("REPORT_BOUND_SECTION:2", "update", "report", [("## Bound bytes", "## Bound bytes\n\nearlier\n\n## Bound bytes", 1)]),
             ("FAILURE_SURFACE_BASELINE_RUNTIME", "update", "baseline", [(("runtime",), "set", [])]),
             # Reading evidence, and the two ways it fails before a shape is ever asked
-            # about. Both were raw before - `JSONDecodeError` and `FileNotFoundError` -
-            # while every neighbouring failure had a name; the suite's own comment conceded
-            # them as "outside that world", and a concession is disclosure, not closure.
+            # about: unnamed, they would leave as `JSONDecodeError` and `FileNotFoundError`
+            # while every neighbouring failure has a name.
             # Planted into the GEOMETRY evidence on purpose: acceptance is loaded first, so
             # a plant there would be answered before this site is reached and the row would
             # be measuring the order of two loads.
             ("EVIDENCE_JSON_INVALID: geometry.json", "update", "geometry_raw", "{"),
             ("EVIDENCE_FILE_UNREADABLE: geometry.json", "update", "geometry_absent", None),
-            # The same two codes by the two routes that used to escape them. Bytes that
-            # are not UTF-8 fail in `read_text`, before the parser is reached, as
-            # UnicodeDecodeError - a ValueError and not an OSError, so the read clause
-            # named only files that were missing or locked. Nesting past the interpreter's
-            # limit fails in the parser as RecursionError - a RuntimeError and not a
-            # ValueError, so the parse clause named only syntax. Both are properties of
-            # the evidence and both now answer in its vocabulary; the rows drive the
-            # shapes rather than the types, so they stay true if the clauses are rewritten.
+            # The same two codes by the two routes that escape a clause written for the obvious
+            # type. Bytes that are not UTF-8 fail in `read_text`, before the parser is reached, as
+            # UnicodeDecodeError - a ValueError and not an OSError, so a read clause for OSError
+            # names only files that are missing or locked. Nesting past the interpreter's limit
+            # fails in the parser as RecursionError - a RuntimeError and not a ValueError, so a
+            # parse clause for ValueError names only syntax. Both are properties of the evidence
+            # and both answer in its vocabulary; the rows drive the shapes rather than the types,
+            # so they stay true if the clauses are rewritten.
             ("EVIDENCE_FILE_UNREADABLE: geometry.json", "update", "geometry_bytes", b"\xff\xfe{}"),
-            # The report is an input to both halves as well as their output, and it was read
-            # bare in both. Absent and not UTF-8, through each half, since each has its own
-            # read of it.
+            # The report is an input to both halves as well as their output, and each half has its
+            # own read of it. Absent and not UTF-8, through each half.
             ("REPORT_UNREADABLE: report.md", "update", "report_absent", None),
             ("REPORT_UNREADABLE: report.md", "update", "report_bytes", b"\xff\xfe# report"),
             ("REPORT_UNREADABLE: ACCEPTANCE-REPORT.md", "rebind", "report_absent", None),
             ("REPORT_UNREADABLE: ACCEPTANCE-REPORT.md", "rebind", "report_bytes", b"\xff\xfe# report"),
             ("EVIDENCE_JSON_INVALID: geometry.json", "update", "geometry_raw",
              "[" * 50000 + "]" * 50000),
+            # The depth bound is the reader's own, so the answer does not depend on the
+            # interpreter (on the row above, 3.12's parser raises RecursionError and 3.14's
+            # returns a list). One level past the bound is refused before the parser; the bound
+            # itself still parses - a list here, which the object rule then refuses. Literal
+            # depths, not the constant: an expectation computed from it would move with its
+            # mutation.
+            ("EVIDENCE_JSON_INVALID: geometry.json", "update", "geometry_raw", "[" * 65 + "]" * 65),
+            ("EVIDENCE_JSON_OBJECT_REQUIRED", "update", "geometry_raw", "[" * 64 + "]" * 64),
             ("FAILURE_SURFACE_ALL", "update", "baseline", [(("emission_points_all",), "set", -1)]),
             # The eight figures were `len(...)` of whatever the key held, and `len` is true
             # of a string and of a mapping as well as of a list. A bare string
@@ -6003,13 +6077,12 @@ class ContractRegressions(unittest.TestCase):
             ("REBIND_MANIFEST_DIGEST:2", "rebind", "report", [("## Bound bytes", "every entry except this report, digest to `" + "a" * 64 + "`\n\n## Bound bytes", 1)]),
             # A SOLE claim whose digest is lowercase: the count sees one sentence and is
             # satisfied, and the substitution - which matches the well-formed digest -
-            # matches nothing. Before `count_pattern` existed this was refused `:0`;
-            # after it the function returned the text unchanged and the caller reported
-            # the new digests as written. The row pins the direction: the fix for a
-            # missed duplicate must not buy itself a silent no-op.
+            # matches nothing. Without the substitution count the function would return
+            # the text unchanged and the caller report the new digests as written; the row
+            # pins the refusal `:0`. Refusing a duplicate must not buy a silent no-op.
             ("REBIND_MANIFEST_DIGEST:0", "rebind", "report", [("every entry except this report, digest to `", "every entry except this report, digest to `" + "a" * 64 + "`x`", 1)]),
             ("REBIND_DOCUMENT_DIGEST:0", "rebind", "report", [("the geometry below describes has SHA-256 `", "the geometry below describe has SHA-256 `", 1)]),
-            # Unchecked, this value went into the report through the substitution
+            # Unchecked, this value would go into the report through the substitution
             # template, its backslash read as a template escape.
             ("REBIND_DOCUMENT_DIGEST_SHAPE", "rebind", "manifest", [(("files", document_entry, "sha256"), "set", "A" * 63 + "\\")]),
             ("ACCEPTANCE_REPORT_INPUTS_REQUIRED", "cli", None, None),
@@ -6170,8 +6243,8 @@ class ContractRegressions(unittest.TestCase):
                     self._indexed_evidence_reads(source),
                     ["evidence['missing'] at line 3", "nested['missing'] at line 4"],
                 )
-        # The third form that binds one name: `:=`. Measured before it was added - the plain
-        # assignment was reported and this binding, with the same read, was not.
+        # The third form that binds one name: `:=`. Measured: without it the plain
+        # assignment is reported and this binding, with the same read, is not.
         with self.subTest(binding="walrus"):
             source = (
                 "if (evidence := load_json(path)):\n"
@@ -6191,8 +6264,8 @@ class ContractRegressions(unittest.TestCase):
             anchor + '\n    extra_evidence: dict = load_json(root / "tests" / "failure-surface-baseline.json")',
         ).replace(read, 'extra_evidence["bridge_refusal_codes"]')
         # Only what the plant adds is this test's fact. Whether the generator itself reads a
-        # figure by index is the name-not-index test's, and counting it here reddened this
-        # test on that defect too - measured. Line numbers are dropped: the plant adds one.
+        # figure by index is the name-not-index test's; counting it here would redden this
+        # test on that defect too. Line numbers are dropped: the plant adds one.
         def reads(text: str) -> list[str]:
             return sorted(
                 finding.rsplit(" at line ", 1)[0]
@@ -6237,10 +6310,10 @@ class ContractRegressions(unittest.TestCase):
     def test_a_writer_leaves_another_writers_temporary_alone(self) -> None:
         """Another writer's temporary is not this call's to touch.
 
-        The name used to be `<report>.tmp` for every writer, so a second writer overwrote
-        the first one's bytes and its `finally` then deleted a file it did not own. Planted
-        here at that old shared name: a call that takes its own name leaves it exactly as
-        it was. This stood inside the failed-replace case, whose name it did not fit.
+        A temporary named `<report>.tmp` for every writer would let a second writer
+        overwrite the first one's bytes and its `finally` then delete a file it does not
+        own. Planted here at that shared name: a call that takes its own name leaves it
+        exactly as it is.
         """
         with tempfile.TemporaryDirectory() as temporary:
             report = Path(temporary) / "ACCEPTANCE-REPORT.md"
@@ -6249,17 +6322,17 @@ class ContractRegressions(unittest.TestCase):
             neighbour.write_text("another writer's text\n", encoding="utf-8", newline="\n")
             write_through_temporary(report, "after\n")
             self.assertEqual(report.read_text(encoding="utf-8"), "after\n")
-            # Asked to exist first: the shared name removes it, and reading a removed file
-            # reddened this case as a FileNotFoundError rather than under its own message.
+            # Asked to exist first: a shared name removes it, and reading a removed file
+            # would redden this case as a FileNotFoundError rather than under its own message.
             self.assertTrue(
                 neighbour.is_file(), "a temporary this call did not create was removed")
             self.assertEqual(
                 neighbour.read_text(encoding="utf-8"), "another writer's text\n",
                 "a temporary this call did not create was overwritten")
         # And a file another writer puts at THIS call's temporary name once the replace has
-        # moved the temporary away: the name is free from that moment, and the `finally`
-        # used to remove whatever stood there. Planted by a replace that moves the file and
-        # then writes at the name it left.
+        # moved the temporary away: the name is free from that moment, and a `finally` that
+        # still removed it would remove whatever stands there. Planted by a replace that
+        # moves the file and then writes at the name it left.
         real_replace = Path.replace
         reused = []
 
@@ -6283,10 +6356,10 @@ class ContractRegressions(unittest.TestCase):
         """No residue when the failure comes the moment the temporary exists.
 
         Before anything is written - where an interrupt lands between creating the file
-        and using it. Closing the handle and naming the path used to stand before the
-        `try`, so this left the file. The close really happens before the failure: an open
-        handle is a file Windows cannot remove, and that would measure the platform instead
-        of the code. This stood inside the failed-replace case, whose name it did not fit.
+        and using it. Closing the handle and naming the path stand inside the `try`;
+        outside it, this failure would leave the file. The close really happens before the
+        failure: an open handle is a file Windows cannot remove, and that would measure the
+        platform instead of the code.
         """
         real_close = os.close
 
@@ -6693,8 +6766,8 @@ class ContractRegressions(unittest.TestCase):
         original = engine.ledger._event_signer
 
         # The persisted chain is HMAC and the configured signer speaks
-        # Ed25519 only. The earlier guard looked at this pairing the other way
-        # round, so this direction read as a broken chain.
+        # Ed25519 only: this direction is a signer the chain cannot use, not a
+        # broken chain.
         engine.ledger._event_signer = Ed25519DetachedSigner.from_private_bytes(
             "fixture-ledger-key-v1",
             bytes(range(32)),

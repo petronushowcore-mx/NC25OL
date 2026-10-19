@@ -216,9 +216,9 @@ ROLE_CONSTANTS = {
 # the reason, because "no second source" is a fact worth stating rather than a
 # silence. Key custody is deliberately out of band (no route exists), and the
 # observer projection is documented as intentionally not a route.
-# These three are the sites where this package has already had gaps, so the
-# list is pinned by size as well as by content: an exemption list that can grow
-# is an exemption field, which is the shape that was refused entry. Their second
+# These three are the sites most exposed to a gap, so the list is pinned by
+# size as well as by content: an exemption list that can grow is an exemption
+# field, which is the shape this package refuses. Their second
 # source is not the adapter but the regressions that call them with a
 # hard-coded correct role - test_permit_rotation_without_revocation_across_restore,
 # test_signer_rotation_rolls_back_on_persist_failure,
@@ -1198,7 +1198,7 @@ class ConnectionSuite:
         # which proves the guard is called and called early enough. The guard
         # itself holds three facts, and they live in it rather than in the
         # methods - so they are proved here, once, instead of twelve times.
-        # Without this, deleting either of the two unswept branches was green.
+        # Without this, deleting either of the two unswept branches stays green.
         # Each seal gets its OWN engine: tampering is not undone, so one shared
         # engine would leave the second break running against the first one's
         # damage and the code asserted would depend on the order of the tuple.

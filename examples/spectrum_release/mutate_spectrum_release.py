@@ -27,7 +27,7 @@ CASES = [
     ('unused_checkout_mismatch_ignored', 5, 'file.read_bytes() == raw', 'True'),
     ('source_type_ignored', 6, 'mode in {"100644", "100755"} and kind == "blob"', 'True'),
     ('source_parent_path_ignored', 6, 'all(p not in {"", ".", "..", ".git"} and ":" not in p for p in parts)', 'True'),
-    # The earlier reading: PurePosixPath collapses empty and "." parts, so the check never sees them.
+    # A PurePosixPath reading collapses empty and "." parts, so the check never sees them.
     ('source_path_normalized', 6, 'parts = relative.split("/")', 'parts = __import__("pathlib").PurePosixPath(relative).parts'),
     ('honest_path_parts_overrefused', 2, '":" not in p for p in parts', '":" not in p and "." not in p for p in parts'),
     ('release_namespace_case_sensitive', 6, 'not full.casefold().startswith("release/")', 'not full.startswith("release/")'),

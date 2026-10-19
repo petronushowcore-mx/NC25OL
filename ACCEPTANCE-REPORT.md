@@ -1,8 +1,8 @@
 # NC25OL Acceptance Report
 
-Version: `01.09.01`
+Version: `01.09.02`
 
-Verification date: `2026-10-17 UTC`
+Verification date: `2026-10-19 UTC`
 
 Status: `PASS`
 
@@ -56,9 +56,9 @@ fail-closed behavior.
 ## Bound bytes
 
 This report was generated for one exact tree. The manifest entries it
-certifies, every entry except this report, digest to `A1A8279849E09689734BDE683AD2D831789E2E84CC81A4CE280D798A2A4FAACD`
+certifies, every entry except this report, digest to `4AF36CC16BC76B8EE502DDAFB02C8FDE4E941EF4C401C5C5197AC84120258C45`
 as path-ordered (path, SHA-256, byte length) triples; the specification
-document the geometry below describes has SHA-256 `E2A0AE67F215FF6B87CC1645C748AAE337760C8669DBB7321D5C118F1436B540`.
+document the geometry below describes has SHA-256 `5F591F538F35A0B97C28D3C56DCB786265004560DB2A9A20C5E6AA38787C4BF6`.
 The package verifier recomputes both from the shipped bytes and refuses
 this report when either differs.
 

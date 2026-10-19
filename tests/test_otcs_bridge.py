@@ -523,9 +523,9 @@ class OTCSBridgeRegressions(unittest.TestCase):
             connection, a failed handshake, a marshalling error.
 
         The second shape is why recovery must check the permit here as well.
-        An earlier version of this guard exempted AMBIGUOUS on the ground that
-        it "records that the request left"; driven, that produced a FIRST
-        downstream effect under a dead permit.
+        AMBIGUOUS is not exempt on the ground that it "records that the request
+        left": driven, that exemption produces a FIRST downstream effect under a
+        dead permit.
 
         Both shapes are instantiated below, because a witness that only builds
         the half where the claim holds certifies nothing about the other half.
@@ -596,16 +596,12 @@ class OTCSBridgeRegressions(unittest.TestCase):
     def test_an_unknown_stored_state_is_reachable_through_the_public_read(
         self,
     ) -> None:
-        """Pins the measurement that moved a code out of the internal-only set.
+        """OTCS_OUTBOX_STATE is reachable through the public read, not internal-only.
 
-        The module used to declare OTCS_OUTBOX_STATE unreachable from any
-        public path, on the ground that its state set and the table's CHECK
-        constraint are the same set. That holds only while this module creates
-        the table. A deployment that hands the bridge an existing database of
-        the right shape and no CHECK breaks it.
-
-        Without this test the retraction rested on a one-off probe that shipped
-        with nothing, and the next reader would have had only prose to trust.
+        The state set and the table's CHECK constraint are the same set only
+        while this module creates the table. A deployment that hands the bridge
+        an existing database of the right shape and no CHECK breaks that, and an
+        unknown stored state then reaches the public read.
         """
         import sqlite3
 
@@ -644,11 +640,11 @@ class OTCSBridgeRegressions(unittest.TestCase):
         """One refusal code, two facts, and the detail has to say which.
 
         `PRAGMA table_xinfo`, the guard's read, answers a table that is not there
-        with no rows at all, so the guard's `present` came back empty and every declared name
-        fell into "missing": the caller was handed a sentence describing a
-        table with the wrong columns, for a database that had none. The code
-        stays what it was - this is still not our table - and the detail is
-        what changes.
+        with no rows at all, so the guard's `present` is empty and, read alone,
+        every declared name falls into "missing": the caller would be handed a
+        sentence describing a table with the wrong columns, for a database that
+        has none. The code is the same either way - this is still not our table -
+        and the detail says which fact it is.
 
         Reachable because the bridge opens a connection per call: a file
         deleted or replaced between calls is recreated empty by `sqlite3`.
@@ -673,12 +669,11 @@ class OTCSBridgeRegressions(unittest.TestCase):
         with self.assertRaisesRegex(OTCSBridgeError, r"^OTCS_OUTBOX_COLUMNS: missing "):
             SQLiteOTCSOutbox(wrong)
 
-        # A third fact under the same code, and the one the guard itself used to leak: the
+        # A third fact under the same code, and one the guard's own reads can leak: the
         # statements that read the schema are statements, so a path holding bytes that are
-        # not a SQLite database made the FIRST of them raise sqlite3.DatabaseError - past
-        # this module, and at construction, because the store takes a checked connection as
-        # it opens. Measured before the guard: `escaped:sqlite3.DatabaseError` from both
-        # stores; after it, each refuses by its own code.
+        # not a SQLite database makes the FIRST of them raise sqlite3.DatabaseError - past
+        # this module unless it is guarded, and at construction, because the store takes a
+        # checked connection as it opens. Guarded, each store refuses by its own code.
         prose = self.temporary_root / "not-a-database.sqlite"
         prose.write_bytes(b"this file is a hundred bytes of ordinary prose, not a database.")
         with self.assertRaisesRegex(OTCSBridgeError, r"^OTCS_OUTBOX_COLUMNS: not a database$"):
@@ -709,11 +704,10 @@ class OTCSBridgeRegressions(unittest.TestCase):
                 OTCSBridgeError, r"^OTCS_OUTBOX_COLUMNS: unreadable: SQLITE_ERROR$"):
             SQLiteOTCSOutbox(alien)
 
-        # A fifth: a valid header over a schema page that is not. The guarded statement was
-        # the header read, described as running before anything else on the connection -
-        # and the create ran on that same connection outside any guard. Measured: this file
-        # PASSES `PRAGMA schema_version` and used to raise `database disk image is
-        # malformed` out of the create, past this module. Built by overwriting page one
+        # A fifth: a valid header over a schema page that is not. Guarding the header read
+        # alone is not enough, because the create runs on the same connection after it.
+        # Measured: this file PASSES `PRAGMA schema_version`, and an unguarded create raises
+        # `database disk image is malformed` past this module. Built by overwriting page one
         # after its hundred-byte header, which is the only way to make a file whose header
         # is honest and whose schema is not.
         readable_header = self.temporary_root / "corrupt-schema.sqlite"
@@ -749,19 +743,18 @@ class OTCSBridgeRegressions(unittest.TestCase):
         # statement about the stored artefact.
         #
         # Every row carries the CLASS, the CODE and the NAME the driver gives that case,
-        # because a fixture must repeat its producer - the name is carried even though the
-        # function no longer reads it, for the same reason. Which of the two grounds each
+        # because a fixture must repeat its producer - the name is carried although the
+        # function does not read it, for the same reason. Which of the two grounds each
         # row stands on, said rather than blurred, and the two lists together account for
         # every name the loops drive: SQLITE_BUSY, SQLITE_CANTOPEN, SQLITE_FULL,
         # SQLITE_ERROR, SQLITE_NOTADB, SQLITE_CORRUPT and SQLITE_CONSTRAINT were produced
         # and read on this build; SQLITE_LOCKED, SQLITE_IOERR, SQLITE_INTERRUPT,
         # SQLITE_PROTOCOL, SQLITE_FORMAT and SQLITE_SCHEMA are taken from the module's
         # documented mapping of result codes to exception classes, because no test here can
-        # provoke them. An earlier form of this comment listed twelve and left
-        # SQLITE_INTERRUPT in neither list while the loop went on pinning it.
-        # The rows were built by side before - transient
-        # ones as OperationalError, artefact ones as DatabaseError - and that hid the whole
-        # point: SQLITE_ERROR is raised BY THE DRIVER as an OperationalError, so it is an
+        # provoke them.
+        # Each row is built with the class the driver raises for its code, not by side:
+        # building transient ones as OperationalError and artefact ones as DatabaseError
+        # would hide the whole point - SQLITE_ERROR is raised BY THE DRIVER as an OperationalError, so it is an
         # artefact code wearing the transient class, and a row that builds it as a
         # DatabaseError passes under a plain type test too. SQLITE_NOMEM is absent for the
         # same reason in reverse: the driver answers it with MemoryError, which no
@@ -841,8 +834,8 @@ class OTCSBridgeRegressions(unittest.TestCase):
             "a collation the build lacks is a property of the stored schema, not a retry")
         # And an error the MODULE raises, with no SQLite code behind it at all. Measured on
         # this build: a statement on a closed connection and a wrong binding count are
-        # ProgrammingError with no code, and the fallback they used to meet answered both
-        # 'not a database' - a fault in the caller published as a verdict about the file.
+        # ProgrammingError with no code, and a type-based fallback would answer both 'not a
+        # database' - a fault in the caller published as a verdict about the file.
         uncoded = sqlite3.ProgrammingError("Cannot operate on a closed database.")
         self.assertIsNone(
             refuse_unreadable_database(uncoded),
@@ -920,19 +913,18 @@ class OTCSBridgeRegressions(unittest.TestCase):
         self.assertEqual(client.calls, 0)
 
     def test_a_stored_number_the_canonical_form_refuses_is_caught_by_the_read(self) -> None:
-        """The walk asked its question of strings only, and a number is not a string.
+        """The walk asks its question of numbers too, because a number is not a string.
 
         `json.loads` admits the bare tokens NaN, Infinity and -Infinity; this module's
         canonical dump passes `allow_nan=False` and refuses them. Between those two facts
-        sat the decoder's walk, which examined every string it met and matched no branch at
-        all for a float - so such a value travelled the whole recovery path and died at the
-        LAST step, after the engine-side effect was already committed, under no code of
-        ours. That is the class the text check exists to close, in the one shape it could
-        not see.
+        sits the decoder's walk: asking its question of strings only, it would match no
+        branch for a float, so such a value would travel the whole recovery path and die
+        at the LAST step, after the engine-side effect is committed, under no code of
+        ours. That is the class the text check exists to close, in the one shape a
+        strings-only walk cannot see.
 
-        Planted as `Infinity` rather than as the `NaN` the defect was found with, on
-        purpose: the fix is finiteness, and a fix written for the token it was reported
-        with would let this plant through.
+        Planted as `Infinity` rather than as `NaN`, on purpose: the guard is finiteness,
+        and a guard written for one token would let this plant through.
         """
         import sqlite3
 
@@ -1036,8 +1028,8 @@ class OTCSBridgeRegressions(unittest.TestCase):
 
         Its own method, not a second drive in the case above: that store keeps the row the
         first drive leaves, the intent binds the idempotency key and the receipt carries it
-        too, so a second drive there has to move four things together and ends up measuring
-        whichever guard notices first - measured, twice, before this was split out.
+        too, so a second drive there would have to move four things together and would
+        measure whichever guard notices first - measured.
         """
         class RefusesToBeEncoded(str):
             def encode(self, *arguments: object, **keywords: object) -> bytes:
@@ -1321,12 +1313,12 @@ class OTCSBridgeRegressions(unittest.TestCase):
     def test_a_receipt_that_cannot_be_read_forces_reconciliation(self) -> None:
         """A receipt that cannot be read is an unusable receipt, not a row left mid-call.
 
-        The admission caught only this module's errors, so a receipt mapping that raised
-        on being read left the `try` and the row stayed CALLING over an effect that had
-        happened. Two paths, one case each. A mapping whose own `keys` and `__getitem__`
-        raise is read by the plain copy, which runs its code once and refuses it by name,
-        so the row records OTCS_RECEIPT_FIELDS. And the clause that answers any other
-        exception - kept for a fault in this module's own receipt code, which no copy
+        An admission that caught only this module's errors would let a receipt mapping
+        that raises on being read leave the `try`, and the row would stay CALLING over an
+        effect that has happened. Two paths, one case each. A mapping whose own `keys` and
+        `__getitem__` raise is read by the plain copy, which runs its code once and refuses
+        it by name, so the row records OTCS_RECEIPT_FIELDS. And the clause that answers any
+        other exception - kept for a fault in this module's own receipt code, which no copy
         sees - is driven by injecting exactly that fault, so it records the type's name.
         """
         from collections.abc import Mapping
@@ -1380,12 +1372,12 @@ class OTCSBridgeRegressions(unittest.TestCase):
     def test_a_receipt_that_says_it_matches_is_compared_by_its_characters(self) -> None:
         """A receipt for another project is refused even when its value says it matches.
 
-        The value objects asked each helper and then kept what they had been HANDED, so
-        the receipt-against-operation check ran the object's own `!=`. A str subclass
-        that answers every comparison with "equal" carried a receipt naming another
-        project past that check, after the downstream effect. The fields are now kept as
-        the helpers' plain answers; the next case is the control that keeps the refusal
-        about the characters and not about the type.
+        The value objects keep each helper's plain answer, not the object they were
+        HANDED: kept as handed, the receipt-against-operation check would run the
+        object's own `!=`, and a str subclass that answers every comparison with "equal"
+        would carry a receipt naming another project past that check, after the
+        downstream effect. The next case is the control that keeps the refusal about
+        the characters and not about the type.
         """
         receipt = copy.deepcopy(self.bundle["downstream_receipt"])
         receipt["project_id"] = _AgreesWithEverything("another-project")
@@ -1412,9 +1404,9 @@ class OTCSBridgeRegressions(unittest.TestCase):
         """Each field is kept as the plain value its helper returned; a nested reference
         is admitted only as its exact class; the refusal names the field's own code.
 
-        Rows marked `lie` were ADMITTED before this change, measured: the object's own
-        `!=` or `<` answered the question the helper had already asked of its characters.
-        The other rows pin shapes the same door now names instead of failing inside a
+        Rows marked `lie` are objects whose own `!=` or `<` would answer the question the
+        helper has already asked of their characters, if the object were kept. The other
+        rows pin shapes the same door names instead of failing inside a
         comparison. The controls are the last block: an ordinary subclass is admitted and
         stored as the plain type, so the refusals are about values, not about subclassing.
         """
@@ -1589,8 +1581,8 @@ class OTCSBridgeRegressions(unittest.TestCase):
                         self.bridge(client).execute(
                             bundle["bridge_operation"], bundle["intent"], bundle["evidence"])
                     self.assertEqual(client.calls, 0)
-        # A key that is not a string: no document has one, and before the copy refused it
-        # an integer key beside string ones escaped as a raw TypeError from `_closed`.
+        # A key that is not a string: no document has one, and unrefused, an integer key
+        # beside string ones would leave as a raw TypeError from `_closed`.
         with self.subTest(row="a key that is not text"):
             self.setUp()
             operation = copy.deepcopy(self.bundle["bridge_operation"])
@@ -1630,12 +1622,12 @@ class OTCSBridgeRegressions(unittest.TestCase):
         """A caller's object whose `__class__` lies is answered by name at every place.
 
         The door leaves a value it does not recognise for the checks that refuse it by name,
-        and some readers met it first and asked `isinstance`, which asks `__class__`.
-        Measured by exactly this sweep: an object claiming `str` in a hash field of the
-        binding, the intent or an evidence item left `execute` as a raw TypeError or
-        AttributeError, and one claiming `list` left as a raw TypeError wherever it was
-        iterated - by the hash-case normaliser, and at the evidence's `items` by the
-        evidence check, which met it first there. The class is the question, so the sweep
+        and a reader that meets it first and asks `isinstance` asks `__class__`. Measured by
+        exactly this sweep: without the by-name answers, an object claiming `str` in a hash
+        field of the binding, the intent or an evidence item leaves `execute` as a raw
+        TypeError or AttributeError, and one claiming `list` leaves as a raw TypeError
+        wherever it is iterated - by the hash-case normaliser, and at the evidence's `items`
+        by the evidence check, which meets it first there. The class is the question, so the sweep
         plants four liars - claiming str, int, mapping and list - at every leaf and object
         of the operation, the intent and the evidence, each on a fresh engine and outbox,
         and requires a named answer every time. It names no codes: which check answers is
@@ -1709,11 +1701,11 @@ class OTCSBridgeRegressions(unittest.TestCase):
                         else:
                             self.fail("a liar was ADMITTED here")
         # Every leaf and object of the three reference documents, four liars each - and the
-        # answer counted, not the attempt. `driven` was incremented before the drive and
-        # nothing else was asserted, so a liar that was admitted passed as quietly as one
-        # refused: the number said how many were tried, and the case read as though it said
-        # how many were answered. The `else` is what makes an admission a failure; the
-        # equality below is what makes the count mean what its name says.
+        # answer counted, not the attempt. A count taken before the drive, with nothing else
+        # asserted, would let an admitted liar pass as quietly as a refused one: the number
+        # would say how many were tried while the case reads as though it says how many
+        # were answered. The `else` is what makes an admission a failure; the equality
+        # below is what makes the count mean what its name says.
         #
         # Changing _plain_copy's unknown-value fallback from `return value` to
         # `return str(value)` reaches that `else`: a liar becomes an admitted string.
@@ -1866,14 +1858,15 @@ class OTCSBridgeRegressions(unittest.TestCase):
     def test_a_stored_plain_column_of_the_wrong_type_is_refused_by_name(self) -> None:
         """A BLOB or an integer in a text column is refused, not handed back as the record.
 
-        The decoder asked storability of strings and passed every non-string through, so
-        five plain columns came back from `outbox_record` as `bytes` or `int`. Pinned here
-        on `last_error`, the column a reader is least likely to type-check, with the two
-        halves of the rule beside it: NULL where the schema allows it is an answer, and
-        NULL where it does not is a refusal. And on a JSON column: once where the parse
-        stood in for the question and `json.loads` takes bytes, and twice for the one JSON
-        column declared NOT NULL - NULL, and the text `null`, which parses to the same None
-        and is refused under its own detail. And twice on `state`, which
+        A decoder that asks storability of strings only and passes every non-string
+        through would hand five plain columns back from `outbox_record` as `bytes` or
+        `int`. Pinned here on `last_error`, the column a reader is least likely to
+        type-check, with the two halves of the rule beside it: NULL where the schema
+        allows it is an answer, and NULL where it does not is a refusal. And on a JSON
+        column: once where the parse alone would answer the question and `json.loads`
+        takes bytes, and twice for the one JSON column declared NOT NULL - NULL, and the
+        text `null`, which parses to the same None and is refused under its own detail.
+        And twice on `state`, which
         the shape check skips because the state check answers it first: the row's own state
         name as a BLOB, the plant a reader would take for the honest value, and NULL, which
         a table without the module's NOT NULL admits.
@@ -1914,13 +1907,15 @@ class OTCSBridgeRegressions(unittest.TestCase):
                 connection.commit()
             return OTCSBridge(self.engine, client, path)
 
-        # The last row is a JSON column, which the parse used to answer: `json.loads`
-        # accepts bytes, so the row's own document stored as a BLOB came back as the record.
+        # The last row is a JSON column, which the parse alone would answer: `json.loads`
+        # accepts bytes, so the row's own document stored as a BLOB would come back as the
+        # record.
         for label, column, value, code, detail in (
             ("a BLOB", "last_error", b"\xff\xfe", "OTCS_OUTBOX_ROW_TEXT", "last_error: not text"),
             ("an integer", "last_error", 7, "OTCS_OUTBOX_ROW_TEXT", "last_error: not text"),
-            # A number the canonical form refuses is still a number in a text column. The
-            # walk meant for parsed values used to answer it first, with the JSON code.
+            # A number the canonical form refuses is still a number in a text column, and
+            # the text question comes first: the walk meant for parsed values would answer
+            # it with the JSON code.
             ("infinity, stored as a REAL", "last_error", float("inf"),
              "OTCS_OUTBOX_ROW_TEXT", "last_error: not text"),
             ("NULL where the schema forbids it", "updated_at", None,
@@ -1939,8 +1934,8 @@ class OTCSBridgeRegressions(unittest.TestCase):
              "OTCS_OUTBOX_STATE", "state: not text"),
             ("NULL in state", "state", None, "OTCS_OUTBOX_STATE", "state: null"),
             # And valid JSON that is not a DOCUMENT. Every value this module writes into
-            # those columns is an object, the parse admits any JSON value, and both of
-            # these came back as the record's `request` - measured, `[]` and `7`.
+            # those columns is an object, and the parse admits any JSON value: `[]` and `7`
+            # would come back as the record's `request`.
             ("an array in request_json", "request_json", "[]",
              "OTCS_OUTBOX_ROW_JSON", "request_json: not an object"),
             ("a number in request_json", "request_json", "7",
@@ -1960,12 +1955,11 @@ class OTCSBridgeRegressions(unittest.TestCase):
     def test_a_stored_document_is_bounded_where_the_wire_bounds_it(self) -> None:
         """A stored JSON column is refused past the nesting limit exactly where the wire is.
 
-        The walk over a parsed column applies the engine's limit, and it has twice counted
-        differently from the wire's bracket scan: seeded at one, it refused a document of
-        exactly 64 containers that the wire admits, so a row the engine accepted could not
-        be read back; counting nodes, it admitted 65 containers whose innermost is empty,
-        which the wire refuses. Both were measured by a probe and fixed, and nothing kept
-        the measurement. This case is it: 63, 64 and 65 containers, the document itself
+        The walk over a parsed column applies the engine's limit and must count as the
+        wire's bracket scan does: seeded at one, it would refuse a document of exactly 64
+        containers that the wire admits, so a row the engine accepted could not be read
+        back; counting nodes, it would admit 65 containers whose innermost is empty, which
+        the wire refuses. This case holds both: 63, 64 and 65 containers, the document itself
         counted, each with a scalar at the bottom and with an empty container there. The
         verdict is written as a literal of the published limit, 64, and the wire's scan and
         the walk are both held to it, so a change to either is a red here, not a new
@@ -2841,9 +2835,7 @@ class OTCSBridgeRegressions(unittest.TestCase):
         and certifies OTCS_HASH_REF_FIELDS instead.  The row removes a key
         because a removed key leaves no value to intercept at all.
         The head sequence has minimum 0, so only a negative value reaches
-        OTCS_HEAD_SEQUENCE - zero falls through to the successor check.  Each
-        row was run against the live bridge and its ACTUAL code compared with
-        the expected one before it was admitted to this table.
+        OTCS_HEAD_SEQUENCE - zero falls through to the successor check.
         """
         # Control: an untouched fixture must build under both drivers. Without
         # it, a fixture that no longer parses at all would turn every row below
@@ -3030,13 +3022,13 @@ class OTCSBridgeRegressions(unittest.TestCase):
         client and an outbox for no additional coverage.  Both validators are
         `@staticmethod`, so neither needs a constructed bridge.
 
-        Two traps decide these rows, and both were measured rather than
-        reasoned.  First, three separate loops upper-case any value whose field
-        name ends in `_hash` before comparing, so a corruption that changes
-        only the CASE is swallowed and the row would go green having proved
-        nothing; every row below changes the value itself.  Second, the intent
-        binding loop runs to completion before the scope loop begins, so a row
-        meant for the scope must leave all six binding fields untouched.
+        Two traps decide these rows.  First, three separate loops upper-case
+        any value whose field name ends in `_hash` before comparing, so a
+        corruption that changes only the CASE is swallowed and the row would go
+        green having proved nothing; every row below changes the value itself.
+        Second, the intent binding loop runs to completion before the scope loop
+        begins, so a row meant for the scope must leave all six binding fields
+        untouched.
         """
         # Control: the untouched fixture must pass BOTH validators. Without it
         # a fixture that no longer binds at all would turn every row green for
@@ -3137,15 +3129,14 @@ class OTCSBridgeRegressions(unittest.TestCase):
         a genuine engine admission, so the admission check cannot obscure the
         particular later refusal each case is meant to reach.
 
-        Every pair below was RUN before it was admitted, and two of them had to
-        be corrected by that run rather than by reading.  A row whose only
-        stated defect was a short permit hash reached the closed field-set
-        check first, because the request it carried was missing `operation`;
-        and a row meant to prove a terminal state without an execution request
-        was overtaken by the engine-binding check, because its profile and
-        declaration hashes were placeholders rather than the engine's own.
-        Both now carry a complete request, so the stated defect is the only
-        one.
+        Each pair carries exactly one defect, its stated one, because an extra
+        one is answered first.  A row whose only stated defect is a short
+        permit hash reaches the closed field-set check first if the request it
+        carries lacks `operation`; and a row meant to prove a terminal state
+        without an execution request is overtaken by the engine-binding check
+        if its profile and declaration hashes are placeholders rather than the
+        engine's own.  Both rows therefore carry a complete request, so the
+        stated defect is the only one.
 
         The empty connector id is reachable only from inside: on every public
         route an earlier guard answers first.  It is witnessed here because a
@@ -3402,13 +3393,13 @@ class OTCSBridgeRegressions(unittest.TestCase):
             "empty text": "",
             # Not the same form as the bytes above: a bytes parameter binds as a BLOB,
             # which the decoder sees as a non-string. This one is written through a CAST
-            # so the column is TEXT holding bytes that are not UTF-8 - the form that used
-            # to fail inside the driver at the fetch, before any bridge code named it.
+            # so the column is TEXT holding bytes that are not UTF-8 - the form that fails
+            # inside the driver at the fetch, which the bridge must name there.
             "text that is not UTF-8": INVALID_UTF8_TEXT,
             # Innocent bytes, guilty value: this text is pure ASCII and parses, and what
             # it parses INTO is a lone surrogate that cannot be written back. A check on
-            # the stored bytes alone passes it, which is what the first version of that
-            # check did; the write two calls later was where it died.
+            # the stored bytes alone passes it, and the write two calls later is where
+            # it would die.
             "JSON carrying a surrogate escape": '{"note": "\\ud800"}',
         }
 
@@ -3527,10 +3518,10 @@ class OTCSBridgeRegressions(unittest.TestCase):
         with self.subTest(member="outbox table carrying our columns and no primary key"):
             # The third direction, and the one the names alone cannot ask. A create does
             # nothing when a table of that name is already there and retrofits no
-            # constraint, so this table passed: two rows sharing the project and the
-            # idempotency key lived in it and `get` answered with whichever the driver
-            # reached first - measured, against our own table, which refuses the second
-            # row itself. Idempotency is what that key carries.
+            # constraint, so without a key check this table would pass: two rows sharing
+            # the project and the idempotency key live in it and `get` answers with
+            # whichever the driver reaches first - measured, against our own table, which
+            # refuses the second row itself. Idempotency is what that key carries.
             path = self.temporary_root / "without-primary-key.sqlite"
             base_row = bases["LOCAL_COMMITTED"][0]
             with closing(sqlite3.connect(path)) as connection:

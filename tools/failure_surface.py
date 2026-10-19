@@ -146,10 +146,9 @@ PROCEDURES = {
         "Bridge refusal codes observed at runtime leaving a"
         " production-raised OTCSBridgeError into test code, by the same"
         " two forms and the same discriminating rule as witnessed_codes."
-        " Before this existed the bridge vocabulary was witnessed by"
-        " nothing: a deleted sweep row lost its witness in silence while"
-        " the method count and the declared-equals-measured check both"
-        " stayed green."
+        " Without it the bridge vocabulary is witnessed by nothing: a"
+        " deleted sweep row loses its witness in silence while the method"
+        " count and the declared-equals-measured check both stay green."
     ),
     "unwitnessed_bridge_codes": (
         "bridge_refusal_codes minus witnessed_bridge_codes: the bridge's"
@@ -518,11 +517,11 @@ def _decision_returns(tree: ast.AST, owner_name: str) -> set[str]:
 def _architect_emissions(tree: ast.AST) -> tuple[set[str], list[str]]:
     """Decision codes the engine can emit, and the sites that resist reading.
 
-    Every code-bearing position is CLASSIFIED, never skipped. Skipping is what
-    made a decision code returned through a local variable invisible: the
-    extractor saw no literal, said nothing, and the declaration matched a
-    silently narrower world. An unreadable position now names itself, exactly
-    as an unclassifiable refusal raise does.
+    Every code-bearing position is CLASSIFIED, never skipped. Skipping would make
+    a decision code returned through a local variable invisible: the extractor
+    would see no literal and say nothing, and the declaration would match a
+    silently narrower world. An unreadable position names itself, exactly as an
+    unclassifiable refusal raise does.
     """
     parents = _parents(tree)
     gate_codes = _decision_returns(tree, "_effect_gate")
@@ -637,9 +636,9 @@ def static_snapshot() -> tuple[dict[str, object], list[str]]:
         return f"{stem}#{index}"
 
     # Each source carries its OWN pinned helpers, refusal classes and code
-    # bucket. Those four facts used to be global, and a third source does not
-    # fit that shape without changing what the first two mean: one flat helper
-    # set would let a name living in the bridge pin a call site in the engine.
+    # bucket. Global facts do not fit a third source without changing what the
+    # first two mean: one flat helper set would let a name living in the bridge
+    # pin a call site in the engine.
     #
     # `dynamic_allowed` is the engine's privilege alone. Its dynamic refusal
     # kinds are declared and derived there; the bridge has no such declaration,
@@ -912,9 +911,8 @@ def _entered_from_tests() -> bool:
     Walks outward from the immediate caller, skipping this tool's own frames
     and unittest's internals, and asks whether the first foreign frame lives
     under tests/. Written as a walk rather than a frame depth on purpose: a
-    depth is silently wrong after any refactor, and the first version of this
-    gate was off by one, which cost 36 witnesses and would have pinned the
-    undercount into the baseline as truth.
+    depth is silently wrong after any refactor, and a depth off by one loses
+    witnesses and pins the undercount into the baseline as truth.
     """
     frame = sys._getframe(1)
     while frame is not None:
@@ -1060,8 +1058,8 @@ def _install_observation(
     engine_class = ledger_module.ContractViolation
     bridge_class = bridge_module.OTCSBridgeError
     # (exception class, universe attribute, witness sink attribute).
-    # The regex path used to name the engine class directly, so a bridge
-    # refusal asserted by an anchored pattern witnessed nothing at all.
+    # Both classes, because a regex path naming the engine class alone would
+    # leave a bridge refusal asserted by an anchored pattern witnessing nothing.
     REGEX_TARGETS = (
         (engine_class, "engine_universe", "witnessed_engine_raw"),
         (bridge_class, "bridge_universe", "witnessed_bridge_raw"),
@@ -1592,12 +1590,12 @@ def regeneration_regressions(
             if lost:
                 losses.append(f"REGENERATION_LOSES:{field} {lost}")
     # The scalar the recorded run also carries. `check_baseline` treats a
-    # changed test count as a difference worth naming, and until this entry the
-    # write path did not: a regeneration could record a smaller run - suites
-    # deselected, cases deleted - and exit zero, so the evidence behind every
-    # witnessed code could shrink without the reason this function exists to
-    # demand. Only a DECREASE is a loss; growth is free, like every other set
-    # above it.
+    # changed test count as a difference worth naming, and so does the write
+    # path: without this entry a regeneration could record a smaller run -
+    # suites deselected, cases deleted - and exit zero, so the evidence behind
+    # every witnessed code could shrink without the reason this function exists
+    # to demand. Only a DECREASE is a loss; growth is free, like every other
+    # set above it.
     old_tests = old_runtime.get("unittest_test_count")
     new_tests = new_runtime.get("unittest_test_count")
     if isinstance(old_tests, int) and isinstance(new_tests, int):
@@ -1641,10 +1639,10 @@ def main() -> None:
             for problem in problems:
                 print(problem)
             raise SystemExit(1)
-        # Two ways to reach a write with no comparison, and both used to be
-        # silent: the file is absent, or it carries another format. Either one
-        # turns the ratchet off for exactly one run, which is all it takes, so
-        # both now cost the same explicit acknowledgement a loss costs.
+        # Two ways to reach a write with no comparison: the file is absent, or
+        # it carries another format. Either one turns the ratchet off for
+        # exactly one run, which is all it takes, so both cost the same explicit
+        # acknowledgement a loss costs.
         previous: dict[str, object] | None = None
         if BASELINE_PATH.is_file():
             previous = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))

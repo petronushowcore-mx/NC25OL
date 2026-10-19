@@ -1,7 +1,7 @@
 # Spectrum and NC25OL: one local source release
 
-On 15 October 2026, Spectrum's supplied XIV/XV fixtures were executed from the
-pinned source trees of the Tectonica Spectrum release `v00.09.01`. NC25OL then
+On 18 October 2026, Spectrum's supplied XIV/XV fixtures were executed from the
+pinned source trees of the Tectonica Spectrum release `v00.09.02`. NC25OL then
 admitted a separate operation: storing the source ZIP and its observation in an
 authenticated local document target. The original machine result is
 [result.json](result.json).
@@ -31,14 +31,14 @@ example did not upload its source archive to a public service.
 
 | Repository | Commit |
 | --- | --- |
-| [Spectrum](https://github.com/petronushowcore-mx/TECTONICA), tag `v00.09.01` | `874b91f8e847c13e04ec18851c23100c04bf1da6` |
+| [Spectrum](https://github.com/petronushowcore-mx/TECTONICA), tag `v00.09.02` | `8fdd50badcae0bf810ef9967a64a18a7127f8d83` |
 | XIV submodule | `d03e16a3094996bf5d2947e3b1ee073b102573ee` |
 | XV submodule | `73b6a0c25bf0a92cc64ff3357d08d9e60b398f7d` |
 
 The observed archive contained 86 committed source files of the root and the
-XIV and XV layers, plus its manifest and observation. Its size was 624281 bytes
+XIV and XV layers, plus its manifest and observation. Its size was 624989 bytes
 and its SHA-256 was
-`1c17b4b4a343f1b0f3f98d513904179aa6c22fd9dbc75d4f7b8b5a1fbd7718e2`.
+`1cb18c1ae6676bbc747bc6b4f92a8ef77fb1e59dedcc398c330a7807a7bf4ca7`.
 This result records that local artifact; the archive is not included here.
 `result.json` records its manifest and observation hashes and both receipts.
 `document_payload_hash` is the gateway's hash of document name and encoded
@@ -65,14 +65,14 @@ were not read, packaged or run:
 
 ## Reproduce
 
-Use Python 3.11 or 3.12; the recorded run used Python 3.12.9 in a new
+Use Python 3.11, 3.12 or 3.14; the recorded run used Python 3.12.9 in a new
 environment installed from `requirements-lock.txt`. Create a separate Spectrum
 checkout without newline transformations: the root at the tag, then the two
 layers at the root's gitlinks. The other gitlink directories stay empty.
 `git clone --revision` needs Git 2.49 or later.
 
 ```text
-git clone -c core.autocrlf=false -c core.eol=lf --branch v00.09.01 https://github.com/petronushowcore-mx/TECTONICA.git spectrum
+git clone -c core.autocrlf=false -c core.eol=lf --branch v00.09.02 https://github.com/petronushowcore-mx/TECTONICA.git spectrum
 git clone -c core.autocrlf=false -c core.eol=lf --revision=d03e16a3094996bf5d2947e3b1ee073b102573ee https://github.com/petronushowcore-mx/NC2.5-ONTOSigma-XIV-Cross-Layer-Forgetful-Separation-corpus.git spectrum/layers/XIV
 git clone -c core.autocrlf=false -c core.eol=lf --revision=73b6a0c25bf0a92cc64ff3357d08d9e60b398f7d https://github.com/petronushowcore-mx/NC2.5-ONTOSigma-XV-Spin-Channel-and-Nestability-corpus.git spectrum/layers/XV
 ```
@@ -83,7 +83,7 @@ output directory outside both source trees:
 ```text
 python -m pip install --require-hashes -r requirements-lock.txt
 python -B tests/verify_package.py
-python -B examples/spectrum_release/spectrum_release.py --spectrum-root /absolute/spectrum --spectrum-revision 874b91f8e847c13e04ec18851c23100c04bf1da6 --output /absolute/new-run
+python -B examples/spectrum_release/spectrum_release.py --spectrum-root /absolute/spectrum --spectrum-revision 8fdd50badcae0bf810ef9967a64a18a7127f8d83 --output /absolute/new-run
 python -B -m unittest discover -s examples/spectrum_release -p "test_*.py" -v
 python -B examples/spectrum_release/mutate_spectrum_release.py --scratch /absolute/scratch
 ```
@@ -92,9 +92,12 @@ The command runs the real pinned Spectrum sources, writes a new local source ZIP
 and result, and verifies admission, exact target bytes and recovery. No public
 upload or OTCS registration is performed. Each fresh observation has new
 timestamps and an identifier; each local session has fresh signing keys. A rerun
-is expected to produce different archive and receipt hashes. Rebuilding from the
-same source, observation and manifest bytes is deterministic within one
-Python/zlib runtime.
+is expected to produce different archive and receipt hashes. The observation in
+the archive also records `collection.stdout_sha256`, the hash of the Spectrum
+runner's output, and that output depends on the absolute path of the Spectrum
+checkout, so the same commit checked out elsewhere gives another value.
+Rebuilding from the same source, observation and manifest bytes is
+deterministic within one Python/zlib runtime.
 
 The NC2.5 core is not included. Without the separately supplied core, package
 verification reports external-core checks as `NOT_RUN`; it does not reproduce
@@ -105,7 +108,8 @@ the private strict-core verification.
 This result, the machine result and the example code fall under the MIT terms
 for `examples/` in the root [LICENSE](../../LICENSE). The Ledger documents
 listed there have separate CC BY 4.0 terms. Spectrum and its layers remain
-separate works under their own CC BY-NC-ND 4.0 terms. No Spectrum source is
-relicensed by this example.
+separate works under their own terms: CC BY-NC-ND 4.0, except the Probe VI
+companion in Spectrum's `layers/ProbeVI`, which keeps its MIT licence. No
+Spectrum source is relicensed by this example.
 
 Maksim Barziankou (MxBv), The Urgrund Laboratheory.

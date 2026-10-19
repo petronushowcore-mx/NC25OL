@@ -114,9 +114,8 @@ def sole_assignment(tree: ast.AST, name: str, *, where: str = "") -> ast.expr | 
     whatever the reader does.
 
     Takes a parsed tree rather than a path because the other caller already
-    holds one. It is published rather than private because it had a second
-    home: the failure-surface tool carried the same reader, found and fixed the
-    same way on the same day, and a reader whose whole purpose is to refuse a
+    holds one. It is published rather than private because the failure-surface
+    tool needs the same reader, and a reader whose whole purpose is to refuse a
     duplicated declaration is a poor thing to declare twice.
 
     Returns None when the name is absent; the caller decides whether that is
@@ -169,12 +168,10 @@ def literal_mapping_values(path: Path, symbol: str) -> list[str]:
     other only transcribed: it lets a checker read the writer's collection
     instead of keeping a second copy beside it.
 
-    The gate-row labels needed it. The report builder owned them and the
-    package verifier asserted its own transcription, and nothing held the two
-    together - so a row could be dropped from the checker with no test to say
-    so. That is exactly how the OTCS bridge row shipped unchecked: it was
-    added to the builder's rows and never to the verifier's, and the omission
-    was found by reading, not by a red.
+    The gate-row labels need it. The report builder owns them, and a package
+    verifier keeping its own transcription would hold nothing to them: a row
+    added to the builder's rows and never to the verifier's would go unchecked,
+    with no test to say so.
     """
     mapping = ast.literal_eval(_sole_assignment(path, symbol))
     if not isinstance(mapping, dict):

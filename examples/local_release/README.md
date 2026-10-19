@@ -62,7 +62,7 @@ against slow input. The command is for local synthetic runs only.
 
 ## Run the Python checks
 
-From the Ledger package root, using Python 3.11 or 3.12 with the package's pinned
+From the Ledger package root, using Python 3.11, 3.12 or 3.14 with the package's pinned
 dependencies installed:
 
 ```text

@@ -16,6 +16,11 @@ OUTPUT = ROOT / "PACKAGE-MANIFEST.json"
 # outside the hash-bound set with nothing saying so.
 EXCLUDED_PARTS = {"__pycache__", ".pytest_cache"}
 REPOSITORY_DIRECTORY = ".git"
+# A virtual environment made in the package root is not part of the package either, and it
+# is excluded at the root for the same reason: that is where `python -m venv .venv` puts it.
+# Taken in, its files would break manifest coverage, and its bundled .docx templates would
+# make the bound-document count 3 instead of 1. README names these two places.
+ENVIRONMENT_DIRECTORIES = {".venv", "venv"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".bak", ".tmp", ".orig", ".rej"}
 
 
@@ -25,6 +30,7 @@ def included(path: Path) -> bool:
         path.is_file()
         and relative.as_posix() != OUTPUT.name
         and relative.parts[:1] != (REPOSITORY_DIRECTORY,)
+        and not (len(relative.parts) > 1 and relative.parts[0] in ENVIRONMENT_DIRECTORIES)
         and not (set(relative.parts) & EXCLUDED_PARTS)
         and path.suffix.lower() not in EXCLUDED_SUFFIXES
     )

@@ -434,9 +434,12 @@ manifest. The terminal verdict counts every completed step. It launches every
 Python subprocess with `-B` and `PYTHONDONTWRITEBYTECODE=1`; the package verifier
 runs last and rejects bytecode, pytest caches, and other build artefacts.
 
-Optional pytest collection, without creating cache artefacts:
+Optional pytest collection, without creating cache artefacts. pytest is not
+in `requirements-lock.txt`, which pins what the package itself runs; install
+it into the same environment first:
 
 ```text
+python -m pip install pytest
 python -B -m pytest -p no:cacheprovider tests
 ```
 

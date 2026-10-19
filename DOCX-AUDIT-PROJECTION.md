@@ -8,7 +8,7 @@ relationships, content types and core metadata. The package manifest identifies 
 - Format: `nc25-docx-audit-projection/v1`
 - Source: `NC25OL Specification v01.09.docx`
 - Source bytes: `68458`
-- Source SHA-256: `E2A0AE67F215FF6B87CC1645C748AAE337760C8669DBB7321D5C118F1436B540`
+- Source SHA-256: `5F591F538F35A0B97C28D3C56DCB786265004560DB2A9A20C5E6AA38787C4BF6`
 - Generator: `tools/build_docx_audit_projection.py`
 
 ## ZIP member inventory
@@ -24,7 +24,7 @@ relationships, content types and core metadata. The package manifest identifies 
 | `docProps/core.xml` | 946 | `9937E898E47823EF9DDC97A8B81A0ABF6F560C4EFC27EE1E7BA3F12F2C04102C` |
 | `docProps/thumbnail.jpeg` | 8324 | `96367138DC44CE09BF2C8F0F8E49348A1478D2C5C0AF69BBC2BBC38B63CDCEAD` |
 | `word/_rels/document.xml.rels` | 1613 | `92BA0B0C1DCEF764CD7BA71FAA371AA1714446753442B3F3F2804A50A330FF41` |
-| `word/document.xml` | 401265 | `A29A735E983A053123EEFEA61D3A1E44EC16F009418DB67FCF8E6EE1A987FCDB` |
+| `word/document.xml` | 401265 | `B1E04D4A60B19907CBAB3B21EBD5A13E81D3EC61B508A79ACED6F97946A86408` |
 | `word/fontTable.xml` | 2811 | `79385FB7F60247507ECAFFC292E9EBD52EA0657B8634F629BA6FCCC54011D6BB` |
 | `word/footer1.xml` | 1690 | `5AE994C4D3889A1FC58D88009A7F8F63C216AAC94713254E567358CF3BB1EA20` |
 | `word/footer2.xml` | 1494 | `182E82C76996BFE2986520193E30C014C84D0FA4A666EBB74C01C59EFEDD9ACC` |
@@ -105,9 +105,9 @@ relationships, content types and core metadata. The package manifest identifies 
 5. Document
 6. Value
 7. Version
-8. 01.09.01
+8. 01.09.02
 9. Date
-10. 17 October 2026
+10. 18 October 2026
 11. Author
 12. Maksim Barziankou (MxBv)
 13. Affiliation

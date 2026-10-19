@@ -61,9 +61,8 @@ GATE_ROWS = {
 def plural(count: int, noun: str) -> str:
     """Agree a regular noun with its count.
 
-    One home for the REGULAR rule, because the figures paragraph and the
-    geometry sentence each carried their own and only one of them was ever
-    applied. The geometry noun is irregular and is decided beside its own
+    One home for the REGULAR rule, so the figures paragraph and the geometry
+    sentence agree their nouns by one rule. The geometry noun is irregular and is decided beside its own
     sentence by `geometry_word`; it does not pass through here, and its justification lives
     beside it rather than as a second home for this rule.
 
@@ -72,38 +71,72 @@ def plural(count: int, noun: str) -> str:
     for the counts that share it; and "hard findings" in the document sentence, whose count
     the gate admits only as zero. `witnessed` in the figures paragraph bypasses nothing: it
     has no noun of its own and borrows the one agreed before it. Named, not counted - a
-    number in prose beside a list is a second copy of it. An earlier form of this docstring
-    named the first as "the stated exception", which reads as the complete list and is not.
+    number in prose beside a list is a second copy of it.
     """
     return noun if count == 1 else f"{noun}s"
+
+
+# The deepest JSON this package ships is 8 levels (a schema, measured). The bound
+# sits far above that and far below any interpreter's parser limit, so no evidence this
+# reader accepts can reach the parser's.
+EVIDENCE_JSON_MAX_DEPTH = 64
+_JSON_DEPTH_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|[\[\]{}]')
+
+
+def _nested_past(text: str, limit: int) -> bool:
+    """Does any array or object in this JSON text open deeper than `limit`?
+
+    A scan over string literals and brackets, not a parse, so it cannot recurse: strings
+    are matched whole and skipped, and only the brackets outside them move the depth.
+    Text that is not JSON can mislead the count; the parser refuses such text anyway,
+    under the same code. Valid JSON deeper than the bound is refused on purpose: a bound
+    of this reader's own is the only one that gives the same answer on every interpreter.
+    """
+    depth = 0
+    for match in _JSON_DEPTH_TOKEN.finditer(text):
+        token = match.group()
+        if token in ("[", "{"):
+            depth += 1
+            if depth > limit:
+                return True
+        elif token in ("]", "}"):
+            depth -= 1
+    return False
 
 
 def load_json(path: Path) -> dict[str, Any]:
     """Read one piece of evidence, answering by name whatever is wrong with it.
 
-    Reading and parsing used to sit in one expression, and the two failures that expression
-    can produce left the vocabulary: a missing or unreadable file as `OSError`, a file whose
-    bytes are not JSON as `JSONDecodeError`. Both were conceded in a test comment as
-    "outside that world", and a concession is disclosure rather than closure - the caller
-    still met a raw exception where every neighbouring failure has a name.
+    Reading and parsing are separate clauses, each answering in the evidence's vocabulary:
+    in one expression, a missing or unreadable file would leave as `OSError` and a file
+    whose bytes are not JSON as `JSONDecodeError` - raw exceptions where every neighbouring
+    failure has a name.
 
     The label carries the file, because five call sites share this function: a refusal
     saying only that some evidence was unreadable sends a reader to open all five.
 
-    Both clauses name a CLASS and not the failures that were observed, because the first
-    form of this function caught the two that had been seen and let the next two out.
-    Reading bytes into text fails for reasons of the file - absent, locked, denied - and
-    for reasons of its ENCODING; turning text into data fails for reasons of syntax and
-    for reasons of DEPTH. All four are properties of the evidence rather than of this
-    program, so all four answer in the evidence's vocabulary. Measured, because the type
-    hierarchy is what decided the first form: `UnicodeDecodeError` is a `ValueError` and
-    NOT an `OSError`, so it passed the read clause untouched; `RecursionError` is a
-    `RuntimeError`, so it passed the parse clause the same way.
+    Both clauses name a CLASS and not single observed failures. Reading bytes into text
+    fails for reasons of the file - absent, locked, denied - and for reasons of its
+    ENCODING; turning text into data fails for reasons of syntax and for reasons of DEPTH.
+    All four are properties of the evidence rather than of this program, so all four
+    answer in the evidence's vocabulary. The type hierarchy decides what each clause must
+    name, measured: `UnicodeDecodeError` is a `ValueError` and NOT an `OSError`, so a read
+    clause naming `OSError` alone lets it through; `RecursionError` is a `RuntimeError`, so
+    a parse clause naming `ValueError` alone lets it through the same way.
+
+    Depth is bounded here, before the parser, at EVIDENCE_JSON_MAX_DEPTH. The parser's
+    own limit belongs to the interpreter, not to the evidence: a list nested 50 000 deep
+    raises RecursionError on Python 3.12 and parses into a list on 3.14 (measured), so
+    without the bound the same bytes would be EVIDENCE_JSON_INVALID on one interpreter and
+    EVIDENCE_JSON_OBJECT_REQUIRED on the other. With the bound, the answer is a
+    property of the bytes alone.
     """
     try:
         raw = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         raise ValueError(f"EVIDENCE_FILE_UNREADABLE: {path.name}") from None
+    if _nested_past(raw, EVIDENCE_JSON_MAX_DEPTH):
+        raise ValueError(f"EVIDENCE_JSON_INVALID: {path.name}")
     try:
         value = json.loads(raw)
     except (ValueError, RecursionError):
@@ -143,9 +176,9 @@ def require_collection(value: Any, label: str) -> int:
 
     Each entry is a NAME, and the figure published beside it is a count of names: every
     one of the nine collections this reads is a list of code names or of emission points,
-    measured off the shipped baseline. Raw `len` counted whatever the file listed, so a
-    name written twice published as two codes - measured, `["X", "X"]` answered 2 - and a
-    figure the report calls a count of codes would have been a count of entries. Entries
+    measured off the shipped baseline. Raw `len` counts whatever the file lists, so a name
+    written twice would publish as two codes - measured, `["X", "X"]` answers 2 - and a
+    figure the report calls a count of codes would be a count of entries. Entries
     are required to be non-empty strings and to be distinct; the scanner that writes the
     baseline builds these lists from a set, so this cannot fire on a file of ours, and it
     is the reader that publishes the number.
@@ -169,11 +202,10 @@ def read_report(path: Path) -> str:
     """Read the report a run is about to rewrite, answering by name for what reading can do.
 
     The report is an INPUT to both halves as well as their output - its sections are
-    rewritten in place - and both halves read it with a bare `read_text`, beside a
-    `load_json` that names every way the evidence files can fail to read. So a report that
-    was missing, locked or not UTF-8 left the generator as a raw OSError or
-    UnicodeDecodeError, while the sweep's comment said only `bound_bytes` remained outside.
-    The same two failure classes as `load_json`'s read, under the report's own code.
+    rewritten in place. A bare `read_text` would let a report that is missing, locked or
+    not UTF-8 leave the generator as a raw OSError or UnicodeDecodeError, beside a
+    `load_json` that names every way the evidence files can fail to read. Here: the same
+    two failure classes as `load_json`'s read, under the report's own code.
     """
     try:
         return path.read_text(encoding="utf-8")
@@ -185,29 +217,27 @@ def write_through_temporary(path: Path, text: str) -> None:
     """Write a file through a neighbouring temporary, leaving none behind on any path this
     code runs.
 
-    Both writers in this module used to carry these two statements in line, and both
-    carried the same hole: with the replace raising - a locked destination, a device
-    error - the temporary written a moment earlier stayed behind, against a sentence
-    promising no residue. One writer even named the hole in a comment, which is
-    disclosure and not closure; the other said nothing.
+    Both writers in this module go through here. With these two statements in line, the
+    replace raising - a locked destination, a device error - would leave behind the
+    temporary written a moment earlier.
 
     `finally` and not an `except`, because the paths that leave residue are not only
     exceptions: an interrupt between the two statements does it too. After a successful
     replace the name is released at once: the file has moved, so whatever stands at that
-    name afterwards is not this call's, and the `finally` used to remove it all the same -
-    a file another writer had put there in between would have gone. `missing_ok` stays
-    for a temporary something else has already removed.
+    name afterwards is not this call's, and a `finally` that still removed it would take a
+    file another writer had put there in between. `missing_ok` stays for a temporary
+    something else has already removed.
 
-    The temporary's NAME belongs to this call alone. It was `<report>.tmp`, shared by every
-    writer of the same report, and the `finally` above turned that from a race into a
+    The temporary's NAME belongs to this call alone. A name like `<report>.tmp`, shared by
+    every writer of the same report, would turn the `finally` above from a race into a
     hazard: removing a name is not removing MY file, so one writer could delete the
-    temporary another was about to replace. `mkstemp` in the report's own directory - the
+    temporary another is about to replace. `mkstemp` in the report's own directory - the
     same volume, so the replace stays a rename - gives each call a file nobody else holds.
-    Two writers of one report still race for which text lands last; what they no longer
-    do is destroy each other's temporaries.
+    Two writers of one report still race for which text lands last; they do not destroy
+    each other's temporaries.
 
-    Everything after `mkstemp` names its file runs inside the `try`: closing the handle and
-    building the path used to stand before it, so an interrupt there left the temporary.
+    Everything after `mkstemp` names its file runs inside the `try`, closing the handle and
+    building the path included, so an interrupt there leaves no temporary.
     The windows no statement here can close: inside `mkstemp` itself, between the file
     being created and its name being returned; and between the replace returning and the
     name being released on the line after it, where an interrupt would still remove a
@@ -230,26 +260,24 @@ def replace_once(text: str, pattern: str, replacement: str, label: str,
                  count_pattern: str | None = None) -> str:
     """Replace a pattern that occurs exactly once, and refuse any other count.
 
-    The first form counted with `re.subn(..., count=1)`, which stops after the
-    first substitution and reports one, so it refused an ABSENT pattern and
-    accepted a DOUBLED one - quietly rewriting the first of two. The name said
-    once; the code meant at least once.
-    The count now comes from `re.findall` before anything is rewritten; the
+    Counting with `re.subn(..., count=1)` alone would not do: it stops after the
+    first substitution and reports one, so it refuses an ABSENT pattern and
+    accepts a DOUBLED one, quietly rewriting the first of two.
+    The count comes from `re.findall` before anything is rewritten; the
     rewrite's own count is asked as well, for the reason below.
     """
     # What must occur once is not always what gets rewritten. A caller that substitutes a
     # well-formed value can pass the CLAIM as `count_pattern`: counting the well-formed
-    # occurrences alone made a duplicate carrying a malformed one invisible, and the
-    # rewrite then saved a document with both copies - measured, with 64 lowercase
+    # occurrences alone would make a duplicate carrying a malformed one invisible, and the
+    # rewrite would then save a document with both copies - measured, with 64 lowercase
     # characters as the second digest.
     # And the substitution is counted too, because the two patterns can disagree. With a
     # `count_pattern` the claim is counted and the DIGEST is rewritten, so a sole
     # occurrence carrying a malformed digest satisfies the count and matches nothing to
-    # replace: before `count_pattern` existed that document was refused `:0`, and after
-    # it the function returned the text unchanged while `rebind_report_to_manifest`
-    # reported the new digests as though they had been written. A loud refusal traded for
-    # a silent no-op. `:0` is the same detail the absent case carried, and it is
-    # the right one: nothing was replaced.
+    # replace. Without the second count the function would return the text unchanged while
+    # `rebind_report_to_manifest` reports the new digests as though they had been written:
+    # a silent no-op where a refusal belongs. The refusal is `:0`, the same detail as the
+    # absent case, and it is the right one: nothing was replaced.
     occurrences = len(re.findall(count_pattern or pattern, text, flags=re.MULTILINE))
     if occurrences != 1:
         raise ValueError(f"{label}:{occurrences}")
@@ -311,7 +339,7 @@ def rebind_report_to_manifest(root: Path = ROOT) -> tuple[str, str]:
     report_path = root / "ACCEPTANCE-REPORT.md"
     source = read_report(report_path)
     # `replace_once` and not a bare `sub`: a report carrying the sentence twice
-    # is a defect the verifier now names, and rewriting the first of two would
+    # is a defect the verifier names, and rewriting the first of two would
     # hide it here instead.
     source = replace_once(
         source,
@@ -344,14 +372,12 @@ def failure_surface_figures(root: Path = ROOT) -> dict[str, int]:
     if not isinstance(runtime, dict):
         raise ValueError("FAILURE_SURFACE_BASELINE_RUNTIME")
     # Every figure is read with `.get` and answered by `require_collection`, so a key that
-    # is ABSENT and a key holding the wrong shape refuse with the same name. Half of these
-    # were indexed - `baseline["engine_refusal_codes"]` - and an indexed read of a missing
-    # key raises KeyError: not a raise site, so outside the closed world the by-name sweep
-    # holds this generator to, and outside the vocabulary a caller is promised.
-    # `require_collection` refuses None already, having to refuse every non-list,
-    # so the change is the read and not the helper. The two `_int` figures were already
-    # written this way, which is how the split arose: the shape was copied from a
-    # neighbour for some lines and not for others.
+    # is ABSENT and a key holding the wrong shape refuse with the same name. An indexed
+    # read - `baseline["engine_refusal_codes"]` - of a missing key raises KeyError: not a
+    # raise site, so outside the closed world the by-name sweep holds this generator to,
+    # and outside the vocabulary a caller is promised. `require_collection` refuses None
+    # already, having to refuse every non-list, so the read is what carries the rule, not
+    # the helper; every figure here, the two `_int` ones included, is read the same way.
     return {
         "engine": require_collection(
             baseline.get("engine_refusal_codes"), "FAILURE_SURFACE_ENGINE_CODES"),
@@ -425,10 +451,10 @@ def update_report(
         step_id = raw.get("id")
         passed = require_non_negative_int(raw.get("passed"), "STEP_COUNT")
         total = require_non_negative_int(raw.get("total"), "STEP_COUNT")
-        # A gate that ran NO checks is not a passing gate. `passed == total` was the whole
-        # test, and zero satisfies it, so eight steps of `0/0 PASS` beside the aggregate
-        # `8/8` would have been published as eight gates passed. The vacuous case is
-        # reachable from our own tree, not only from a forged file: the runner extracts
+        # A gate that ran NO checks is not a passing gate. With `passed == total` as the
+        # whole test, zero satisfies it, and eight steps of `0/0 PASS` beside the aggregate
+        # `8/8` would be published as eight gates passed. The vacuous case is reachable
+        # from our own tree, not only from a forged file: the runner extracts
         # `Ran (?P<passed>\d+) tests` and requires `OK`, and a suite that ran nothing
         # prints both.
         if (not isinstance(step_id, str) or step_id in steps or passed != total
@@ -452,8 +478,8 @@ def update_report(
     # Each count against the list it counts, where the file carries the list. The audit
     # writes both from their own lists - measured - so this cannot fire on our own
     # pipeline; it fires on a file that says zero hard findings beside a list of them,
-    # which is what this report would then publish. Two spellings of one fact with
-    # nothing holding them together is the seam this change set closes elsewhere.
+    # which is what this report would then publish: two spellings of one fact, with
+    # this check as the only thing holding them together.
     # Named limits: a file that OMITS the list is still read by its count alone, as the
     # fixture that pins this reader does; and `pages` is NOT held to `page_count`,
     # deliberately - the page count is the PDF's and the page reports are the rendered
@@ -466,10 +492,9 @@ def update_report(
     # `page_sizes` holds the DISTINCT page geometries, not one entry per page:
     # a multi-page render may use a single geometry. So the
     # coherent range is one geometry at least and no more than there are
-    # pages. Until this line the two figures were validated separately and
-    # never against each other, and the report prints both in one sentence -
-    # geometry with no sizes at all would have been accepted and published as
-    # "N pages and uses 0 page geometries".
+    # pages. The report prints both figures in one sentence, so they are
+    # validated against each other: geometry with no sizes at all would
+    # otherwise be published as "N pages and uses 0 page geometries".
     if not 1 <= len(page_sizes) <= page_count:
         raise ValueError("GEOMETRY_PAGE_SIZES")
     # Each entry is one geometry, a [width, height] pair of positive finite
@@ -525,16 +550,15 @@ def update_report(
     # The two fields of this manifest the rest of the function leans on, asked here by name.
     # `package_version` is read AGAIN below by `spec_docx_name`, a helper shared with the
     # verifier and the projection builder, which re-parses the file and indexes it bare: a
-    # manifest without the field, or with a number in it, left this function as KeyError or
-    # AttributeError from inside that helper - no raise site of this module, so outside the
-    # closed world the by-name test holds it to, and invisible to the indexed-read ratchet,
-    # which reads this module's source only. The helper keeps its contract for its other
-    # callers; this function names the field before handing the path over. The form asked is
-    # the one the helper takes major.minor from.
-    # `inputs` is iterated, and a JSON number as `inputs` itself raised TypeError from the
-    # `for` - a number inside the list is filtered by the dict test below - the same
-    # class one line down, found by looking at every read of this object, not only the one
-    # reported.
+    # manifest without the field, or with a number in it, would leave this function as
+    # KeyError or AttributeError from inside that helper - no raise site of this module, so
+    # outside the closed world the by-name test holds it to, and invisible to the
+    # indexed-read ratchet, which reads this module's source only. The helper keeps its
+    # contract for its other callers; this function names the field before handing the path
+    # over. The form asked is the one the helper takes major.minor from.
+    # `inputs` is iterated, and a JSON number as `inputs` itself would raise TypeError from
+    # the `for` - a number inside the list is filtered by the dict test below - the same
+    # class one line down, so every read of this object is asked, not only one.
     package_version = source_manifest.get("package_version")
     if not isinstance(package_version, str) or not re.fullmatch(
         r"[0-9]+(?:\.[0-9]+)+", package_version
@@ -560,14 +584,14 @@ def update_report(
         core_input.get("byte_length"), "CORE_BYTES"
     )
     core_lines = require_non_negative_int(core_input.get("line_count"), "CORE_LINES")
-    # `str(core_sha)` stood where `core_sha` stands now, and the conversion was the whole
-    # defect: the pattern was applied to text this line manufactured, so a JSON NUMBER
-    # whose decimal form is sixty-four digits - 10**63 - satisfied a HEX test and was
-    # printed into the report as the core's digest. Measured, with controls: a genuine
-    # uppercase digest passes, `deadbeef` fails, the integer passed. The other three
-    # digest checks in this file ask the value's type and match the value itself; this one
-    # asked the type of the neighbouring FILE NAME and converted its own subject. A form
-    # check run on a conversion is a check on the conversion.
+    # `core_sha` itself, not `str(core_sha)`: matched against its conversion, a JSON
+    # NUMBER whose decimal form is sixty-four digits - 10**63 - satisfies a HEX test and
+    # would be printed into the report as the core's digest. Measured, with controls: a
+    # genuine uppercase digest passes, `deadbeef` fails, and the integer passes a check
+    # on its conversion. The other three digest checks in this file ask the value's type
+    # and match the value itself, and so does this one, rather than asking the type of
+    # the neighbouring FILE NAME and converting its own subject. A form check run on a
+    # conversion is a check on the conversion.
     if (
         not isinstance(core_file, str)
         or not isinstance(core_sha, str)
@@ -640,11 +664,12 @@ def update_report(
     # asked AGAIN on the final text below, which is the text this run publishes. Only the
     # second one is the guard: everything between the two lines puts generated values into
     # the report, and one of them is a NAME out of the source manifest, checked to be a
-    # string and nothing else. Measured on a copy of the package - a core file name reading
-    # "core.md`; py -3 tests/run_acceptance.py; `x" left the template clean, passed here,
-    # and stood in the written report inside the immutable-core sentence, with the run
-    # reported as successful. The guard's own comment says a sentence quoting the exact
-    # invocation is refused whatever the intent; the one text it never read was its own.
+    # string and nothing else. Measured on a copy of the package: without the second check,
+    # a core file name reading "core.md`; py -3 tests/run_acceptance.py; `x" leaves the
+    # template clean, passes here, and stands in the written report inside the
+    # immutable-core sentence, with the run reported as successful. A sentence quoting the
+    # exact invocation is refused whatever the intent, in the text this function writes as
+    # well as in the template it reads.
     if command_refused(text):
         raise ValueError("REPORT_CANONICAL_COMMAND")
     text = replace_once(
@@ -722,13 +747,10 @@ def update_report(
     # that carry none of their own are the emission-point counts below, which share one
     # fixed noun, and `witnessed`, which borrows the noun of the count before it
     # ("... constructed and 1 witnessed") and so reads right at any value. Named, not
-    # counted: the figures this comment gave went stale beside the list. The
-    # sentence here used to claim
-    # every count agreed, which the inner comment contradicted fifteen lines later - two
-    # statements about one paragraph, in one function, saying opposite things. What
-    # changed was the idiom already used for the geometry sentence below, applied here
-    # too: without it six nouns were frozen plural and one frozen singular, and the
-    # paragraph misread itself at a value of one. `all`, `static` and `dynamic` share the
+    # counted: figures in this comment would go stale beside the list. The idiom is the
+    # one the geometry sentence below uses: without it six nouns would be frozen plural
+    # and one frozen singular, and the paragraph would misread itself at a value of one.
+    # `all`, `static` and `dynamic` share the
     # single noun "points" and stay frozen deliberately, because a count of emission
     # points is not a count of things the sentence names one by one.
     figures_section = "\n".join(
@@ -778,8 +800,7 @@ def update_report(
             # The NEXT line's noun, "hard findings", does not go through `plural` and the
             # line above this comment does: the gate admits only `hard_count == 0`, so that
             # noun has one form because the value has one value, and routing a pinned count
-            # through the agreement rule would dress a constant as an agreement. Said here
-            # rather than above, where it read as a denial of the page count beside it.
+            # through the agreement rule would dress a constant as an agreement.
             f"geometry gate reported {chr(96)}GREEN{chr(96)}, {hard_count} hard findings, and",
             f"{warning_count} non-blocking {warning_word}. Automated geometry evidence does not claim",
             "human visual inspection. Optional extended-property counters that could not be",

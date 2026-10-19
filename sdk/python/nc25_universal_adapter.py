@@ -191,8 +191,9 @@ class UniversalConnectionHttpAdapter:
         # (method, compiled path) -> (required scope, handler). One row per
         # OpenAPI operation; the conformance suite asserts this set is exact.
         # Anchored with \Z, not $: in Python `$` also matches immediately
-        # before a trailing newline, so every route had a second spelling that
-        # differed by one appended %0A - including the state-changing ones.
+        # before a trailing newline, so with `$` every route would have a second
+        # spelling that differs by one appended %0A - including the
+        # state-changing ones.
         # Anything outside this process that treats the path as the identity of
         # a resource (a proxy allow-list, an audit trail, a rate limiter) sees
         # two different strings where the adapter saw one route.
@@ -336,8 +337,9 @@ class UniversalConnectionHttpAdapter:
             raise WireError(
                 400, "ACTIVATE_BODY", "profile and declaration required"
             )
-        # The wrapper is closed in the contract (additionalProperties: false)
-        # and was open here: an unknown top-level key was accepted in silence.
+        # The wrapper is closed in the contract (additionalProperties: false),
+        # and closed here too: an unknown top-level key is refused, not accepted
+        # in silence.
         unknown = set(body) - {
             "profile", "declaration", "activated_by", "approval_evidence_ref"
         }

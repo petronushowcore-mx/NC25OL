@@ -16,6 +16,42 @@ the README title and every other version field carry all three.
 Versions up to 0.0.11 are pre-release; in them the second digit is not used,
 and each entry is a patch.
 
+## 01.09.02
+
+Paired with Spectrum `v00.09.02`. Fixes three defects of 01.09.01 and adds
+Python 3.14 to the supported versions.
+
+- Evidence JSON read by the acceptance-report generator is refused past a depth
+  bound of 64 before it reaches the parser. The parser's own limit belongs to
+  the interpreter: a list nested 50 000 deep raised `RecursionError` on Python
+  3.12 and parsed on Python 3.14, so the same bytes were refused under two
+  different codes. They are now `EVIDENCE_JSON_INVALID` on every interpreter.
+- A virtual environment made as `.venv` or `venv` in the package root is left
+  out of the package manifest and of every package check, and git ignores both.
+  Taken in, its files failed `no_build_artefacts` and
+  `package_manifest_coverage`, and the `.docx` templates it carries stopped the
+  acceptance run on `BOUND_DOCUMENT_COUNT:3`. README says where to make the
+  environment.
+- The runbook's optional pytest collection names its precondition: pytest is
+  not in `requirements-lock.txt` and is installed separately.
+- Python 3.14 is supported: the full acceptance passes on 3.14.4, the hashes in
+  `requirements-lock.txt` cover its wheels, and CI runs 3.11, 3.12 and 3.14.
+- The recorded source release (`examples/spectrum_release/RESULT.md` and its
+  `result.json`) uses Tectonica Spectrum `v00.09.02`. Its archive packages the
+  Spectrum root, whose README and CHANGELOG changed in `v00.09.02`, so the
+  example was run again on that release; the new result replaces the record
+  made on `v00.09.01`.
+- The package verifier checks the pair with Spectrum: the pairing line of the
+  current CHANGELOG section, the recorded source release's RESULT.md (its prose,
+  table and reproduction commands) and its `result.json` must name one Spectrum
+  release and one commit.
+- The README files of the three local examples name Python 3.11, 3.12 and 3.14,
+  as the package README and CI do.
+- RESULT.md states that the Probe VI companion in Spectrum's `layers/ProbeVI`
+  keeps its MIT licence; it had named only CC BY-NC-ND 4.0. It also says that
+  the observation's `collection.stdout_sha256` depends on the absolute path of
+  the Spectrum checkout.
+
 ## 01.09.01
 
 - Adds a synthetic local example composing an OTCS registration preview,

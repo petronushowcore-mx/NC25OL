@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: NC25OL - Navigational Cybernetics 2.5 Open Ledger API
-  version: 01.09.01
+  version: 01.09.02
   description: >-
     Role-separated reference contract for activating one connection
     declaration, issuing and revoking workload authority, evaluating bound

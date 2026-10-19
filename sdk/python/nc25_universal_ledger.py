@@ -514,7 +514,7 @@ def _require_exact_keys(
 # A refused value is quoted back so the caller can see WHICH value was
 # refused; it does not need to be quoted back in full. The adapter returns this
 # detail as the error message, so without a bound the response length is set by
-# the request: an identifier of 900 KiB came back as a message of 900 KiB.
+# the request: an identifier of 900 KiB would come back as a message of 900 KiB.
 # Every legitimate value the helpers that quote back a refused value accept is
 # far shorter than the bound, so a truncated detail only ever appears on a
 # value already refused. There are six such call sites across five functions,
@@ -579,22 +579,22 @@ def _normalize_declared_hash_case(value: Any, field: str | None = None) -> Any:
     This builds the replay identity of a request, and it honours the wire rule
     "a hash is accepted in either case" on the fields where that rule is given.
 
-    It used to normalise by SHAPE - any 64-hex string anywhere - which quietly
-    pulled opaque identifiers into the identity whenever a deployment chose
-    hex-shaped values for them. Two consequences, both measured: an idempotency
-    key differing only in case produced ONE request identity but TWO stored
-    entries, so a single logical payment could hold two reservations and be
-    executed twice; and two DIFFERENT principals presenting one key replayed
-    each other's permit, because the conflict guard compared identities in
-    which the requester's case had already been erased. The inventory is not a
+    Normalising by SHAPE instead - any 64-hex string anywhere - would quietly pull
+    opaque identifiers into the identity whenever a deployment chose hex-shaped
+    values for them. Two consequences, both measured: an idempotency key differing
+    only in case produces ONE request identity but TWO stored entries, so a single
+    logical payment can hold two reservations and be executed twice; and two
+    DIFFERENT principals presenting one key replay each other's permit, because the
+    conflict guard compares identities in which the requester's case has already
+    been erased. The inventory is not a
     maintenance burden invented here - it is the schemas' own, and it is
     checked against them.
     """
     # The value's real type, and the base `upper`: `isinstance` asks `__class__`, which a
     # caller's object can answer as it likes - measured through the bridge, an object that
-    # said `str` in a declared hash field reached `fullmatch`, and one that said `list`
-    # was iterated, and each left as a raw TypeError. Asked of every branch, because the
-    # class is the question and not the type it lies about.
+    # says `str` in a declared hash field would reach `fullmatch`, and one that says `list`
+    # would be iterated, each leaving as a raw TypeError. Asked of every branch, because
+    # the class is the question and not the type it lies about.
     kind = type(value)
     if issubclass(kind, str):
         if field in DECLARED_HASH_FIELDS and SHA256_RE.fullmatch(value):
@@ -1446,9 +1446,9 @@ class AppendOnlyLedger:
         key that is not text as JSON_OBJECT_KEY_TYPE, a structure past
         MAX_NESTING_DEPTH as NESTING_DEPTH_EXCEEDED - `canonical_json` catches
         what the encoder raises and re-raises a ContractViolation untouched,
-        so the walk's own codes reach the caller. This paragraph named all
-        three as CANONICAL_JSON_INVALID until they were run. The hostile-value
-        sweep drives them beside the integrity refusal for exactly that reason.
+        so the walk's own codes reach the caller. The hostile-value sweep
+        drives all three beside the integrity refusal, so each code is pinned
+        by a run rather than by this paragraph.
 
         Raises IntegrityViolation("EVENT_SIGNER_REQUIRED") for the cases that
         are not an answer about the chain but the absence of any means to
@@ -1474,13 +1474,13 @@ class AppendOnlyLedger:
                 return False
             if event.get("previous_event_hash") != previous:
                 return False
-            # Not copied. The copy that stood here had no reader - `sha256_hex` walks
-            # this mapping through `_plain_json`, which builds fresh containers and
-            # mutates nothing - and it ran BEFORE the walk, so it was the first thing a
-            # deep stored value met: measured, a payload 600 levels deep left verify()
-            # and the public read as a bare RecursionError, while the walk refuses at 65
-            # by its own code. A copy taken ahead of a guard is a guard's worth of depth
-            # spent before the guard.
+            # Not copied. A copy here would have no reader - `sha256_hex` walks this
+            # mapping through `_plain_json`, which builds fresh containers and mutates
+            # nothing - and it would run BEFORE the walk, as the first thing a deep stored
+            # value meets: measured, with a copy here a payload 600 levels deep leaves
+            # verify() and the public read as a bare RecursionError, while the walk refuses
+            # at 65 by its own code. A copy taken ahead of a guard is a guard's worth of
+            # depth spent before the guard.
             body = {
                 key: value
                 for key, value in event.items()
@@ -1554,22 +1554,19 @@ class AppendOnlyLedger:
 def refuse_stored_artefact(connection: "sqlite3.Connection", statements):
     """Run statements on a connection, naming a stored artefact rather than escaping.
 
-    One home, because the guard was one statement wide and the class is not. The header
-    read was guarded and described as running "before anything else on this connection" -
-    and the statement that followed it on that same connection, the create, was not.
-    Measured: a database whose first hundred bytes are a valid header and whose schema page
-    is overwritten passes `PRAGMA schema_version` and then raises
-    `sqlite3.DatabaseError: database disk image is malformed` out of the create, past both
-    stores, which is the class both stores exist to close.
+    One home, because the class is wider than one statement: guarding the header read
+    alone leaves the statement that follows it on the same connection, the create,
+    unguarded. Measured: a database whose first hundred bytes are a valid header and
+    whose schema page is overwritten passes `PRAGMA schema_version` and then raises
+    `sqlite3.DatabaseError: database disk image is malformed` out of an unguarded
+    create, past both stores, which is the class both stores exist to close.
 
     Returns None when every statement ran, and the artefact detail paired with its driver
     error when one of them says the file is not our store. The RAISE stays with the caller,
     and that is a decision rather than a style: the refusal vocabulary belongs to the
     caller's module, and a raise whose exception class and code arrive as arguments is a
-    raise no static reader of this tree can classify. The first form of this helper took
-    both as parameters and raised here; it left one unclassified emission point, and off
-    that single line came the static ratchet check, the disjoint-worlds control, and four
-    ratchet plants that run the suite in a copy before planting and require it green.
+    raise no static reader of this tree can classify: raised here, it would be an
+    emission point the static ratchet check cannot attribute.
 
     The connection is closed on the path this function answers - a `sqlite3.DatabaseError`,
     whether it becomes a refusal or is re-raised. Why here, given that both callers close
@@ -1577,20 +1574,18 @@ def refuse_stored_artefact(connection: "sqlite3.Connection", statements):
     a returned connection is one no statement in this function still owns. On the re-raise
     path that reason does not apply - the exception reaches a caller that closes its own -
     and the close runs there only because it stands before the branch deciding between the
-    two. The reason
-    given before was that "a caller that receives a refusal is not going to close it",
-    and that was false of both callers there are - the bridge wraps its connection in
-    `closing(...)`, the state store in a `try/finally` - so on the refusal path the
-    connection is closed twice, which sqlite3 permits. Twice and known beats once and
-    assumed. NOT on every path, which is what this said and was not: anything that is not a
-    `sqlite3.DatabaseError` leaves through here with the connection open, because that is
-    the only class the handler catches. `MemoryError`, the shape `SQLITE_NOMEM` takes, is
-    the live example; a `TypeError` from a statement that is not a string is another, and
-    unreachable while both callers pass literals. Said as a class with an example rather
-    than as the example alone, which read as a complete list. Both callers close their own -
-    one through `closing(...)`, one through a `finally` - so the code is right and only the
-    claim was too wide; widening the code instead would duplicate what the callers already
-    guarantee. And on success - `None`, every statement run - the connection is left open
+    two. Both callers
+    close their own as well - the bridge wraps its connection in `closing(...)`, the state
+    store in a `try/finally` - so on the refusal path the connection is closed twice, which
+    sqlite3 permits. Twice and known beats once and assumed. NOT on every path: anything
+    that is not a `sqlite3.DatabaseError` leaves through here with the connection open,
+    because that is the only class the handler catches. `MemoryError`, the shape
+    `SQLITE_NOMEM` takes, is the live example; a `TypeError` from a statement that is not a
+    string is another, and unreachable while both callers pass literals. Said as a class
+    with an example rather than as the example alone, which would read as a complete list.
+    Both callers close their own - one through `closing(...)`, one through a `finally` - so
+    widening the code here would duplicate what the callers already guarantee. And on
+    success - `None`, every statement run - the connection is left open
     on purpose, because it is the caller's: the bridge commits the create on it, and the
     state store closes it in its `finally`.
     """
@@ -1616,31 +1611,29 @@ def refuse_unreadable_database(exc: "sqlite3.DatabaseError") -> str | None:
     artefact leaving the refusal vocabulary - one layer above the values.
 
     The transient class is named POSITIVELY, by the driver's own error names, and not as
-    "every OperationalError". That was this function's first form and it left a hole: a
-    database whose stored table is a virtual table naming a module this build lacks makes
-    `PRAGMA table_xinfo` raise `OperationalError: no such module`, which is not transient at
-    all - it is a permanent property of that file against this build - and re-raising it
-    put a raw driver error outside the refusal vocabulary, one layer above the values,
-    which is the class both stores exist to close. Measured on this build (sqlite 3.45.3):
+    "every OperationalError": a database whose stored table is a virtual table naming a
+    module this build lacks makes `PRAGMA table_xinfo` raise `OperationalError: no such
+    module`, which is not transient at all - it is a permanent property of that file
+    against this build - and re-raising it as transient would put a raw driver error
+    outside the refusal vocabulary, one layer above the values, which is the class both
+    stores exist to close. Measured on this build (sqlite 3.45.3):
     a locked database is SQLITE_BUSY, an unopenable file is SQLITE_CANTOPEN, a path of
     foreign bytes is SQLITE_NOTADB, and `no such module` is plain SQLITE_ERROR.
 
     Which side is which is the second decision on this point. Naming the transient side
-    positively was right and did not make its COMPLEMENT the artefact side - which is what
-    the first form assumed. Measured then over eleven error names: five that
-    belong to neither, `SQLITE_IOERR`, `SQLITE_NOMEM`, `SQLITE_FULL`, `SQLITE_INTERRUPT`
-    and `SQLITE_PROTOCOL`, were being refused as `unreadable: <name>` under codes whose
-    only declared meaning is that the table's columns are not ours. A full disk was
-    published as an integrity verdict about a database that is correct, and the caller
-    lost the exception type that would have told it to retry.
+    positively does not make its COMPLEMENT the artefact side. Measured over eleven error
+    names: five belong to neither, `SQLITE_IOERR`, `SQLITE_NOMEM`, `SQLITE_FULL`,
+    `SQLITE_INTERRUPT` and `SQLITE_PROTOCOL`; refused as `unreadable: <name>`, they would
+    land under codes whose only declared meaning is that the table's columns are not ours.
+    A full disk would be published as an integrity verdict about a database that is
+    correct, and the caller would lose the exception type that tells it to retry.
 
-    That count is the measurement of the day, not the rows as they stand: the suite now
-    drives each code by name on the side it belongs to, with the class the driver raises
-    for each, and two shapes beside them, an extended code and an error the driver did not
-    code at all. `SQLITE_NOMEM` left the rows in the same edit:
-    the driver answers that code with MemoryError, which no `except sqlite3.DatabaseError`
-    catches, so this function never sees it and a row about it asks a shape that never
-    arrives.
+    That count is a measurement, not the rows: the suite drives each code by name on the
+    side it belongs to, with the class the driver raises for each, and two shapes beside
+    them, an extended code and an error the driver did not code at all. `SQLITE_NOMEM` has
+    no row: the driver answers that code with MemoryError, which no `except
+    sqlite3.DatabaseError` catches, so this function never sees it and a row about it
+    would ask a shape that never arrives.
 
     So an error is a verdict about the stored artefact only when it SAYS so: the file is
     not a database, its schema is malformed, or a statement against that schema failed -
@@ -1650,42 +1643,42 @@ def refuse_unreadable_database(exc: "sqlite3.DatabaseError") -> str | None:
     transient codes are named where they are pinned - in the bridge suite's by-name rows,
     which drive both sides with the class the driver raises for each.
 
-    SQLITE_SCHEMA stood in that list without a measurement on either side - its row took
-    the class from the module's documented mapping and could not provoke the code. By the
-    criterion above it does not
-    belong: it says the schema changed while a statement ran - after the driver, which
-    prepares with `prepare_v2`, has already re-prepared the statement and tried again -
-    which is a concurrent change, not a property of whose table this is. It keeps its type
-    now, beside SQLITE_BUSY.
+    SQLITE_SCHEMA is not an artefact code. Its row takes the class from the module's
+    documented mapping, because no test here can provoke the code, and by the criterion
+    above it does not belong in the list: it says the schema changed while a statement
+    ran - after the driver, which prepares with `prepare_v2`, has already re-prepared the
+    statement and tried again - which is a concurrent change, not a property of whose
+    table this is. It keeps its type, beside SQLITE_BUSY.
 
     Keyed on the driver's BASE code, not on its name. The driver reports EXTENDED result
     codes - measured, a primary-key violation arrives as SQLITE_CONSTRAINT_PRIMARYKEY,
     1555 - and SQLite defines an extended code as the base code with high bits set, so
-    the low byte is the base. A table keyed by base names would have let an extended
+    the low byte is the base. A table keyed by base names would let an extended
     artefact code keep its type: SQLITE_CORRUPT_INDEX is 779, whose low byte is
     SQLITE_CORRUPT. The detail keeps the base wording, because the base is what the
     refusal is about.
 
-    But the fold is not general, and applying it to every base was this function's next
-    hole. Under SQLITE_CORRUPT the extensions all say corruption - _VTAB, _SEQUENCE,
+    But the fold is not general: applied to every base it would open a hole of its own.
+    Under SQLITE_CORRUPT the extensions all say corruption - _VTAB, _SEQUENCE,
     _INDEX - so the low byte answers for them. Under SQLITE_ERROR they say something
     else entirely: SQLITE_ERROR_RETRY, 513, is an instruction to try the statement again,
     and SQLITE_ERROR_SNAPSHOT, 769, is about a WAL snapshot that has moved on. Both mask
-    to 1 and were published as "unreadable: SQLITE_ERROR" - a PERMANENT verdict about the
+    to 1, and a fold over every base would publish them as "unreadable: SQLITE_ERROR" - a
+    PERMANENT verdict about the
     file, which is the exact defect this function's own account describes one paragraph
     above: a transient condition named as permanent takes from the caller the exception
     type that would have told it to retry. Measured on this build, all three names exist
     and all three mask to 1. So the fold is per-base and named: only the families whose
     extensions carry the base's meaning are folded, and the rest must match exactly.
 
-    An error with NO code gets no verdict and keeps its type. This used to fall back to a
-    type test - every DatabaseError that was not an OperationalError read as "not a
-    database" - on the ground that builds before 3.11 lack the attribute. Those builds are
-    not supported, and on the ones that are the fallback was reached only by errors the
-    MODULE raises itself, with no SQLite code behind them: measured on 3.12.9, a statement
-    on a closed connection and a wrong binding count are ProgrammingError with no code, and
-    both were published as a verdict that the stored file is not a database. A fault in
-    the caller is not a statement about the file. Named limit: on a build before 3.11 a
+    An error with NO code gets no verdict and keeps its type. A fallback type test -
+    every DatabaseError that is not an OperationalError read as "not a database" - would
+    serve only builds before 3.11, which lack the attribute and are not supported; on the
+    supported ones it would be reached only by errors the MODULE raises itself, with no
+    SQLite code behind them: measured on 3.12.9, a statement on a closed connection and a
+    wrong binding count are ProgrammingError with no code, and a fallback would publish
+    both as a verdict that the stored file is not a database. A fault in the caller is not
+    a statement about the file. Named limit: on a build before 3.11 a
     driver error carries no code either, so there a corrupt file keeps its type too; this
     function does not guess from message text.
 
@@ -1810,11 +1803,11 @@ class SQLiteStateStore:
             # site, and the two cases in the suite that look like its witnesses are
             # witnesses of the prologue.
             #
-            # The bridge is the opposite case, which is where the class was found: its
-            # prologue guards `PRAGMA schema_version` alone, so the create was the
-            # statement that escaped, and a file of exactly this shape left it as a raw
-            # driver error. Same shape, different reach - which is the reason this guard
-            # is kept and disclosed rather than removed as unreachable.
+            # The bridge is the opposite case: its prologue guards `PRAGMA schema_version`
+            # alone, so there the create is the statement a file of exactly this shape
+            # reaches, and without its guard it leaves as a raw driver error. Same shape,
+            # different reach - which is the reason this guard is kept and disclosed rather
+            # than removed as unreachable.
             # Through the translator, like the row statements and the commit. The
             # helper asks `refuse_unreadable_database` about a driver error, and that
             # function answers None for the CONSTRAINT class on purpose - a constraint
@@ -1904,14 +1897,14 @@ class SQLiteStateStore:
             if detail:
                 connection.close()
                 raise IntegrityViolation("STATE_COLUMNS", detail)
-            # And its KEY, which the names alone did not ask for. A create does nothing
+            # And its KEY, which the names alone do not ask for. A create does nothing
             # when a foreign table of the name is already there and does not retrofit a
-            # constraint, so a table with these five columns and no primary key passed -
-            # and this one is a WITHOUT ROWID table whose key IS the table. The rows just
-            # read report it: `table_xinfo` gives each column's position in the key, zero
-            # outside it. Measured on the outbox, whose key is the same question one
-            # module over: without it two rows sharing the identifiers lived in the table
-            # and the reader answered with whichever came first.
+            # constraint, so a table with these five columns and no primary key passes the
+            # names - and this one is a WITHOUT ROWID table whose key IS the table. The rows
+            # just read report it: `table_xinfo` gives each column's position in the key,
+            # zero outside it. Measured on the outbox, whose key is the same question one
+            # module over: without it two rows sharing the identifiers live in the table
+            # and the reader answers with whichever comes first.
             key = {row[1] for row in columns if row[5]}
             if key != self._KEY:
                 connection.close()
@@ -2143,10 +2136,10 @@ def _state_locked(required_scope: str) -> Any:
     a table would be a second source of truth that drifts. It is checked as
     the wrapper's first statement, above the lock, so a refusal cannot open a
     transaction, cannot take the SQLite write lock, cannot verify a snapshot
-    and cannot queue behind another writer. That placement is the property -
-    while the check lived in the method body it ran AFTER the store had
-    already loaded and verified a snapshot, so an unscoped caller on a
-    state-backed engine learned integrity status and drove a durable write.
+    and cannot queue behind another writer. That placement is the property:
+    a check in the method body would run AFTER the store has already loaded
+    and verified a snapshot, so an unscoped caller on a state-backed engine
+    would learn integrity status and drive a durable write.
     """
     if required_scope not in _KNOWN_ROLES:
         raise TypeError("_state_locked requires a declared role constant")
@@ -2937,9 +2930,9 @@ class UniversalConnectionLedger:
         # The binding's SHAPE is form, and form is refused here - before any
         # event and before the idempotency key is consumed. Only its VALUES
         # are substance: a well-formed binding naming another profile is a
-        # refusal with an event, decided later. A non-object binding used to
-        # fall through to that refusal, so malformed input became a permanent
-        # decision in the signed chain and burned the caller's key.
+        # refusal with an event, decided later. A non-object binding that fell
+        # through to that refusal would make malformed input a permanent
+        # decision in the signed chain and burn the caller's key.
         binding = _require_mapping(intent["binding"], "INTENT_BINDING")
         _require_exact_keys(binding, set(self._binding()), "INTENT_BINDING")
         for key in {
@@ -3140,13 +3133,14 @@ class UniversalConnectionLedger:
         Every revocation path shares this: once a permit provably can never
         commit, the structure reserved for it must come back immediately
         rather than sit until its TTL. Both revocation surfaces route through
-        here so the two cannot drift apart again.
+        here so the two cannot drift apart.
         """
         for record in self.permits.values():
             # Only a permit that is still live is killed here. One whose
             # reservation was already released keeps the reason it was
-            # released for - a permit expired before its grant was revoked
-            # used to be rewritten as revoked, and the first cause was lost.
+            # released for: a permit that expired before its grant was revoked
+            # stays expired, rather than being rewritten as revoked with the
+            # first cause lost.
             if selects(record) and not record.consumed and record.reservation_active:
                 record.reservation_active = False
                 record.invalidated_reason = reason
@@ -3800,11 +3794,10 @@ class UniversalConnectionLedger:
         # retry differing only in the case of a hash replays instead of
         # conflicting. The nested binding hashes are covered because the
         # inventory is the schemas' own and names them; the request's other
-        # keys are not, and that is the point. An earlier comment here argued
-        # that shape was safe because EXECUTION_FIELDS closes the key set -
-        # measured, that was false: connector_id is typed as an identifier and
-        # a hex-shaped value in it collapsed two distinct requests into one
-        # identity.
+        # keys are not, and that is the point. A closed key set does not make
+        # normalising by shape safe: connector_id is typed as an identifier, and
+        # a hex-shaped value in it, normalised by shape, would collapse two
+        # distinct requests into one identity - measured.
         canonical_execution_request = _normalize_declared_hash_case(
             execution_request
         )

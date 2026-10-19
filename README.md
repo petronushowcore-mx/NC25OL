@@ -1,13 +1,13 @@
-# NC25OL - Navigational Cybernetics 2.5 Open Ledger v01.09.01
+# NC25OL - Navigational Cybernetics 2.5 Open Ledger v01.09.02
 
 **Explicit admission. Single-use permits. Recorded execution.**
 
 <p align="center">
-  <img src="assets/NC25OL-poster.gif" alt="NC25OL 01.09.01 poster" width="400">
+  <img src="assets/NC25OL-poster.gif" alt="NC25OL 01.09.02 poster" width="400">
 </p>
 
 [![Acceptance](https://github.com/petronushowcore-mx/NC25OL/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/petronushowcore-mx/NC25OL/actions/workflows/ci.yml)
-[![Python 3.11 and 3.12](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](#getting-started)
+[![Python 3.11, 3.12 and 3.14](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.14-3776AB?logo=python&logoColor=white)](#getting-started)
 [![Code licence MIT](https://img.shields.io/badge/Code-MIT-2563EB)](LICENSE)
 [![Document licence CC BY 4.0](https://img.shields.io/badge/Documents-CC%20BY%204.0-7257C8)](LICENSE)
 
@@ -163,6 +163,11 @@ receipt. Conflating them would move the authority boundary and is invalid.
 pip install -r requirements-lock.txt
 python -B tests/run_acceptance.py
 ```
+
+Install into a virtual environment made outside the package directory, or as
+`.venv` or `venv` in its root: those two are left out of the package checks
+and ignored by git. An environment under any other name inside the package is
+read as package content and fails the package checks.
 
 The expected terminal result is `ACCEPTANCE_STEPS=8/8 PASS`, reported with
 `PACKAGE_CHECKS=61/61` and `EXTERNAL_SOURCE_CHECKS=NOT_RUN`: the NC2.5 core is a
@@ -609,7 +614,7 @@ Registry lookup is selector-bound. `registry_record` requires the exact connecto
 
 ## Reproducible release evidence
 
-The canonical acceptance command is `python -B tests/run_acceptance.py`; `python` must resolve to a supported interpreter. Supported versions are Python 3.11 and 3.12 — the two the continuous-integration matrix runs; the dependency lock was generated on 3.12. The command blocks below use the equivalent Windows launcher form `py -3 -B`.
+The canonical acceptance command is `python -B tests/run_acceptance.py`; `python` must resolve to a supported interpreter. Supported versions are Python 3.11, 3.12 and 3.14 — the three the continuous-integration matrix runs; the dependency lock was generated on 3.12, and its hashes also cover the 3.14 wheels. The command blocks below use the equivalent Windows launcher form `py -3 -B`.
 
 After any intentional package or specification change, rebuild the specification document first; its acceptance numbers and version are derived from the executable suites and `SOURCE-MANIFEST.json` at build time:
 

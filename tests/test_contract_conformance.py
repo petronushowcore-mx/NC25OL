@@ -551,10 +551,10 @@ def openapi_conformance() -> None:
 
     # Every status the reference adapter can emit on a route is DECLARED for
     # that route. The table below is the adapter's behaviour written down,
-    # route by route; it used to check only 403 and 413, and the three
-    # parametric GET routes answered 400 for a malformed selector with no
-    # declaration anywhere. 503 is on every route: the last-resort guard can
-    # answer on any of them. 200 on the grants route is the replay answer.
+    # route by route, every status included: the three parametric GET routes
+    # answer 400 for a malformed selector, and a table of 403 and 413 alone
+    # would leave that undeclared. 503 is on every route: the last-resort guard
+    # can answer on any of them. 200 on the grants route is the replay answer.
     emitted_by_route = {
         "/v1/declarations:activate": {"201", "400", "403", "409", "413", "503"},
         "/v1/authority-grants": {"200", "201", "400", "403", "409", "413", "503"},
@@ -1044,8 +1044,8 @@ def http_adapter_conformance() -> None:
         f"status={spoofed_status} body={spoofed}",
     )
 
-    # 413: a body over the adapter cap is refused before it is parsed. The
-    # declared body-cap status was never produced by a probe.
+    # 413: a body over the adapter cap is refused before it is parsed. This
+    # probe produces the declared body-cap status.
     cap_app, _cap_grant, _cap_intent, _cap_evidence = _adapter_fixture()
     oversized_status, _ = _http_call(
         cap_app,
@@ -1256,10 +1256,9 @@ def main() -> None:
         )
         raise SystemExit(1)
     # Which declared checks did not report is computed on EVERY path, and it is
-    # printed before any verdict. It used to be computed only after the partial
-    # branch had already returned, so in a partial run a check that stopped
-    # executing for any reason - not only a missing optional library - was
-    # reported by nothing at all.
+    # printed before any verdict. Computed only after the partial branch returns,
+    # it would leave a check that stopped executing for any reason - not only a
+    # missing optional library - reported by nothing at all in a partial run.
     missing = sorted(EXPECTED_CONFORMANCE_IDS - passed_ids)
     if missing:
         print(f"CONTRACT_CONFORMANCE_MISSING={missing}")
@@ -1270,9 +1269,9 @@ def main() -> None:
         )
         raise SystemExit(1)
     if skipped:
-        # A partial run is not a pass, and exiting zero said it was. The
-        # acceptance runner already refuses this output, because its marker
-        # requires PASS - so a direct run that exited zero made the two
+        # A partial run is not a pass, so it does not exit zero. The
+        # acceptance runner refuses this output too, because its marker
+        # requires PASS; a direct run exiting zero would make the two
         # disagree about the same result.
         print(
             f"CONTRACT_CONFORMANCE={len(passed_ids)}/"

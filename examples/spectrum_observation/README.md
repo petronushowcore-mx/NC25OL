@@ -24,7 +24,7 @@ is `NOT_MEASURED`; semantic validity and deployment conditions C1-C4 are not pro
 
 ## Run
 
-Use Python 3.11 or 3.12 and Git. Obtain Spectrum separately under its own licence;
+Use Python 3.11, 3.12 or 3.14 and Git. Obtain Spectrum separately under its own licence;
 this package contains no Spectrum source. Supply a full Spectrum commit chosen
 independently by the operator. All three checkouts must be clean, including ignored
 files, and the XIV/XV revisions must match the Spectrum commit's gitlinks. Hidden

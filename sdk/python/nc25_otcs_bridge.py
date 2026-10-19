@@ -186,15 +186,14 @@ OTCS_REFUSAL_CODES = frozenset(
 #                              wrapper, never as the code. Counted here on
 #                              that measurement, not on a reading.
 #
-# OTCS_OUTBOX_STATE was here and is NOT. Its reason was "the module's state set
-# and the table's CHECK constraint are the same set" -- true only while this
-# module created the table. A deployment that hands the bridge a pre-existing
-# database with a table of the right shape and no CHECK breaks the assumption,
-# and the PUBLIC read then raises the code directly. A
-# row in an unknown state reaches it through outbox_record/get with no
-# earlier guard in the way. The two remaining reasons were driven the same way
-# and were not reached BY THAT ROUTE -- which is weaker than unreachable, and
-# is written that way on purpose.
+# OTCS_OUTBOX_STATE is NOT in this set. The module's state set and the table's
+# CHECK constraint are the same set only when this module created the table. A
+# deployment that hands the bridge a pre-existing database with a table of the
+# right shape and no CHECK reaches the code through the PUBLIC read: a row in an
+# unknown state arrives through outbox_record/get with no earlier guard in the
+# way. Two of the reasons above are driven the same way and are not reached BY
+# THAT ROUTE -- which is weaker than unreachable, and is written that way on
+# purpose.
 OTCS_INTERNAL_ONLY_CODES = frozenset(
     {
         "OTCS_OUTBOX_RESULT_STATE",
@@ -374,18 +373,16 @@ def _storable_text(value: str) -> bool:
 
     `str.encode(value, ...)` and not `value.encode(...)`: `isinstance(value, str)` admits a
     SUBCLASS, whose `encode` is the object's own code and may raise anything at all, and
-    the clause below catches one exception type. No caller hands one over any more: both
+    the clause below catches one exception type. No caller hands one over: both
     `_stored_reason` and `_text` normalise to a plain string before calling this, and the
     decoder's walk gets exact strings from `json.loads`. The base call stays so the
     predicate is right for a caller that does not normalise, and it is said here that it
-    is no longer load-bearing - the break that removed it reddened a case while `_text`
-    called this on the object, and reddens nothing now. The case that reddens when `_text`
+    is not load-bearing: removing it reddens no case. The case that reddens when `_text`
     stops normalising is the value-object case, which builds a receipt directly; a receipt
     through `execute` reaches `_text` already plain, because the mapping door copies it.
-    Measured when it carried the class, with
-    the controls in both directions: a subclass whose `encode` raises fires on a normal
-    call and not through the base method; an ordinary string still encodes; a lone
-    surrogate is still refused.
+    The base call's controls, in both directions: a subclass whose `encode` raises fires
+    on a normal call and not through the base method; an ordinary string still encodes; a
+    lone surrogate is still refused.
     """
     try:
         str.encode(value, "utf-8")
@@ -423,12 +420,11 @@ def _stored_reason(value: Any, maximum: int = 500) -> str:
     """
     if _is(value, str):
         # A PLAIN string of the same characters, and not the object itself. `isinstance`
-        # admits a subclass, and every operation below then runs the subclass's code:
-        # `encode` inside `_storable_text` - which is the finding that started this - and
-        # `__getitem__` in the truncation three lines down, whose override could return
-        # anything at all, including a value sqlite cannot bind, which is the raw driver
-        # error this function exists to prevent. One normalisation closes the whole class
-        # rather than the method that was reported. `str.__str__` is the base
+        # admits a subclass, and every operation below would then run the subclass's code:
+        # `encode` inside `_storable_text`, and `__getitem__` in the truncation three lines
+        # down, whose override could return anything at all, including a value sqlite
+        # cannot bind, which is the raw driver error this function exists to prevent. One
+        # normalisation closes the whole class rather than one method. `str.__str__` is the base
         # implementation, so it runs nothing the subclass defines; measured against a
         # plant overriding `__str__`, `__repr__`, `__getitem__`, `__add__`, `__iter__`
         # and `encode` - it returns an exact `str`, and a lone surrogate survives it, so
@@ -453,11 +449,9 @@ def _stored_reason(value: Any, maximum: int = 500) -> str:
             text = "<unrenderable %s>" % name
     if not _storable_text(text):
         # Base method for the same reason as everywhere else in this function, though on
-        # this path it can no longer matter: the normalisation above makes `text` a plain
+        # this path it does not matter: the normalisation above makes `text` a plain
         # string before anything here runs. Written this way so the line stays right if
-        # the normalisation is ever moved, and said plainly rather than left as a comment
-        # about a subclass that cannot reach it - an earlier draft of this sentence
-        # claimed exactly that, three lines under the fix that made it false.
+        # the normalisation is ever moved.
         text = str.encode(text, "utf-8", "backslashreplace").decode("utf-8")
     return text[:maximum]
 
@@ -520,23 +514,23 @@ def _plain_copy(value: Any, code: str, depth: int = 0) -> Any:
     code runs - and a failure of that copy is refused under `code`. A key is made plain too, two
     keys that become the same string are refused rather than collapsed into whichever
     came last, and a key that is not a string is refused: no document here has one, and
-    left in place it escaped as a raw TypeError from the sorted detail of `_closed` -
+    unrefused it would escape as a raw TypeError from the sorted detail of `_closed` -
     measured, an integer key beside a string one.
 
     Anything else is left as it is, for the checks that refuse it by name, so a value this
-    copy does not recognise meets the code it met before - which holds only while every
-    reader before those checks asks the value's real type. Some did not: an object whose
-    `__class__` said str or list reached a hash-case normaliser or a binding check first
-    and left raw. They ask the real type now, and a sweep in the bridge suite plants such
+    copy does not recognise meets the same code as without the copy - which holds only
+    while every reader before those checks asks the value's real type. An object whose
+    `__class__` says str or list reaches a hash-case normaliser or a binding check first,
+    so those readers ask the real type, and a sweep in the bridge suite plants such
     objects at every place of the three documents.
 
     Past the nesting limit the value is refused here, under `code`, before anything is
-    asked of it. It used to be left uncopied for the engine's depth guard to answer, and
-    that guard is not the first reader: the replay identity's hash-case normaliser walks
-    the whole document before the hash reaches it, with no bound, and so does the binding
-    check before that. Measured: a plain list nested 3000 deep left `execute` as a raw
-    RecursionError, and a str or dict subclass past the limit ran its own `upper` or
-    `items` and left as whatever that raised. Counted by CONTAINERS - the top-level value
+    asked of it, not left uncopied for the engine's depth guard: that guard is not the
+    first reader - the replay identity's hash-case normaliser walks the whole document
+    before the hash reaches it, with no bound, and so does the binding check before that.
+    Measured without this refusal: a plain list nested 3000 deep leaves `execute` as a raw
+    RecursionError, and a str or dict subclass past the limit runs its own `upper` or
+    `items` and leaves as whatever that raises. Counted by CONTAINERS - the top-level value
     at depth zero, and a container entered at depth MAX_NESTING_DEPTH or deeper refused -
     which is how the wire's bracket scan and the stored-row walk count, so no document this
     door admits is refused for its depth on read-back. The engine's own walk counts values instead
@@ -1015,25 +1009,23 @@ class SQLiteOTCSOutbox:
         # `IF NOT EXISTS`. A statement outside the lock would be one nobody reading the
         # rest of the class expects, which is the whole reason it is inside.
         with self._lock, closing(self._connect(require_table=False)) as connection:
-            # Under the same classifier as the header read in `_connect`. That read was
-            # described as running "before anything else on this connection", and this
-            # create ran on the same connection outside any guard: measured, a file whose
+            # Under the same classifier as the header read in `_connect`. That read does not
+            # cover what runs after it on the same connection: measured, a file whose
             # hundred-byte header is valid and whose schema page is overwritten passes the
-            # read and raises `database disk image is malformed` HERE, past this module.
+            # read and, without a guard here, raises `database disk image is malformed` HERE,
+            # past this module.
             # Through `_translate`, for the reason the engine's constructor gives at the
             # same place: `refuse_unreadable_database` answers None for the CONSTRAINT
             # class by design, so an `IntegrityError` raised INSIDE
             # `refuse_stored_artefact` - by `connection.execute(CREATE)` - would leave this
             # module as the driver's own exception WITHOUT this wrapper; with it, the
-            # translator names it. Defensive, and said as such: this said
-            # the error "left", as if observed, while the engine's own measurement holds
-            # here too - a `CREATE TABLE IF NOT EXISTS` over a foreign table raises
+            # translator names it. Defensive, and said as such: the engine's own
+            # measurement holds here too - a `CREATE TABLE IF NOT EXISTS` over a foreign table raises
             # nothing, and DDL reaches the constraint class only by building a unique index
             # over rows that already hold duplicates. This schema's primary key does build
             # one - `sqlite_autoindex_otcs_bridge_outbox_1`, measured - but only with the
             # table, over no rows, and `IF NOT EXISTS` builds nothing over a table already
-            # there; an earlier form of this said the schema built none. Should an index over
-            # stored rows ever be added, the translator's
+            # there. Should an index over stored rows ever be added, the translator's
             # detail is worded for a ROW write and would need its own. That is what the
             # wrapper covers, and all it covers: the `raise` below stands outside the
             # `_translate` block - still inside the lock and the connection - so on the
@@ -1075,8 +1067,7 @@ class SQLiteOTCSOutbox:
                 detail, cause = refusal
                 raise OTCSBridgeError("OTCS_OUTBOX_COLUMNS", detail) from cause
             # The last statement of the construction, under the same translation as the
-            # create it finishes. It was outside every guard while the statements around
-            # it were inside - found by reading the list this file's own comment gives.
+            # create it finishes, like the statements around it.
             with self._translate():
                 connection.commit()
         # The subject here is the table of THIS name, not the file: a database already
@@ -1096,34 +1087,30 @@ class SQLiteOTCSOutbox:
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
         # The FIRST statement that touches the file, guarded. It is not the only guarded
-        # one, and this comment used to say it ran "before anything else on this
-        # connection", which read as a promise that everything after it was covered: the
-        # create the constructor performs ran on this same connection outside any guard.
-        # Measured both halves. Without this prologue the bridge escaped with
-        # sqlite3.DatabaseError on a path that is not a database, while the state store,
-        # whose own prologue was already guarded, refused by name. And with the prologue
-        # but without a guard on the create, a file whose hundred-byte header is valid and
-        # whose schema page is overwritten PASSES here and raises `database disk image is
-        # malformed` out of the create.
+        # one, and it does not cover what runs after it on this connection: the create the
+        # constructor performs has a guard of its own. Both halves are measured. Without
+        # this prologue the bridge escapes with sqlite3.DatabaseError on a path that is not
+        # a database, while the state store, whose own prologue is guarded, refuses by
+        # name. And with the prologue but without a guard on the create, a file whose
+        # hundred-byte header is valid and whose schema page is overwritten PASSES here and
+        # raises `database disk image is malformed` out of the create.
         #
-        # What is guarded, said as a list rather than as "every statement", which is what
-        # stood here and was never true. The guards in this file, each named by what it
-        # wraps: this prologue, inline, just below; the COLUMN read further down, which has
-        # its own try/except and was folded into "the prologue" by an earlier form of this
-        # list; the create, in the constructor, through `refuse_stored_artefact` under its
-        # own `_translate`; the COMMIT that finishes it, under a `_translate` of its own; and
+        # What is guarded, said as a list rather than as "every statement", which would not
+        # be true. The guards in this file, each named by what it wraps: this prologue,
+        # inline, just below; the COLUMN read further down, which has its own try/except;
+        # the create, in the constructor, through `refuse_stored_artefact` under its own
+        # `_translate`; the COMMIT that finishes it, under a `_translate` of its own; and
         # `_rows`, one guard around every statement a public call runs against ROWS. A guard
         # wraps one statement or many - the create is one, `_rows` is all of a call's - and
-        # the list counts guards, not statements. It is named rather than counted: its
-        # figure went stale once already, when the create and the commit stopped sharing a
-        # wrapper and the number beside the list did not move. The list is of the FILE, not
+        # the list counts guards, not statements. It is named rather than counted: a figure
+        # beside the list does not move when guards split or merge. The list is of the FILE, not
         # of one connection: each connection passes the guards on its own path, and the
         # constructor's create connection, opened with `require_table=False`, never runs
         # the column read - the checked connection the constructor opens after the create
         # does.
         #
         # What each one consults, said per failure, because "every guard asks the
-        # classifier" stood here and was true of one failure only. For a driver error that
+        # classifier" is true of one failure only. For a driver error that
         # is NOT a constraint failure, every one of them consults `refuse_unreadable_database`,
         # the one home for that classification. A constraint failure is the one thing that
         # function answers None for, on purpose, and `_translate` answers it itself, by the
@@ -1131,12 +1118,12 @@ class SQLiteOTCSOutbox:
         # own writes a constraint can only be one the stored table carries. So the guards
         # that go through `_translate` - the create, the commit, and `_rows` - answer both,
         # and the inline handlers - the prologue and the column read - answer only the
-        # first, because the statements they run read and never write. The create asked the
-        # classifier, got None for a constraint, and was re-raised raw until it too ran
-        # through `_translate`: asking is not being answered.
-        # The row guard was added after a measurement:
-        # a corrupt DATA page under an intact schema page passes both reads here and left
-        # a raw driver error out of a public read.
+        # first, because the statements they run read and never write. The create runs
+        # through `_translate` because the classifier answers None for a constraint, and
+        # asking is not being answered.
+        # The row guard stands because of a measurement: a corrupt DATA page under an
+        # intact schema page passes both reads here, and without the guard a raw driver
+        # error leaves a public read.
         try:
             # `schema_version` reads the database header; a connection-level setting such
             # as `busy_timeout` does not touch the file at all and would guard nothing.
@@ -1155,13 +1142,13 @@ class SQLiteOTCSOutbox:
         if require_table:
             # The bridge accepts an outbox table it did not create, so the
             # table's columns are checked before any statement names one: a
-            # missing column raised sqlite3.OperationalError from the query or
+            # missing column raises sqlite3.OperationalError from the query or
             # KeyError from the row decoder, past the bridge vocabulary.
-            # The comparison is in BOTH directions. A table carrying every
-            # declared column plus others used to pass, because only
-            # `declared - present` was taken, and `SELECT *` then carried the
-            # undeclared values into the decoded record and out through
-            # `outbox_record`: a shape no declared reading describes.
+            # The comparison is in BOTH directions. With only `declared - present`
+            # taken, a table carrying every declared column plus others would pass,
+            # and `SELECT *` would carry the undeclared values into the decoded
+            # record and out through `outbox_record`: a shape no declared reading
+            # describes.
             # The reading statement is itself a statement: a path holding bytes that are
             # not a SQLite database makes it raise before any guard here runs, which is
             # this module's own class one layer up. The engine's helper decides which
@@ -1184,17 +1171,17 @@ class SQLiteOTCSOutbox:
             if detail:
                 connection.close()
                 raise OTCSBridgeError("OTCS_OUTBOX_COLUMNS", detail)
-            # The declared shape includes its KEY, and the names alone did not ask for it.
+            # The declared shape includes its KEY, and the names alone do not ask for it.
             # The create statement does nothing when a foreign table of that name is already
-            # there, and a constraint is not retrofitted: a table carrying exactly our
-            # twelve columns and no primary key was admitted, two rows sharing a project and
-            # an idempotency key lived in it, and `get` answered with whichever the driver
-            # reached first - measured, against our own table, which refuses the second row
-            # itself. Idempotency is what that key carries, so a table without it is not
-            # this outbox whatever its columns are called. The same rows already read
-            # report the key: `table_xinfo` gives each column's position in it, zero for a
-            # column outside it. The detail names the key that IS there, since the one that
-            # should be is this module's own declaration.
+            # there, and a constraint is not retrofitted: without this check a table carrying
+            # exactly our twelve columns and no primary key would be admitted, two rows
+            # sharing a project and an idempotency key live in it, and `get` answers with
+            # whichever the driver reaches first - measured, against our own table, which
+            # refuses the second row itself. Idempotency is what that key carries, so a table
+            # without it is not this outbox whatever its columns are called. The same rows
+            # already read report the key: `table_xinfo` gives each column's position in it,
+            # zero for a column outside it. The detail names the key that IS there, since the
+            # one that should be is this module's own declaration.
             key = {row[1] for row in columns if row[5]}
             if key != _OUTBOX_KEY:
                 connection.close()
@@ -1211,11 +1198,10 @@ class SQLiteOTCSOutbox:
     def _rows(self):
         """Open the outbox for statements that read and write rows, refusing by name.
 
-        The prologue and the create are guarded where they stand; these are the rest, and
-        until this existed they were the layer where a stored artefact still left raw.
-        Measured: a corrupt data page under an intact schema page passes the header read
-        and the column read, and the SELECT then raised `database disk image is malformed`
-        out of `get`.
+        The prologue and the create are guarded where they stand; these are the rest, the
+        layer where a stored artefact would otherwise leave raw. Measured: a corrupt data
+        page under an intact schema page passes the header read and the column read, and
+        an unguarded SELECT then raises `database disk image is malformed` out of `get`.
 
         A constraint failure is answered separately and deliberately. This module's writes
         satisfy this module's declaration by construction - `transition` refuses a state
@@ -1270,13 +1256,13 @@ class SQLiteOTCSOutbox:
             way in - TEXT turns a stored number into a str, INTEGER and REAL turn numeric
             text into numbers and leave other text a str - and BLOB, or no declared type,
             converts nothing, so a value comes back as what was stored: a str, an int, a
-            float or bytes. This said BLOB and no type return bytes, which the bridge's own
-            typeless sweep table contradicts, since its stored strings come back as strings.
-            The non-strings are not this walk's to judge, and handing them to it was a
-            defect: its float branch, which exists for what the parse produces, refused a
-            non-finite REAL in a plain column as OTCS_OUTBOX_ROW_JSON, while a finite one in
-            the same column met the shape check as OTCS_OUTBOX_ROW_TEXT - two codes for one
-            fact. They are refused further on: in a JSON column as OTCS_OUTBOX_ROW_JSON
+            float or bytes; the bridge's own typeless sweep table shows it, since its stored
+            strings come back as strings. The non-strings are not this walk's to judge, and
+            they are not handed to it: its float branch, which exists for what the parse
+            produces, would refuse a non-finite REAL in a plain column as
+            OTCS_OUTBOX_ROW_JSON, while a finite one in the same column meets the shape
+            check as OTCS_OUTBOX_ROW_TEXT - two codes for one fact. They are refused
+            further on: in a JSON column as OTCS_OUTBOX_ROW_JSON
             before the parse; in `state` as OTCS_OUTBOX_STATE by the state check, which runs
             first and which the shape check then skips; in every other plain column as
             OTCS_OUTBOX_ROW_TEXT by the shape check. Named here because what this walk
@@ -1292,25 +1278,24 @@ class SQLiteOTCSOutbox:
             RecursionError under no code of ours. An explicit stack removes the failure
             rather than catching it.
 
-            The stack alone was NOT enough, and the sentence here said it was. A value
-            deep enough to exhaust `copy.deepcopy` in the public read - roughly two frames
-            per level against a 1000-frame limit - but shallow enough for the parser still
-            parsed, walked and returned, and died two calls later under no code of ours.
-            So the walk also applies the engine's MAX_NESTING_DEPTH to the parsed
-            structure: the same limit a submitted document meets, read from the same place,
-            and - since the boundary was measured - applied at the same level. The first
-            form of this seeded the top-level value at 1 and so refused a document of
-            exactly MAX containers that the wire admits, which would have made a row the
-            engine accepts unreadable by every public call. Only with both does the answer stop depending on which of the
-            interpreter's limits is smaller.
+            The stack alone is NOT enough. A value deep enough to exhaust `copy.deepcopy`
+            in the public read - roughly two frames per level against a 1000-frame limit -
+            but shallow enough for the parser would still parse, walk and return, and die
+            two calls later under no code of ours. So the walk also applies the engine's
+            MAX_NESTING_DEPTH to the parsed structure: the same limit a submitted document
+            meets, read from the same place, and applied at the same level, measured at the
+            boundary. Seeding the top-level value at 1 would refuse a document of exactly
+            MAX containers that the wire admits, and so make a row the engine accepts
+            unreadable by every public call. Only with both does the answer stop depending
+            on which of the interpreter's limits is smaller.
             """
             # Seeded at 0, so the bound here is the bound on the wire and not one level
             # stricter. Measured at the boundary with MAX_NESTING_DEPTH = 64: with the
-            # top-level value seeded at 1, a document of exactly 64 containers was ADMITTED
+            # top-level value seeded at 1, a document of exactly 64 containers is ADMITTED
             # by the adapter's scan and REFUSED here, so a row the engine accepts through
-            # the wire could not be read back through any public call and nothing repaired
-            # it. The adapter counts opening brackets from zero; counting values from one
-            # visits a scalar inside N containers at N+1. At 63 and at 65 the two agreed,
+            # the wire cannot be read back through any public call and nothing repairs it.
+            # The adapter counts opening brackets from zero; counting values from one
+            # visits a scalar inside N containers at N+1. At 63 and at 65 the two agree,
             # which is why only a case at exactly the limit shows it.
             pending = [(value, 0)]
             while pending:
@@ -1327,16 +1312,15 @@ class SQLiteOTCSOutbox:
                 if isinstance(item, (Mapping, list, tuple)) and depth >= MAX_NESTING_DEPTH:
                     # Counted on ENTERING a container, because that is what the wire
                     # counts: its scan counts opening brackets, so its depth is the number
-                    # of containers. Counting visited NODES agreed only for values whose
+                    # of containers. Counting visited NODES agrees only for values whose
                     # deepest node is a scalar - a container's own depth is one less than
                     # its members', so a value ending in an EMPTY container has no node at
-                    # the depth its bracket count implies. The earlier node count did
-                    # exactly that: at one past the limit with a scalar inside both
-                    # refused, while with the innermost container empty the wire refused
-                    # and the walk admitted. The two now agree on every shape measured -
-                    # 63, 64 and 65 containers with a scalar at the bottom, 64 and 65 with
-                    # an empty container at the bottom - and the stored-document case holds
-                    # both to those shapes, 63 with an empty bottom added.
+                    # the depth its bracket count implies: at one past the limit with a
+                    # scalar inside both refuse, while with the innermost container empty
+                    # the wire refuses and a node count admits. The two agree on every shape
+                    # measured - 63, 64 and 65 containers with a scalar at the bottom, 64 and
+                    # 65 with an empty container at the bottom - and the stored-document case
+                    # holds both to those shapes, 63 with an empty bottom added.
                     raise OTCSBridgeError(
                         "OTCS_OUTBOX_ROW_JSON",
                         "%s: nested past %d" % (field, MAX_NESTING_DEPTH))
@@ -1348,18 +1332,18 @@ class SQLiteOTCSOutbox:
                         raise OTCSBridgeError("OTCS_OUTBOX_ROW_TEXT", field)
                 elif isinstance(item, float) and not math.isfinite(item):
                     # The same question as the line above, asked of a number. A float is
-                    # not a string, so it matched no branch of this walk and was never
-                    # examined: `json.loads` admits the bare tokens NaN, Infinity and
+                    # not a string, so without this branch it would match nothing in this
+                    # walk: `json.loads` admits the bare tokens NaN, Infinity and
                     # -Infinity, and this module's canonical dump passes allow_nan=False,
-                    # so such a value travelled the whole recovery path and died at the
-                    # LAST step - after the engine-side effect was committed, under no
+                    # so such a value would travel the whole recovery path and die at the
+                    # LAST step - after the engine-side effect is committed, under no
                     # code of ours. Refused here, before the effect, which is the same
                     # reason the text check stands where it stands.
                     #
                     # The predicate is finiteness rather than a test for NaN, because the
                     # rule it must agree with is the dump's own: allow_nan=False refuses
-                    # exactly the non-finite. Three tokens were measured; naming them
-                    # would have closed three shapes and left the class open.
+                    # exactly the non-finite. Naming the three tokens would close three
+                    # shapes and leave the class open.
                     #
                     # The code is the JSON one and not a new name: the family is already
                     # "the stored JSON carries what our canonical form cannot express",
@@ -1415,9 +1399,9 @@ class SQLiteOTCSOutbox:
             if raw is None and field not in _OUTBOX_NULLABLE:
                 sql_null.add(field)
             # Text first, and refused as text: `json.loads` accepts BYTES, so a BLOB of
-            # valid JSON in a column the schema declares TEXT parsed and came back as the
-            # record - measured on a typeless table, the row's own document stored as a
-            # BLOB, with invalid bytes and an integer as controls, which the parse did
+            # valid JSON in a column the schema declares TEXT would parse and come back as
+            # the record - measured on a typeless table, the row's own document stored as a
+            # BLOB, with invalid bytes and an integer as controls, which the parse does
             # refuse. The driver hands a TEXT column back as an exact `str`.
             if raw is not None and type(raw) is not str:
                 raise OTCSBridgeError("OTCS_OUTBOX_ROW_JSON", "%s: not text" % field)
@@ -1425,13 +1409,13 @@ class SQLiteOTCSOutbox:
             # may hand the bridge a table this module did not create. A stored
             # column that does not parse - invalid text, an integer literal
             # past the digit limit, an array nested past the interpreter's
-            # recursion limit - is refused with its own code; json.loads raised
-            # it past the bridge vocabulary before. RecursionError is not a
-            # ValueError, and no nesting scan runs here as it does before the
-            # wire adapter's parse. A value that is not text never gets here -
-            # it is refused just above - so the parse is handed a str or None,
-            # and a TypeError, which is what it raised on a number (bytes it
-            # parsed), is no longer one of its answers.
+            # recursion limit - is refused with its own code, so json.loads
+            # does not carry it past the bridge vocabulary. RecursionError is
+            # not a ValueError, and no nesting scan runs here as it does before
+            # the wire adapter's parse. A value that is not text never gets
+            # here - it is refused just above - so the parse is handed a str or
+            # None, and a TypeError, which the parse raises on a number (bytes
+            # it does parse), is not one of its answers.
             try:
                 result[field.removesuffix("_json")] = (
                     json.loads(raw) if raw is not None else None
@@ -1440,10 +1424,11 @@ class SQLiteOTCSOutbox:
                 raise OTCSBridgeError("OTCS_OUTBOX_ROW_JSON", field) from exc
             # And whether what parsed is a DOCUMENT. Every value this module writes into
             # these four columns is an object; the parse admits any JSON value, so a stored
-            # `[]` came back as the record's `request` and `7` came back as `request=7` -
-            # measured, with an object as the control - and `outbox_record` handed both to a
-            # caller that has no such shape to read. Asked before the walk below, because
-            # whether this is a document at all comes before what its values are made of.
+            # `[]` would come back as the record's `request` and `7` as `request=7` -
+            # measured, with an object as the control - and `outbox_record` would hand both
+            # to a caller that has no such shape to read. Asked before the walk below,
+            # because whether this is a document at all comes before what its values are
+            # made of.
             parsed = result[field.removesuffix("_json")]
             if parsed is not None and type(parsed) is not dict:
                 raise OTCSBridgeError(
@@ -1466,18 +1451,18 @@ class SQLiteOTCSOutbox:
             detail = (state if type(state) is str
                       else "state: null" if state is None else "state: not text")
             raise OTCSBridgeError("OTCS_OUTBOX_STATE", detail)
-        # And the SHAPE the schema declares, which the storability walk never asked: it
+        # And the SHAPE the schema declares, which the storability walk does not ask: it
         # tests strings and passes every non-string through. Measured on a stored table
         # with the module's names and no types, the unmodified row as control: a BLOB or an
         # integer in `last_error`, `operation_hash`, `permit_hash`, `rejection_code` or
-        # `updated_at` came back from `outbox_record` as `bytes` or `int` - a record no
-        # declared reading describes, the same reason the undeclared column is refused. The
-        # sweep saw it and passed, because it counted only exceptions that left the
-        # vocabulary; an answer of the wrong shape counted as an answer. Every plain column
-        # is text, or NULL where the schema allows it. The JSON columns are asked only
-        # whether NULL is allowed, under their own code - a non-text value there was
-        # refused before the parse - and of the four only `request_json` is declared NOT
-        # NULL, so it is the one this can refuse.
+        # `updated_at` would come back from `outbox_record` as `bytes` or `int` - a record no
+        # declared reading describes, the same reason the undeclared column is refused. A
+        # sweep that counts only exceptions leaving the vocabulary passes it, because an
+        # answer of the wrong shape counts as an answer. Every plain column is text, or NULL
+        # where the schema allows it. The JSON columns are asked only whether NULL is
+        # allowed, under their own code - a non-text value there is refused before the
+        # parse - and of the four only `request_json` is declared NOT NULL, so it is the one
+        # this can refuse.
         # Asked AFTER the state check, and the order is a decision: a row with an unknown
         # state is answered by the more specific code, which two cases pin, and the
         # question here still reaches every row whose state is one of the nine.
@@ -2144,8 +2129,8 @@ class OTCSBridge:
                 # _permit_not_live_reason answers with any of seven reasons
                 # (consumed, reservation inactive, declaration not active or
                 # outside validity, expired, a stored invalidation reason, or a
-                # refusal code from the lookup itself). An earlier name said
-                # EXPIRED and covered one of the seven.
+                # refusal code from the lookup itself), and a name like EXPIRED
+                # would cover one of the seven.
                 raise OTCSReconciliationRequired(
                     "OTCS_PERMIT_NOT_LIVE_ON_RECOVERY", reason
                 )
@@ -2203,14 +2188,14 @@ class OTCSBridge:
                     ) from exc
                 except Exception as exc:  # noqa: BLE001 - the class, not a list of it
                     # The receipt is admitted AFTER the downstream effect, so an exception
-                    # that is not ours used to leave this `try` with the row CALLING over an
-                    # effect that happened: the receipt object's own code, run while it was
-                    # read - a mapping whose `keys` raised, a value whose methods did. Those
-                    # shapes are read by `_plain_copy` now, which runs none of the object's
-                    # code and refuses an unreadable mapping by name, so they arrive above
-                    # as OTCS_RECEIPT_FIELDS. What is left for this clause is what no copy
-                    # sees - a fault in this module's own receipt code - and the answer is the
-                    # one the bridge already has for a receipt it cannot use:
+                    # that is not ours, left uncaught, would leave this `try` with the row
+                    # CALLING over an effect that happened: the receipt object's own code, run
+                    # while it is read - a mapping whose `keys` raises, a value whose methods
+                    # do. Those shapes are read by `_plain_copy`, which runs none of the
+                    # object's code and refuses an unreadable mapping by name, so they arrive
+                    # above as OTCS_RECEIPT_FIELDS. What is left for this clause is what no
+                    # copy sees - a fault in this module's own receipt code - and the answer is
+                    # the one the bridge already has for a receipt it cannot use:
                     # RECONCILIATION_REQUIRED, which asks an operator rather than guessing.
                     # Fail-closed by design, and witnessed by a case that injects that fault.
                     transition(
