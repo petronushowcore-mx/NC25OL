@@ -11,7 +11,7 @@
 [![Code licence MIT](https://img.shields.io/badge/Code-MIT-2563EB)](LICENSE)
 [![Document licence CC BY 4.0](https://img.shields.io/badge/Documents-CC%20BY%204.0-7257C8)](LICENSE)
 
-[Quickstart](#getting-started) · [Spectrum result](examples/spectrum_release/RESULT.md) · [Runbook](UNIVERSAL-CONNECTION-RUNBOOK.md) · [Specification](NC25OL%20Specification%20v01.09.docx) · [Scope and limits](#boundary-of-the-claim) · [Licences](LICENSE)
+[Quickstart](#start-here) · [Spectrum result](examples/spectrum_release/RESULT.md) · [Runbook](UNIVERSAL-CONNECTION-RUNBOOK.md) · [Specification](NC25OL%20Specification%20v01.09.docx) · [Scope and limits](#boundary-of-the-claim) · [Licences](LICENSE)
 
 NC25OL provides a domain-neutral connection contract for placing an execution
 boundary in front of an external adapter while preserving the declared NC2.5
@@ -49,6 +49,41 @@ controls, evidence obligations and mapping witness.
 > authority; production identity, key custody, trusted time and downstream
 > transaction boundaries remain deployment responsibilities. Read the
 > [scope and limits](#boundary-of-the-claim) before adapting it to a live system.
+
+## Start here
+
+From the package root, Python 3.11, 3.12 or 3.14 and the standard library are
+enough for this local demonstration:
+
+```text
+python -B examples/local_release/quickstart.py
+python -B -m unittest discover -s examples/local_release -p "test_quickstart.py" -v
+python -B examples/local_release/mutate_quickstart.py
+```
+
+The first command prints:
+
+```text
+ADMISSION=ALLOW EXECUTION_AUTHORIZED permit=issued
+RELEASE=COMMITTED bytes=exact target=1/1
+RECOVERY=EXACT_REPLAY events=unchanged target=1/1
+REUSE=PERMIT_ALREADY_CONSUMED
+UNKNOWN_AUTHORITY=REFUSAL AUTHORITY_UNKNOWN
+LEDGER_CHAIN=verified
+```
+
+`ADMISSION` is the engine's permit for the exact intent. `RELEASE` means the
+loopback document target stored the exact bytes and the Ledger recorded the
+execution. `RECOVERY` reopens an already committed row: it returns the same
+receipt, with the event list and target counts unchanged. `REUSE` is the
+engine's refusal to issue the consumed permit again. `UNKNOWN_AUTHORITY` is a
+separate engine decision for a new intent with no issued grant; it does not
+exercise the gateway's HTTP-denial path. `LEDGER_CHAIN` verifies the local event
+chain with this session's key. The commands use synthetic authority, an
+authenticated loopback target and a fixed clock; they do not grant live
+execution authority or test every crash-recovery state. For integration steps
+and the full suite, continue with [Getting started](#getting-started) and the
+[integration path](#integration-path).
 
 ---
 
@@ -254,7 +289,7 @@ the tree, build the review bundle:
 python -B tools/build_review_bundle.py --output <path outside the package>
 ```
 
-## Start here
+## Integration path
 
 1. Read `NC25OL Specification v01.09.docx`.
 2. Read `UNIVERSAL-CONNECTION-RUNBOOK.md`.
@@ -553,8 +588,9 @@ relative path and, finding it there, runs the same checks in source mode
 ## Repository
 
 - `.github/workflows/ci.yml` runs the acceptance suite and the review-bundle
-  build, plus the local example checks and source mutations, on pushes and
-  pull requests targeting `main`; the badge above reports
+  build, plus the local example checks and source mutations, on pushes to
+  `main`, `work/pack-a` and `release/**`, and on pull requests targeting
+  `main` or `release/**`; the badge above reports
   its status. It runs the standalone configuration only: `NC25_SOURCES_ROOT` is
   not set there, so the external-source binding to the NC2.5 core reports
   `NOT_RUN` in CI and is exercised locally instead. The workflow file is
