@@ -10,8 +10,8 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "byte_length": 2133,
-      "sha256": "34A5432681ABA20358B7DAF813ECE762F717079A34BD3B262ADD763B6F69F29D"
+      "byte_length": 3581,
+      "sha256": "DCF164E0B9DE4701766E11DE9252A48D6CB867907F8F73AACE477E2C809B9521"
     },
     {
       "path": ".gitignore",
@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "byte_length": 42937,
-      "sha256": "59B3CBDDFDCB96775CED64853216D4E9BC90ACCFBFAB8BD5DD8277D78EB23B99"
+      "byte_length": 44486,
+      "sha256": "B0FF222F9306A0F356FAA80B4EE0E301F687DE1BB1B4DB8839401819EABD5852"
     },
     {
       "path": "SECURITY.md",
@@ -139,9 +139,24 @@
       "sha256": "E37AB7DBB12F9488F4B824A90133CF58E7571BC6B716A8DB31BA703039046A6B"
     },
     {
+      "path": "examples/local_release/mutate_quickstart.py",
+      "byte_length": 3352,
+      "sha256": "58CD498B41DBE84FC228667FB128CA6CFB8B842998091548915B05ECC1105E0D"
+    },
+    {
       "path": "examples/local_release/mutate_scenario.py",
       "byte_length": 15275,
       "sha256": "E9EAC6C3C82F9C8C18BB4E6D82A207AA30B593EB32647F396347FFF07795BC62"
+    },
+    {
+      "path": "examples/local_release/quickstart-expected.txt",
+      "byte_length": 238,
+      "sha256": "7D4EA7632B21A0BF00CA825287E2197A45CB61C1C8F9F749C56B2508F830C89B"
+    },
+    {
+      "path": "examples/local_release/quickstart.py",
+      "byte_length": 4566,
+      "sha256": "5059D4E3EEA0420260C2303E585448073E8AC3CC27C875CC357B0D36394DDFBC"
     },
     {
       "path": "examples/local_release/scenario.py",
@@ -167,6 +182,11 @@
       "path": "examples/local_release/test_export_preview.mjs",
       "byte_length": 9980,
       "sha256": "7C83CAC2B67C7C423409E905809A64F899FA564E01EC3402BD980256C9E8E132"
+    },
+    {
+      "path": "examples/local_release/test_quickstart.py",
+      "byte_length": 474,
+      "sha256": "9CDCAE8BFC7AFC354B2CC4BABE52C24E205714B697C9ADF4A47C6B382458CCB7"
     },
     {
       "path": "examples/local_release/test_scenario.py",
