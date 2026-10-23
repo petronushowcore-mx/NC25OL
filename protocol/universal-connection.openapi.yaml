@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: NC25OL - Navigational Cybernetics 2.5 Open Ledger API
-  version: 01.09.02
+  version: 01.09.03
   description: >-
     Role-separated reference contract for activating one connection
     declaration, issuing and revoking workload authority, evaluating bound
@@ -609,6 +609,7 @@ components:
             - BODY_LENGTH
             - BODY_NESTING
             - BODY_OBJECT
+            - BODY_SCHEMA
             - BODY_STREAM
             - BODY_TOO_LARGE
             - CANONICAL_JSON_INVALID
@@ -623,7 +624,6 @@ components:
             - CORE_ANCHOR_MISMATCH
             - DECISION_UNKNOWN
             - DECLARATION_ALREADY_ACTIVATED
-            - DECLARATION_EVIDENCE
             - DECLARATION_FIELDS
             - DECLARATION_ID
             - DECLARATION_NOT_ACTIVE
@@ -644,7 +644,6 @@ components:
             - ED25519_PUBLIC_KEY
             - ED25519_UNAVAILABLE
             - EMPTY_SCOPE_CONSTRAINTS
-            - ENVIRONMENT_IDS
             - EVENT_SIGNER_INVALID
             - EVENT_SIGNER_REQUIRED
             - EVENT_SUBJECT
@@ -704,8 +703,6 @@ components:
             - INTENT_SCOPE_DIMENSION
             - INTENT_TIME_IN_FUTURE
             - INTERFACES
-            - INTERFACE_ID
-            - INTERFACE_ROLE_OVERLAP
             - INTERNAL_FAILURE
             - INVALID_TIMESTAMP
             - JSON_OBJECT_KEY_TYPE
@@ -720,6 +717,10 @@ components:
             - NESTING_DEPTH_EXCEEDED
             - NON_EXECUTABLE_WITH_PERMIT
             - NOT_FOUND
+            - OBSERVER_EXPORT_ENGINE
+            - OBSERVER_EXPORT_FIELDS
+            - OBSERVER_EXPORT_PROJECTION_MISMATCH
+            - OBSERVER_EXPORT_SIGNER
             - OBSERVER_PROJECTION_EXPANSION
             - OBSERVER_PROJECTION_FIELDS
             - OFF_LIMITS_SYSTEMS
@@ -739,7 +740,6 @@ components:
             - PERMIT_SIGNER_INVALID
             - PERMIT_TTL
             - PERMIT_UNKNOWN
-            - PREDECESSOR_HASH
             - PREREQUISITE_IDS
             - PREREQUISITE_RESULTS
             - PROFILE_ACTION
@@ -819,6 +819,7 @@ components:
             - SAFE_FALLBACK_ID
             - SAFE_FALLBACK_NOT_ZERO_EFFECT
             - SAFE_FALLBACK_UNKNOWN
+            - SCHEMA_VALIDATION_UNAVAILABLE
             - SCOPE_ACTION_IDS
             - SCOPE_ACTION_TARGET_BINDINGS
             - SCOPE_ACTION_TARGET_COVERAGE
@@ -835,7 +836,6 @@ components:
             - SCOPE_UNKNOWN_ACTION
             - SCOPE_UNKNOWN_EFFECT
             - SECRET_FIELD_FORBIDDEN
-            - SELECTOR_ID
             - SIGNATURE_KEY_ID
             - SIGNING_KEY_REQUIRED
             - STATE_ANCHOR_CHANGED
@@ -869,8 +869,6 @@ components:
             - STRUCTURAL_CAPACITY
             - STRUCTURAL_COST
             - STRUCTURAL_DEBIT_UNAVAILABLE
-            - STRUCTURAL_PROVENANCE
-            - STRUCTURAL_UNIT
             - TARGET_OFF_LIMITS_OVERLAP
             - TIMEZONE_REQUIRED
             - UNKNOWN_DISPOSITION
@@ -888,7 +886,6 @@ components:
             - WITNESS_ID
             - WITNESS_ID_MISMATCH
             - WITNESS_METHOD
-            - WORKLOAD_IDENTITY_ISSUER
         message:
           type: string
   responses:

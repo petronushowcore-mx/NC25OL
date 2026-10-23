@@ -51,6 +51,7 @@ GATE_ROWS = {
     "semantic_contracts": "Semantic contracts",
     "safety_mutations": "Named safety mutations",
     "contract_conformance": "JSON Schema and OpenAPI conformance",
+    "declaration_field_census": "Declaration field census",
     "contract_regressions": "Contract regression cases",
     "otcs_bridge": "OTCS bridge behaviour and refusal vocabulary",
     "failure_surface_ratchet": "Failure-surface ratchet",
@@ -452,8 +453,8 @@ def update_report(
         passed = require_non_negative_int(raw.get("passed"), "STEP_COUNT")
         total = require_non_negative_int(raw.get("total"), "STEP_COUNT")
         # A gate that ran NO checks is not a passing gate. With `passed == total` as the
-        # whole test, zero satisfies it, and eight steps of `0/0 PASS` beside the aggregate
-        # `8/8` would be published as eight gates passed. The vacuous case is reachable
+        # whole test, zero satisfies it, and nine steps of `0/0 PASS` beside the aggregate
+        # `9/9` would be published as nine gates passed. The vacuous case is reachable
         # from our own tree, not only from a forged file: the runner extracts
         # `Ran (?P<passed>\d+) tests` and requires `OK`, and a suite that ran nothing
         # prints both.

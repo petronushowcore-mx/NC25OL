@@ -293,19 +293,6 @@ CONTROL_BOOLEAN_FIELDS = (
 CONTROL_AMBIGUITY_FIELD = "ambiguity_flags"
 CONTROL_FIELDS = CONTROL_BOOLEAN_FIELDS + (CONTROL_AMBIGUITY_FIELD,)
 
-# Declared origin of the structural capacity, coded with the published
-# instrument of NC2.5 Probe II (DOI 10.17605/OSF.IO/7SQMY, R2): the origin of
-# a boundary is fully stipulated, empirically calibrated, derived from a load
-# model, or mixed. The value is a sealed declaration datum read by governance
-# and audit; the gate never reads it.
-STRUCTURAL_PROVENANCE_VALUES = frozenset(
-    {
-        "fully_stipulated",
-        "empirically_calibrated",
-        "derived_from_load_model",
-        "mixed",
-    }
-)
 
 
 def _require_ed25519() -> None:
@@ -562,7 +549,6 @@ DECLARED_HASH_FIELDS = frozenset(
         "ledger_head_hash",
         "payload_hash",
         "permit_hash",
-        "predecessor_declaration_hash",
         "profile_hash",
         "receipt_hash",
         "request_hash",
@@ -1050,7 +1036,6 @@ def validate_declaration(
         "schema_version",
         "declaration_id",
         "declaration_version",
-        "predecessor_declaration_hash",
         "created_at",
         "effective_from",
         "expires_at",
@@ -1063,16 +1048,12 @@ def validate_declaration(
         "governance",
         "interfaces",
         "mapping_witness_binding",
-        "evidence_refs",
     }
     _require_exact_keys(declaration, required, "DECLARATION_FIELDS")
     if declaration["schema_version"] != "1.0.0":
         raise ContractViolation("DECLARATION_SCHEMA_VERSION")
     _require_identifier(declaration["declaration_id"], "DECLARATION_ID")
     _require_version(declaration["declaration_version"], "DECLARATION_VERSION")
-    predecessor = declaration["predecessor_declaration_hash"]
-    if predecessor is not None:
-        _require_sha256(predecessor, "PREDECESSOR_HASH")
     created = parse_utc(declaration["created_at"])
     effective = parse_utc(declaration["effective_from"])
     expires = parse_utc(declaration["expires_at"])
@@ -1098,15 +1079,10 @@ def validate_declaration(
     connector = _require_mapping(declaration["connector"], "CONNECTOR")
     _require_exact_keys(
         connector,
-        {"connector_id", "workload_identity_issuer", "environment_ids"},
+        {"connector_id"},
         "CONNECTOR",
     )
     _require_identifier(connector["connector_id"], "CONNECTOR_ID")
-    _require_identifier(
-        connector["workload_identity_issuer"],
-        "WORKLOAD_IDENTITY_ISSUER",
-    )
-    _unique_ids(connector["environment_ids"], "ENVIRONMENT_IDS")
 
     action_map = {item["action_id"]: item for item in profile["action_alphabet"]}
     effect_ids = {item["effect_class_id"] for item in profile["effect_classes"]}
@@ -1166,15 +1142,10 @@ def validate_declaration(
     )
     _require_exact_keys(
         structural,
-        {"selector_id", "capacity", "unit", "provenance"},
+        {"capacity"},
         "STRUCTURAL_BUDGET",
     )
-    _require_identifier(structural["selector_id"], "SELECTOR_ID")
     _require_non_negative_int(structural["capacity"], "STRUCTURAL_CAPACITY")
-    if not isinstance(structural["unit"], str) or not structural["unit"]:
-        raise ContractViolation("STRUCTURAL_UNIT")
-    if not isinstance(structural["provenance"], str) or structural["provenance"] not in STRUCTURAL_PROVENANCE_VALUES:
-        raise ContractViolation("STRUCTURAL_PROVENANCE")
 
     if not isinstance(declaration["resource_limits"], list):
         raise ContractViolation("RESOURCE_LIMITS")
@@ -1224,55 +1195,30 @@ def validate_declaration(
     _require_exact_keys(
         governance,
         {
-            "profile_owner_id",
-            "declaration_owner_id",
             "approval_owner_id",
             "authority_issuer_id",
             "revision_authority_ids",
-            "change_process_ref",
             "no_live_gate_override",
         },
         "GOVERNANCE",
     )
     for key in {
-        "profile_owner_id",
-        "declaration_owner_id",
         "approval_owner_id",
         "authority_issuer_id",
     }:
         _require_identifier(governance[key], "GOVERNANCE_ID")
     _unique_ids(governance["revision_authority_ids"], "REVISION_AUTHORITIES")
-    if (
-        not isinstance(governance["change_process_ref"], str)
-        or not governance["change_process_ref"]
-        or governance["no_live_gate_override"] is not True
-    ):
+    if governance["no_live_gate_override"] is not True:
         raise ContractViolation("GOVERNANCE_CHANGE_CONTROL")
 
     interfaces = _require_mapping(declaration["interfaces"], "INTERFACES")
     _require_exact_keys(
         interfaces,
         {
-            "governance_service_id",
-            "operator_service_id",
-            "executor_service_id",
-            "architect_store_id",
-            "observer_projection_id",
             "off_limits_system_ids",
         },
         "INTERFACES",
     )
-    interface_ids = []
-    for key in {
-        "governance_service_id",
-        "operator_service_id",
-        "executor_service_id",
-        "architect_store_id",
-        "observer_projection_id",
-    }:
-        interface_ids.append(_require_identifier(interfaces[key], "INTERFACE_ID"))
-    if len(interface_ids) != len(set(interface_ids)):
-        raise ContractViolation("INTERFACE_ROLE_OVERLAP")
     off_limits = set(
         _unique_ids(
             interfaces["off_limits_system_ids"],
@@ -1303,12 +1249,6 @@ def validate_declaration(
     ):
         raise IntegrityViolation("WITNESS_BINDING_MISMATCH")
 
-    if not isinstance(declaration["evidence_refs"], list) or not declaration[
-        "evidence_refs"
-    ]:
-        raise ContractViolation("DECLARATION_EVIDENCE")
-    for item in declaration["evidence_refs"]:
-        _validate_evidence_ref(item, "DECLARATION_EVIDENCE")
 
     _deep_secret_scan(declaration)
 
@@ -4043,7 +3983,7 @@ class UniversalConnectionLedger:
             if dict(registry_core_anchor) != expected_core_anchor:
                 raise ContractViolation("REGISTRY_CORE_ANCHOR")
             if not isinstance(record["status"], str) or record["status"] not in {
-                "DRAFT", "ACTIVE", "SUSPENDED", "REVOKED", "EXPIRED",
+                "DRAFT", "ACTIVE",
             }:
                 raise ContractViolation("REGISTRY_STATUS")
             if record["activated_at"] is not None:
@@ -4103,6 +4043,100 @@ class UniversalConnectionLedger:
     ) -> dict[str, Any]:
         self._assert_integrity()
         return self.ledger.head()
+
+
+_OBSERVER_EXPORT_FIELDS = {"channel", "message_code", "event_time", "subject_ref"}
+
+
+def _projected_observer_rows(
+    engine: UniversalConnectionLedger, events: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Pair each old observer record with its export-only classification."""
+    rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for event in events:
+        kind = event["event_type"]
+        if kind == "PERMIT_ISSUED":
+            channel, code = "OUTPUT", "EXECUTION_AUTHORIZED"
+        elif kind == "INTENT_NON_EXECUTABLE":
+            channel = "REFUSAL"
+            code = engine._public_message_code(event["payload"]["disposition"])
+        elif kind == "EXECUTION_RECORDED":
+            if event["payload"]["receipt_seed"]["outcome"] != "COMMITTED":
+                continue
+            channel, code = "OUTPUT", "EXECUTION_AUTHORIZED"
+        else:
+            continue
+        if code not in PUBLIC_MESSAGE_CODES:
+            raise IntegrityViolation("PUBLIC_MESSAGE_CODE_INVALID")
+        original = {
+            "channel": channel,
+            "message_code": code,
+            "event_time": event["event_time"],
+            "subject_ref": event["subject_ref"],
+        }
+        public = dict(original)
+        if kind == "EXECUTION_RECORDED":
+            public["message_code"] = "EXECUTION_COMMITTED"
+        rows.append((original, public))
+    return rows
+
+
+def build_observer_export(
+    engine: UniversalConnectionLedger,
+    signer: Ed25519DetachedSigner,
+    *,
+    actor_scope: str | None = None,
+) -> dict[str, Any]:
+    """Build a separately signed public projection through the architect read gate.
+
+    Its hashes attest only the projected records, not the private ledger chain.
+    The signing key's operator identity needs independent authentication.
+    """
+    if actor_scope != ROLE_ARCHITECT:
+        raise ContractViolation("ROLE_SCOPE_MISMATCH", f"expected {ROLE_ARCHITECT}")
+    if not isinstance(engine, UniversalConnectionLedger):
+        raise ContractViolation("OBSERVER_EXPORT_ENGINE")
+    if not isinstance(signer, Ed25519DetachedSigner):
+        raise ContractViolation("OBSERVER_EXPORT_SIGNER")
+
+    # Preserve one in-memory snapshot while the existing guarded projection
+    # verifies the original private chain and selects its four public fields.
+    with engine._state_lock:
+        fields = set(engine.profile["roles"]["observer_projection_fields"])
+        if fields != _OBSERVER_EXPORT_FIELDS:
+            raise ContractViolation("OBSERVER_EXPORT_FIELDS")
+        projection = engine.observer_projection(actor_scope=ROLE_ARCHITECT)
+        rows = _projected_observer_rows(engine, engine.ledger.events_copy())
+    if projection != [original for original, _public in rows]:
+        raise IntegrityViolation("OBSERVER_EXPORT_PROJECTION_MISMATCH")
+
+    export_format = "nc25ol-observer-export/v1"
+    events: list[dict[str, Any]] = []
+    previous = "0" * 64
+    for index, (_original, public_fields) in enumerate(rows):
+        if set(public_fields) != _OBSERVER_EXPORT_FIELDS:
+            raise IntegrityViolation("OBSERVER_EXPORT_FIELDS")
+        body = {"index": index, "previous_hash": previous, "record": public_fields}
+        event_hash = hashlib.sha256(canonical_json(body)).hexdigest().upper()
+        events.append({**body, "event_hash": event_hash})
+        previous = event_hash
+
+    raw_key = signer.public_key_bytes()
+    public_key = {
+        "algorithm": "Ed25519",
+        "key_id": signer.key_id,
+        "raw_base64": base64.b64encode(raw_key).decode("ascii"),
+        "fingerprint_sha256": hashlib.sha256(raw_key).hexdigest().upper(),
+    }
+    head = {"event_count": len(events), "head_hash": previous}
+    statement = {"format": export_format, "head": head, "public_key": public_key}
+    return {
+        "format": export_format,
+        "events": events,
+        "head": head,
+        "public_key": public_key,
+        "signature": dict(signer.sign(canonical_json(statement))),
+    }
 
 
 def bind_fixture(

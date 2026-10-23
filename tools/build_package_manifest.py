@@ -24,6 +24,16 @@ ENVIRONMENT_DIRECTORIES = {".venv", "venv"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".bak", ".tmp", ".orig", ".rej"}
 
 
+def nonstandard_environment_directories(root: Path) -> list[str]:
+    """Name root virtual environments that are outside the two supported names."""
+    return sorted(
+        child.name for child in root.iterdir()
+        if child.is_dir()
+        and child.name not in ENVIRONMENT_DIRECTORIES
+        and (child / "pyvenv.cfg").is_file()
+    )
+
+
 def included(path: Path) -> bool:
     relative = path.relative_to(ROOT)
     return (
@@ -45,6 +55,9 @@ def sha256(path: Path) -> str:
 
 
 def main() -> None:
+    unexpected = nonstandard_environment_directories(ROOT)
+    if unexpected:
+        raise SystemExit("NONSTANDARD_VENV_DIRECTORY " + ",".join(unexpected))
     files = []
     for path in sorted(
         (item for item in ROOT.rglob("*") if included(item)),

@@ -3,18 +3,38 @@
 All notable changes to this package are recorded here. Every version binds an
 exact set of file hashes in `PACKAGE-MANIFEST.json`.
 
-From 01.09.01 a version has three groups with leading zeros, `LL.MM.PP`. The
-last two groups are those of the Tectonica Spectrum release the version is
-paired with: 01.09.01 is paired with Spectrum `v00.09.01`. The first group is
-the edition of Ledger's coverage of Spectrum and develops separately from
-Spectrum's first group: `01` is the first ready source edition, and later
-changes of coverage take `02`, `03` and so on. A ready edition does not mean
-that every later Spectrum layer is covered. The file name of the specification
+From 01.09.01 a version has three groups with leading zeros, `LL.MM.PP`.
+`LL` is Ledger's coverage edition, `MM` is the Spectrum minor line used by the
+recorded local example, and `PP` is this Ledger package's revision. Each entry
+names the exact Spectrum release used by that example. The first two releases
+happened to share `MM.PP` with Spectrum; a Ledger-only revision can advance
+`PP` without implying that a new Spectrum release exists. A ready edition does
+not mean that every later Spectrum layer is covered. The file name of the specification
 document and its running header carry only the first two groups (`v01.09`);
 the README title and every other version field carry all three.
 
 Versions up to 0.0.11 are pre-release; in them the second digit is not used,
 and each entry is a patch.
+
+## 01.09.03
+
+Paired with Spectrum `v00.09.02`. This Ledger-only revision retains the recorded
+Spectrum source observation and adds the Pack A connection and reading paths.
+
+- Adds a local document-release quickstart with expected output showing one
+  committed action, exact replay, consumed-permit refusal, and refusal without
+  issued authority.
+- Validates adapter POST bodies against their packaged JSON schemas before
+  calling the engine, with field-path refusals and a closed refusal if schema
+  validation is unavailable.
+- Classifies the declaration and registry fields by runtime use. Removes 17
+  format-only declaration leaves and the nine corresponding refusal codes;
+  the remaining limits and external responsibilities are explicit.
+- Adds a separately verifiable observer export: the operator signs the chain
+  head with Ed25519, and an independent reader checks the events and signature
+  against an externally pinned key fingerprint without importing the engine.
+- Extends the acceptance and package checks to the field census, reader,
+  failure-surface records, and the exact document and manifest bytes.
 
 ## 01.09.02
 

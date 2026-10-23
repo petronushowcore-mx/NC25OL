@@ -133,6 +133,16 @@ PROCEDURES = {
         " anchoring every pattern to exactly one code is a property this"
         " package holds."
     ),
+    "asserted_codes": (
+        "Engine refusal codes checked by a passing unittest assertEqual with"
+        " a production-raised code object and an expected plain string, or by"
+        " a passing code-discriminating assertRaisesRegex. This is separate"
+        " from witnessed_codes, which also counts ordinary equalities."
+    ),
+    "assertion_sites": (
+        "Test-case IDs and assertion kinds that produced asserted engine or"
+        " bridge codes in this recorded run."
+    ),
     "unwitnessed_codes": (
         "engine_refusal_codes minus witnessed_codes: the committed debt. The"
         " baseline pins it as a no-growth ratchet, not a completeness claim."
@@ -149,6 +159,10 @@ PROCEDURES = {
         " Without it the bridge vocabulary is witnessed by nothing: a"
         " deleted sweep row loses its witness in silence while the method"
         " count and the declared-equals-measured check both stay green."
+    ),
+    "asserted_bridge_codes": (
+        "Bridge refusal codes checked by the same passing assertion forms as"
+        " asserted_codes, without crediting engine or wire observations."
     ),
     "unwitnessed_bridge_codes": (
         "bridge_refusal_codes minus witnessed_bridge_codes: the bridge's"
@@ -182,8 +196,11 @@ RUNTIME_PROCEDURE_NAMES = frozenset(
         "constructed_bridge_codes",
         "foreign_translated_codes",
         "witnessed_codes",
+        "asserted_codes",
+        "assertion_sites",
         "unwitnessed_codes",
         "witnessed_bridge_codes",
+        "asserted_bridge_codes",
         "unwitnessed_bridge_codes",
     }
 )
@@ -260,7 +277,7 @@ TYPE_ERROR_OWNERS = frozenset(
     {"_scope_reader", "_state_locked", "_state_read_locked"}
 )
 
-# The recorded run: the FOUR unittest suites plus the two script suites, the
+# The recorded run: the FIVE unittest suites plus the two script suites, the
 # same modules the acceptance pipeline runs, minus the FOUR cases named in
 # RUNTIME_EXCLUDED_SUFFIXES - two self-referential (one re-runs this tool, one
 # re-runs the verifier fleet) and two that install this tool's own observation
@@ -275,6 +292,7 @@ UNITTEST_SUITE_MODULES = (
     # the recorded run only through an import inside the regressions, so its
     # constructions were credited to a suite that does not own them.
     "test_otcs_bridge",
+    "test_reader",
 )
 SCRIPT_SUITE_MODULES = ("test_contract_conformance", "test_safety_mutations")
 # Anchored to the start of a line, and the LAST match is the one taken: an
@@ -879,6 +897,8 @@ class _Observation:
         self.witnessed_engine_raw: set[str] = set()
         self.witnessed_wire_raw: set[str] = set()
         self.witnessed_bridge_raw: set[str] = set()
+        self.asserted_engine: dict[str, set[str]] = {}
+        self.asserted_bridge: dict[str, set[str]] = {}
         self.translated: set[str] = set()
         self.nondiscriminating: list[str] = []
 
@@ -932,7 +952,7 @@ class _ObservedCode(str):
     """The code of a production-raised refusal, as test code sees it.
 
     A passing equality comparison performed by a frame inside tests/ records
-    the pair (this refusal was raised, its exact code was checked). Python's
+    contact with the code, including bookkeeping that asserts nothing. Python's
     subclass-priority rule routes both `exc.code == literal` and
     `literal == exc.code` through this __eq__. __ne__ must be defined too:
     str carries its own C-level __ne__, which would otherwise answer
@@ -1066,6 +1086,27 @@ def _install_observation(
     )
     context = unittest.case._AssertRaisesContext
     original_exit = context.__exit__
+    original_assert_equal = unittest.TestCase.assertEqual
+
+    def traced_assert_equal(self, first, second, msg=None):
+        outcome = original_assert_equal(self, first, second, msg)
+        # Record the assertion call separately from ordinary test equality.
+        if _ACTIVE is not None and _is_test_file(sys._getframe(1).f_code.co_filename):
+            for observed, expected in ((first, second), (second, first)):
+                if not isinstance(observed, (_EngineObservedCode, _BridgeObservedCode)):
+                    continue
+                if type(expected) is not str or str.__eq__(observed, expected) is not True:
+                    continue
+                if isinstance(observed, _EngineObservedCode):
+                    sink, universe = _ACTIVE.asserted_engine, _ACTIVE.engine_universe
+                elif isinstance(observed, _BridgeObservedCode):
+                    sink, universe = _ACTIVE.asserted_bridge, _ACTIVE.bridge_universe
+                else:
+                    continue
+                code = str.__str__(observed)
+                if code in universe:
+                    sink.setdefault(code, set()).add(self.id() + "@assertEqual")
+        return outcome
 
     def traced_exit(self, exc_type, exc_value, traceback):
         outcome = original_exit(self, exc_type, exc_value, traceback)
@@ -1110,6 +1151,14 @@ def _install_observation(
                 )
                 if checks_code and not ambiguous:
                     getattr(_ACTIVE, sink_name).add(code[:])
+                    asserted = (
+                        _ACTIVE.asserted_engine
+                        if isinstance(exc_value, engine_class)
+                        else _ACTIVE.asserted_bridge
+                    )
+                    asserted.setdefault(code[:], set()).add(
+                        self.test_case.id() + "@assertRaisesRegex"
+                    )
                 elif checks_code:
                     _ACTIVE.nondiscriminating.append(
                         f"pattern={pattern.pattern} code={code} "
@@ -1131,6 +1180,8 @@ def _install_observation(
         )
         restores.append((context, "__exit__", original_exit, True))
         context.__exit__ = traced_exit
+        restores.append((unittest.TestCase, "assertEqual", original_assert_equal, True))
+        unittest.TestCase.assertEqual = traced_assert_equal
     except BaseException:
         # A half-applied patch set has no other path back to a clean process.
         _restore_observation(restores)
@@ -1309,6 +1360,17 @@ def runtime_snapshot(
         observation.witnessed_bridge_raw & observation.bridge_universe
     )
     unwitnessed_bridge = observation.bridge_universe - witnessed_bridge
+    asserted_engine = set(observation.asserted_engine) & observation.engine_universe
+    asserted_bridge = set(observation.asserted_bridge) & observation.bridge_universe
+    assertion_sites = sorted(
+        f"{scope}|{code}|{site}"
+        for scope, values in (
+            ("engine", observation.asserted_engine),
+            ("bridge", observation.asserted_bridge),
+        )
+        for code, sites in values.items()
+        for site in sites
+    )
     runtime: dict[str, object] = {
         "unittest_modules": list(UNITTEST_SUITE_MODULES),
         "script_suites": list(SCRIPT_SUITE_MODULES),
@@ -1319,9 +1381,12 @@ def runtime_snapshot(
         "constructed_wire_codes": sorted(observation.constructed_wire),
         "foreign_translated_codes": foreign,
         "witnessed_codes": sorted(witnessed),
+        "asserted_codes": sorted(asserted_engine),
+        "assertion_sites": assertion_sites,
         "unwitnessed_codes": sorted(unwitnessed),
         "constructed_bridge_codes": sorted(observation.constructed_bridge),
         "witnessed_bridge_codes": sorted(witnessed_bridge),
+        "asserted_bridge_codes": sorted(asserted_bridge),
         "unwitnessed_bridge_codes": sorted(unwitnessed_bridge),
     }
     return runtime, problems
@@ -1482,6 +1547,26 @@ def check_baseline(include_runtime: bool = False) -> tuple[dict[str, object], li
                 "foreign_translated_codes",
             )
         )
+        for scope, field in (
+            ("engine", "asserted_codes"),
+            ("bridge", "asserted_bridge_codes"),
+        ):
+            missing = sorted(
+                set(baseline_runtime.get(field, []))
+                - set(current_runtime.get(field, []))
+            )
+            for code in missing:
+                problems.append(
+                    "ASSERTED_REFUSAL_PAIR_REMOVED "
+                    f"scope={scope} code={code} "
+                    f"python={sys.version_info.major}.{sys.version_info.minor}"
+                )
+        problems.extend(
+            _set_difference_problem(
+                "ASSERTION_SITE", baseline_runtime, current_runtime,
+                "assertion_sites",
+            )
+        )
         problems.extend(
             _set_difference_problem(
                 "WITNESSED", baseline_runtime, current_runtime, "witnessed_codes"
@@ -1547,6 +1632,15 @@ def _print_snapshot(snapshot: dict[str, object]) -> None:
         print(
             f"UNWITNESSED_BRIDGE_CODES={len(runtime['unwitnessed_bridge_codes'])}"
         )
+        python_minor = f"{sys.version_info.major}.{sys.version_info.minor}"
+        # This receipt describes THIS invocation; the committed baseline remains
+        # version-neutral so the same package works on supported interpreters.
+        print("FAILURE_ASSERTED_PAIRS=" + json.dumps({
+            "python": python_minor,
+            "engine": [[code, python_minor] for code in runtime["asserted_codes"]],
+            "bridge": [[code, python_minor] for code in runtime["asserted_bridge_codes"]],
+            "sites": runtime["assertion_sites"],
+        }, sort_keys=True, separators=(",", ":")))
         print(f"RUNTIME_UNITTEST_TESTS={runtime['unittest_test_count']}")
 
 

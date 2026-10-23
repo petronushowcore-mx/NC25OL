@@ -162,7 +162,6 @@
     "schema_version": "1.0.0",
     "declaration_id": "synthetic.document.release.connection",
     "declaration_version": "1.2.0",
-    "predecessor_declaration_hash": "8AF9E68FE6B4F75207E9002C5966AC896F7AF904FD40C69D808410F86292CAC6",
     "created_at": "2026-07-31T00:00:00Z",
     "effective_from": "2026-07-31T00:00:00Z",
     "expires_at": "2027-07-27T00:00:00Z",
@@ -178,11 +177,7 @@
       "profile_hash": "A320B14B3759BB9BD93088DBBCF4965FD92ABA1DE824A246C4869F3551FD7F1E"
     },
     "connector": {
-      "connector_id": "synthetic-document-release-connector",
-      "workload_identity_issuer": "synthetic-document-identity-issuer",
-      "environment_ids": [
-        "sandbox"
-      ]
+      "connector_id": "synthetic-document-release-connector"
     },
     "instance_scope": {
       "action_ids": [
@@ -215,10 +210,7 @@
       }
     },
     "structural_budget": {
-      "selector_id": "synthetic-document-selector",
-      "capacity": 400,
-      "unit": "structural-cost-unit",
-      "provenance": "fully_stipulated"
+      "capacity": 400
     },
     "resource_limits": [
       {
@@ -229,22 +221,14 @@
       }
     ],
     "governance": {
-      "profile_owner_id": "synthetic-document-profile-owner",
-      "declaration_owner_id": "synthetic-document-declaration-owner",
       "approval_owner_id": "synthetic-document-approval-owner",
       "authority_issuer_id": "synthetic-document-authority-issuer",
       "revision_authority_ids": [
         "synthetic-document-revision-board"
       ],
-      "change_process_ref": "evidence://synthetic/document-release/change-process/v1",
       "no_live_gate_override": true
     },
     "interfaces": {
-      "governance_service_id": "synthetic-document-governance-service",
-      "operator_service_id": "synthetic-document-operator-service",
-      "executor_service_id": "synthetic-document-executor-service",
-      "architect_store_id": "synthetic-document-architect-store",
-      "observer_projection_id": "synthetic-document-observer-projection",
       "off_limits_system_ids": [
         "production-document-repository",
         "architect-private-store"
@@ -253,24 +237,7 @@
     "mapping_witness_binding": {
       "witness_id": "document-release-reference-witness-v1",
       "witness_hash": "B2D6C3EE0FF57105E276E695A999901A4637A935964EC6245B373F4801547214"
-    },
-    "evidence_refs": [
-      {
-        "evidence_type": "DECLARATION_APPROVAL",
-        "ref": "evidence://synthetic/document-release/declaration-approval/v1",
-        "sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
-      },
-      {
-        "evidence_type": "IDENTITY_BOUNDARY",
-        "ref": "evidence://synthetic/document-release/identity-boundary/v1",
-        "sha256": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
-      },
-      {
-        "evidence_type": "ATOMICITY_DESIGN",
-        "ref": "evidence://synthetic/document-release/atomicity-design/v1",
-        "sha256": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
-      }
-    ]
+    }
   },
   "grant": {
     "message_type": "authority_grant",
@@ -283,7 +250,7 @@
       "profile_hash": "A320B14B3759BB9BD93088DBBCF4965FD92ABA1DE824A246C4869F3551FD7F1E",
       "declaration_id": "synthetic.document.release.connection",
       "declaration_version": "1.2.0",
-      "declaration_hash": "F69D18559079652DEA1DA8E675A06EE4F0CAA4355BE5A7D70FB53D467DD5868D"
+      "declaration_hash": "D3342D331E6E118165723996A9065C20D9D9A203BED0DAB8F73C6B225D1EBB6D"
     },
     "permitted_action_ids": [
       "DOCUMENT_RELEASE",
@@ -311,7 +278,7 @@
       "profile_hash": "A320B14B3759BB9BD93088DBBCF4965FD92ABA1DE824A246C4869F3551FD7F1E",
       "declaration_id": "synthetic.document.release.connection",
       "declaration_version": "1.2.0",
-      "declaration_hash": "F69D18559079652DEA1DA8E675A06EE4F0CAA4355BE5A7D70FB53D467DD5868D"
+      "declaration_hash": "D3342D331E6E118165723996A9065C20D9D9A203BED0DAB8F73C6B225D1EBB6D"
     },
     "action_id": "DOCUMENT_RELEASE",
     "target_system_id": "document-sandbox-repository",

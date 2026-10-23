@@ -44,7 +44,6 @@ from nc25_universal_ledger import (  # noqa: E402
     SHA256_RE,
     SIGNATURE_ENVELOPE_FIELDS,
     SQLiteStateStore,
-    STRUCTURAL_PROVENANCE_VALUES,
     sha256_hex,
     UniversalConnectionLedger,
     DECLARED_HASH_FIELDS,
@@ -549,46 +548,19 @@ class ContractRegressions(unittest.TestCase):
             self.assertEqual(replay, receipt)
             self.assertEqual(engine._snapshot_state(), committed)
 
-    def test_structural_budget_provenance_is_required_and_typed(self) -> None:
-        # The declared capacity origin is coded with the published four-value
-        # instrument; the declaration cannot omit the coding or invent a fifth
-        # value, and every published value remains accepted.
+    def test_removed_capacity_provenance_refused_by_engine_and_schema(self) -> None:
         fixture = self.fixture()
-        missing = copy.deepcopy(fixture.declaration)
-        del missing["structural_budget"]["provenance"]
+        injected = copy.deepcopy(fixture.declaration)
+        injected["structural_budget"]["provenance"] = "vendor_asserted"
         with self.assertRaisesRegex(ContractViolation, "^STRUCTURAL_BUDGET(:|$)"):
-            validate_declaration(missing, fixture.profile)
-        mislabeled = copy.deepcopy(fixture.declaration)
-        mislabeled["structural_budget"]["provenance"] = "vendor_asserted"
-        with self.assertRaisesRegex(ContractViolation, "^STRUCTURAL_PROVENANCE(:|$)"):
-            validate_declaration(mislabeled, fixture.profile)
-        self.assertEqual(
-            STRUCTURAL_PROVENANCE_VALUES,
-            {
-                "fully_stipulated",
-                "empirically_calibrated",
-                "derived_from_load_model",
-                "mixed",
-            },
-        )
-        for value in sorted(STRUCTURAL_PROVENANCE_VALUES):
-            declared = copy.deepcopy(fixture.declaration)
-            declared["structural_budget"]["provenance"] = value
-            validate_declaration(declared, fixture.profile)
-        # The schema surface must carry the same contract as the engine: the
-        # two validation layers may not silently diverge on requiredness or on
-        # the value set.
+            validate_declaration(injected, fixture.profile)
         declaration_schema = json.loads(
-            (
-                ROOT / "core" / "schemas" / "connection-declaration.schema.json"
-            ).read_text(encoding="utf-8")
+            (ROOT / "core" / "schemas" / "connection-declaration.schema.json")
+            .read_text(encoding="utf-8")
         )
         budget_schema = declaration_schema["properties"]["structural_budget"]
-        self.assertIn("provenance", budget_schema["required"])
-        self.assertEqual(
-            set(budget_schema["properties"]["provenance"]["enum"]),
-            set(STRUCTURAL_PROVENANCE_VALUES),
-        )
+        self.assertNotIn("provenance", budget_schema["required"])
+        self.assertNotIn("provenance", budget_schema["properties"])
 
     def test_operator_request_hash_does_not_leak_authorization_stage(self) -> None:
         # A connector can compute sha256({intent, evidence_bundle}) itself. If a
@@ -1194,12 +1166,21 @@ class ContractRegressions(unittest.TestCase):
             self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr[-2000:])
             self._rebind_acceptance_report(package)
 
-            # The pair with Spectrum (verify_package.spectrum_pair_mismatches): the version
-            # names the Spectrum release it pairs with, and the recorded source release must
-            # be a run on that release. When the version moves, RESULT.md can stay on the
-            # previous pair. The plants have the shape of that regression: the RESULT.md
-            # table left on the previous release, and a result.json from a run on another
-            # commit. Each must redden package_version_consistency and nothing else.
+            # The current CHANGELOG names the exact Spectrum release; the minor line
+            # matches Ledger while its patch may advance independently. The recorded
+            # source release must be a run on that tag and commit. A wrong minor line,
+            # stale RESULT.md table, or result.json from another commit must each redden
+            # package_version_consistency and nothing else.
+            changelog_path = package / "CHANGELOG.md"
+            changelog_bytes = changelog_path.read_bytes()
+            pair_line = re.search(rb"Paired with Spectrum `v00\.(\d{2})\.(\d{2})`", changelog_bytes)
+            self.assertIsNotNone(pair_line, "CHANGELOG carries no Spectrum pair")
+            other_minor = b"%02d" % ((int(pair_line.group(1)) + 1) % 100)
+            wrong_minor = changelog_bytes.replace(
+                pair_line.group(0),
+                b"Paired with Spectrum `v00." + other_minor + b"." + pair_line.group(2) + b"`",
+                1,
+            )
             result_md_path = package / "examples" / "spectrum_release" / "RESULT.md"
             result_json_path = package / "examples" / "spectrum_release" / "result.json"
             result_md_bytes = result_md_path.read_bytes()
@@ -1210,6 +1191,8 @@ class ContractRegressions(unittest.TestCase):
             previous = stem + b"%02d" % (revision - 1 if revision > 0 else revision + 1)
             other = bytes(reversed(commit))
             for label, path, original, planted in (
+                ("CHANGELOG on another Spectrum minor line", changelog_path, changelog_bytes,
+                 wrong_minor),
                 ("RESULT.md table on the previous release", result_md_path, result_md_bytes,
                  result_md_bytes.replace(b"tag `" + stem + row.group(2) + b"`", b"tag `" + previous + b"`", 1)),
                 ("result.json from a run on another commit", result_json_path, result_json_bytes,
@@ -1283,6 +1266,38 @@ class ContractRegressions(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode, 0, result.stderr[-2000:])
                 shutil.rmtree(package / name)
+
+            custom = package / "runenv-custom"
+            custom.mkdir()
+            (custom / "pyvenv.cfg").write_text(
+                "home = /usr/bin\n", encoding="utf-8"
+            )
+            with self.subTest(environment="runenv-custom"):
+                result, verdicts = self._package_verdicts(package)
+                first_failure = next(
+                    (line for line in result.stdout.splitlines()
+                     if line.startswith("FAIL ")),
+                    "",
+                )
+                self.assertEqual(
+                    first_failure,
+                    "FAIL nonstandard_environment_directory: runenv-custom",
+                )
+                self.assertEqual(
+                    verdicts["nonstandard_environment_directory"], "FAIL"
+                )
+                rejected = subprocess.run(
+                    [sys.executable, "-B",
+                     str(package / "tools" / "build_package_manifest.py")],
+                    cwd=package, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
+                )
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn(
+                    "NONSTANDARD_VENV_DIRECTORY runenv-custom",
+                    rejected.stdout + rejected.stderr,
+                )
+            shutil.rmtree(custom)
 
             artefact = package / "tests" / "__pycache__"
             artefact.mkdir(parents=True, exist_ok=True)
@@ -1499,6 +1514,15 @@ class ContractRegressions(unittest.TestCase):
                 )["runtime"]["witnessed_codes"],
                 "the planted witness was not recorded before being neutered",
             )
+            self.assertIn(
+                "PLANTED_WITNESSED_CODE",
+                json.loads(
+                    (package / "tests" / "failure-surface-baseline.json").read_text(
+                        encoding="utf-8"
+                    )
+                )["runtime"]["asserted_codes"],
+                "the planted assertion was not recorded before being neutered",
+            )
             source = suite.read_text(encoding="utf-8")
             self.assertEqual(source.count(PLANTED_WITNESS), 1)
             suite.write_text(
@@ -1506,8 +1530,8 @@ class ContractRegressions(unittest.TestCase):
                     PLANTED_WITNESS,
                     "        try:\n"
                     "            _planted_witnessed()\n"
-                    "        except ContractViolation:\n"
-                    "            pass\n",
+                    "        except ContractViolation as exc:\n"
+                    '            _ = exc.code == "PLANTED_WITNESSED_CODE"\n',
                 ),
                 encoding="utf-8",
             )
@@ -1681,11 +1705,8 @@ class ContractRegressions(unittest.TestCase):
                 "neutered assertion drops its witness",
                 neuter_witnessing_assertion,
                 "--check",
-                (
-                    ("WITNESSED_REMOVED", "PLANTED_WITNESSED_CODE"),
-                    ("UNWITNESSED_ADDED", "PLANTED_WITNESSED_CODE"),
-                ),
-                (),
+                (("ASSERTED_REFUSAL_PAIR_REMOVED", "PLANTED_WITNESSED_CODE"),),
+                ("WITNESSED_REMOVED", "UNWITNESSED_ADDED"),
             ),
             (
                 "disarmed sink reddens by itself",
@@ -1768,6 +1789,46 @@ class ContractRegressions(unittest.TestCase):
                             [line for line in lines if line.startswith(marker)],
                             f"{marker} was reported\n{combined[-2000:]}",
                         )
+                    if label == "neutered assertion drops its witness":
+                        summary = next(
+                            i for i, line in enumerate(lines)
+                            if line.startswith("RUNTIME_UNITTEST_TESTS=")
+                        )
+                        self.assertEqual(
+                            lines[summary + 1],
+                            "ASSERTED_REFUSAL_PAIR_REMOVED "
+                            "scope=engine code=PLANTED_WITNESSED_CODE "
+                            f"python={sys.version_info.major}.{sys.version_info.minor}",
+                        )
+
+            from check_failure_surface import pair_problem
+
+            minor = f"{sys.version_info.major}.{sys.version_info.minor}"
+            baseline = {
+                "asserted_codes": ["PLANTED_WITNESSED_CODE"],
+                "asserted_bridge_codes": [],
+                "assertion_sites": [
+                    "engine|PLANTED_WITNESSED_CODE|fixture.Test@test"
+                ],
+            }
+            receipt = {
+                "python": minor,
+                "engine": [["PLANTED_WITNESSED_CODE", minor]],
+                "bridge": [],
+                "sites": baseline["assertion_sites"],
+            }
+            self.assertIsNone(pair_problem(receipt, baseline, minor))
+            wrong_version = dict(receipt, python="0.0")
+            self.assertTrue(
+                pair_problem(wrong_version, baseline, minor).startswith(
+                    "FAILURE_ASSERTED_VERSION_MISMATCH"
+                )
+            )
+            missing_assertion = dict(receipt, sites=[])
+            self.assertEqual(
+                pair_problem(missing_assertion, baseline, minor),
+                "FAILURE_ASSERTED_PAIR_INVALID unexpected-pair-or-site",
+            )
 
     def test_wire_witness_does_not_retire_engine_debt(self) -> None:
         # The two published vocabularies overlap: the adapter's translation
@@ -2093,7 +2154,6 @@ class ContractRegressions(unittest.TestCase):
         self.assert_identifier_list_contracts(
             fixture.declaration, lambda value: validate_declaration(value, fixture.profile),
             (
-                ('ENVIRONMENT_IDS', ('connector', 'environment_ids'), False),
                 ('SCOPE_ACTION_IDS', ('instance_scope', 'action_ids'), False),
                 ('SCOPE_EFFECT_IDS', ('instance_scope', 'effect_class_ids'), False),
                 ('SCOPE_TARGET_IDS', ('instance_scope', 'target_system_ids'), False),
@@ -2107,17 +2167,14 @@ class ContractRegressions(unittest.TestCase):
             ('RESOURCE_LIMIT_ORDER', ((('resource_limits', 0, 'window_seconds'), 'set', 0),)),
             ('RESOURCE_LIMIT_COVERAGE', ((('resource_limits', 1), 'delete', None),)),
             ('GOVERNANCE', ((('governance',), 'set', None),)),
-            ('GOVERNANCE_ID', ((('governance', 'profile_owner_id'), 'set', ''),)),
+            ('GOVERNANCE_ID', ((('governance', 'approval_owner_id'), 'set', ''),)),
             ('GOVERNANCE_CHANGE_CONTROL', ((('governance', 'no_live_gate_override'), 'set', False),)),
             ('INTERFACES', ((('interfaces',), 'set', None),)),
-            ('INTERFACE_ID', ((('interfaces', 'governance_service_id'), 'set', ''),)),
-            ('INTERFACE_ROLE_OVERLAP', ((('interfaces', 'operator_service_id'), 'set', 'synthetic-governance-service'),)),
             ('TARGET_OFF_LIMITS_OVERLAP', ((('interfaces', 'off_limits_system_ids', 0), 'set', 'bank-sandbox-ledger'),)),
             ('WITNESS_BINDING', ((('mapping_witness_binding',), 'set', None),)),
             ('WITNESS_ID_MISMATCH', ((('mapping_witness_binding', 'witness_id'), 'set', 'bank-questionnaire-crosswalk-v2'),)),
             ('WITNESS_HASH', ((('mapping_witness_binding', 'witness_hash'), 'set', 'not-a-sha256'),)),
             ('WITNESS_BINDING_MISMATCH', ((('mapping_witness_binding', 'witness_hash'), 'set', '0000000000000000000000000000000000000000000000000000000000000000'),)),
-            ('DECLARATION_EVIDENCE', ((('evidence_refs',), 'set', []),)),
             ('SCOPE_ACTION_TARGET_COVERAGE', ((('instance_scope', 'action_target_bindings', 'NO_EFFECT_FALLBACK'), 'delete', None),)),
             ('SCOPE_ACTION_TARGET_RANGE', ((('instance_scope', 'action_target_bindings', 'NO_EFFECT_FALLBACK'), 'set', ['unbound-target']),)),
             ('SCOPE_UNKNOWN_EFFECT', ((('instance_scope', 'effect_class_ids', 2), 'set', 'UNKNOWN_EFFECT'),)),
@@ -2127,19 +2184,15 @@ class ContractRegressions(unittest.TestCase):
             ('SCOPE_DIMENSION_ID', ((('instance_scope', 'scope_constraints', '1product'), 'set', ['synthetic-payment']),)),
             ('SCOPE_CONSTRAINT_VALUES', ((('instance_scope', 'scope_constraints', 'product'), 'set', []),)),
             ('STRUCTURAL_BUDGET', ((('structural_budget',), 'set', []),)),
-            ('SELECTOR_ID', ((('structural_budget', 'selector_id'), 'set', ''),)),
             ('STRUCTURAL_CAPACITY', ((('structural_budget', 'capacity'), 'set', -1),)),
-            ('STRUCTURAL_UNIT', ((('structural_budget', 'unit'), 'set', ''),)),
-            ('STRUCTURAL_PROVENANCE', ((('structural_budget', 'provenance'), 'set', 'guessed'),)),
             ('RESOURCE_LIMITS', ((('resource_limits',), 'set', {}),)),
             ('RESOURCE_LIMIT', ((('resource_limits', 0), 'set', 'money_minor_units'),)),
             ('RESOURCE_LIMIT_ID', ((('resource_limits', 0, 'resource_id'), 'set', 42),)),
             ('RESOURCE_MAX_PER_INTENT', ((('resource_limits', 0, 'max_per_intent'), 'set', -1),)),
-            ('DECLARATION_FIELDS', ((('evidence_refs',), 'delete', None),)),
+            ('DECLARATION_FIELDS', ((('mapping_witness_binding',), 'delete', None),)),
             ('DECLARATION_SCHEMA_VERSION', ((('schema_version',), 'set', '2.0.0'),)),
             ('DECLARATION_ID', ((('declaration_id',), 'set', ''),)),
             ('DECLARATION_VERSION', ((('declaration_version',), 'set', '1.2'),)),
-            ('PREDECESSOR_HASH', ((('predecessor_declaration_hash',), 'set', 'not-a-hash'),)),
             ('DECLARATION_TIME_ORDER', ((('expires_at',), 'set', '2026-07-30T00:00:00Z'),)),
             ('PROFILE_BINDING', ((('profile_binding',), 'set', None),)),
             ('PROFILE_ID_MISMATCH', ((('profile_binding', 'profile_id'), 'set', 'banking.reference.v2'),)),
@@ -2148,7 +2201,6 @@ class ContractRegressions(unittest.TestCase):
             ('PROFILE_HASH_MISMATCH', ((('profile_binding', 'profile_hash'), 'set', '81F9552562648773F84123BADD5957A3DA50A65ED47FB962AEC9E1D9518E1069'),)),
             ('CONNECTOR', ((('connector',), 'set', None),)),
             ('CONNECTOR_ID', ((('connector', 'connector_id'), 'set', ''),)),
-            ('WORKLOAD_IDENTITY_ISSUER', ((('connector', 'workload_identity_issuer'), 'set', ''),)),
             ('INSTANCE_SCOPE', ((('instance_scope',), 'set', None),)),
             ('SCOPE_UNKNOWN_ACTION', ((('instance_scope', 'action_ids', 0), 'set', 'BANK_PAYMENT_REVERSE'),)),
             ('SCOPE_ACTION_TARGET_BINDINGS', ((('instance_scope', 'action_target_bindings'), 'set', None),)),
@@ -2545,7 +2597,8 @@ class ContractRegressions(unittest.TestCase):
                 ROLE_GOVERNANCE,
             )
             self.assertEqual(status, 400)
-            self.assertEqual(body.get("code"), "ACTIVATE_BODY")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.activated_by: required")
             self.assertNotEqual(
                 body.get("message"), "None", "the caller was shown a Python repr"
             )
@@ -2560,7 +2613,8 @@ class ContractRegressions(unittest.TestCase):
                 ROLE_OPERATOR,
                 idem=oversized["idempotency_key"],
             )
-            self.assertEqual(body.get("code"), "INVALID_TIMESTAMP")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.intent.received_at: format")
             self.assertLessEqual(len(body.get("message", "")), 131)
 
         with self.subTest(guard="a wrapper's unknown keys are not echoed in full"):
@@ -2572,18 +2626,33 @@ class ContractRegressions(unittest.TestCase):
                 ROLE_OPERATOR,
                 idem=intent["idempotency_key"],
             )
-            self.assertEqual(body.get("code"), "OPERATOR_BODY")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.k0: additionalProperties")
             self.assertLessEqual(len(body.get("message", "")), 131)
 
-        with self.subTest(guard="engine unknown keys are bounded at the wire boundary"):
+        with self.subTest(guard="schema unknown keys are bounded at the wire boundary"):
             payload = {**_grant, **{f"k{index}": 1 for index in range(400)}}
             status, body = call("POST", "/v1/authority-grants", payload, ROLE_GOVERNANCE)
             self.assertEqual(status, 400)
-            self.assertEqual(body.get("code"), "AUTHORITY_GRANT_FIELDS")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.k0: additionalProperties")
             self.assertLessEqual(len(body.get("message", "")), 131)
-        with self.subTest(guard="short engine explanations are preserved"):
+        with self.subTest(guard="short schema field paths are preserved"):
             status, body = call("POST", "/v1/authority-grants", {**_grant, "extra": 1}, ROLE_GOVERNANCE)
-            self.assertEqual(body.get("message"), "unknown fields: ['extra']")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.extra: additionalProperties")
+        with self.subTest(guard="a schema field path cannot set the response length"):
+            payload = {**_grant, "k" * 5000: 1}
+            status, body = call("POST", "/v1/authority-grants", payload, ROLE_GOVERNANCE)
+            self.assertEqual(status, 400)
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertLessEqual(len(body.get("message", "")), 131)
+        with self.subTest(guard="short engine explanations for schema-valid bodies are preserved"):
+            payload = {**_grant, "connector_id": "synthetic-other"}
+            status, body = call("POST", "/v1/authority-grants", payload, ROLE_GOVERNANCE)
+            self.assertEqual(status, 400)
+            self.assertEqual(body.get("code"), "AUTHORITY_CONNECTOR_MISMATCH")
+            self.assertEqual(body.get("message"), "AUTHORITY_CONNECTOR_MISMATCH")
 
         with self.subTest(guard="a refused value is not echoed in full"):
             oversized = copy.deepcopy(intent)
@@ -3645,7 +3714,8 @@ class ContractRegressions(unittest.TestCase):
                     malformed["grant_id"] = value
                     status, response = wire_issue(engine, malformed)
                     self.assertEqual(status, "400 Bad Request")
-                    self.assertEqual(response["code"], "AUTHORITY_IDENTIFIER")
+                    self.assertEqual(response["code"], "BODY_SCHEMA")
+                    self.assertEqual(response["message"], "$.grant_id: type")
             self.assertEqual(wire_issue(engine, grant)[0], "200 OK")
 
         with self.subTest(claim="grant replay status comes from the durable transaction"):
@@ -3876,10 +3946,10 @@ class ContractRegressions(unittest.TestCase):
                     with self.assertRaisesRegex(ContractViolation, rf"^{code}(:|$)"):
                         validate_profile(broken)
         for value in ([], {}):
-            with self.subTest(document="declaration", provenance=value):
+            with self.subTest(document="declaration", removed_provenance=value):
                 broken = copy.deepcopy(fixture.declaration)
                 broken["structural_budget"]["provenance"] = value
-                with self.assertRaisesRegex(ContractViolation, r"^STRUCTURAL_PROVENANCE(:|$)"):
+                with self.assertRaisesRegex(ContractViolation, r"^STRUCTURAL_BUDGET(:|$)"):
                     validate_declaration(broken, fixture.profile)
             with self.subTest(document="state", status=value):
                 engine, _intent, _grant = fixture.engine()
@@ -5400,10 +5470,10 @@ class ContractRegressions(unittest.TestCase):
     def test_the_report_terminal_line_names_the_gate_rows(self) -> None:
         """The report's required terminal result is the count the gate rows make.
 
-        `ACCEPTANCE_STEPS=8/8 PASS` stands in the report as a literal the generator never
+        `ACCEPTANCE_STEPS=9/9 PASS` stands in the report as a literal the generator never
         rewrites - the table rows, the date, the status and the sections it owns are
-        rewritten, and this line is none of them - so a ninth gate row would have left it
-        naming eight while every row beside it moved. Held here against `GATE_ROWS`, the one
+        rewritten, and this line is none of them - so a tenth gate row would have left it
+        naming nine while every row beside it moved. Held here against `GATE_ROWS`, the one
         home of that count: the line stays hand-kept, and this is what keeps it honest.
         """
         report = (ROOT / "ACCEPTANCE-REPORT.md").read_text(encoding="utf-8")
@@ -5870,7 +5940,7 @@ class ContractRegressions(unittest.TestCase):
             ("ACCEPTANCE_STEP_ENTRY", "update", "acceptance", [(steps + (1, "id"), "set", "functional_behaviour")]),
             ("ACCEPTANCE_STEP_ENTRY", "update", "acceptance", [(steps + (0, "total"), "set", 94)]),
             # A gate that ran NO checks. `passed == total` admits zero on both sides, so
-            # eight of these beside the aggregate `8/8` published eight gates passed with
+            # nine of these beside the aggregate `9/9` published nine gates passed with
             # nothing run - and the runner reaches the shape from our own tree, since a
             # suite that ran no tests still prints `Ran 0 tests` and `OK`.
             ("ACCEPTANCE_STEP_ENTRY", "update", "acceptance", [(steps + (0, "passed"), "set", 0), (steps + (0, "total"), "set", 0)]),
@@ -5934,7 +6004,7 @@ class ContractRegressions(unittest.TestCase):
             ("REPORT_CANONICAL_COMMAND", "update", "source_manifest", [(core_input + ("file_name",), "set", "core.md`; py -3 tests/run_acceptance.py; `x")]),
             # A gate row nobody declares. Each declared row is rewritten exactly once,
             # which says nothing about an extra one: measured, without this refusal the
-            # written report carries nine rows under a terminal line reading `8/8`.
+            # written report carries ten rows under a terminal line reading `9/9`.
             ("REPORT_GATE_ROWS", "update", "report", [("| Package integrity checks |", "| Retired gate | `1/1 PASS` |\n| Package integrity checks |", 1)]),
             # A code name written twice in the baseline. `len` counts entries, so without
             # this refusal the figure the report calls a count of codes would be a count of lines.

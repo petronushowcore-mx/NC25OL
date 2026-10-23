@@ -8,10 +8,10 @@
   "binding": {
     "profile_id": "banking.reference.v1",
     "profile_version": "1.3.0",
-    "profile_hash": "D0467762926BF45A856431BF8038044852681456D1FBBAEEEBC80A4EC1674C6F",
+    "profile_hash": "925EF12281DB3777A5A11585B8DE8AF7224B10154CF525640C8B31BFCD3532FA",
     "declaration_id": "synthetic.bank.connection",
     "declaration_version": "1.2.0",
-    "declaration_hash": "54E6C072FA6D20F2F4E32030E26F124C339BEE10F9307B6FA2D35EDF33DFC78E"
+    "declaration_hash": "62601DECE55120E53BA550B9D4640AF9CF433D501BE0C8EFFB0AF793FDA9A440"
   },
   "action_id": "BANK_PAYMENT_POST",
   "target_system_id": "bank-sandbox-ledger",

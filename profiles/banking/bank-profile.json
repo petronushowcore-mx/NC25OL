@@ -126,7 +126,7 @@
       {
         "evidence_type": "DOMAIN_QUESTIONNAIRE_CROSSWALK",
         "ref": "profiles/banking/questionnaire-crosswalk.json",
-        "sha256": "ADE6CFDCF8122C3321A6476C72C76FCCAAC21D2E7D27C0874F583A63A000D1BA"
+        "sha256": "3D8E11252238A7A10EB00E334A278B1AE8564F8D8A98C2EC3B56D20FC70C5765"
       }
     ],
     "covered_action_ids": [
@@ -139,7 +139,7 @@
       "BANK_READ_ONLY_QUERY",
       "NO_EFFECT"
     ],
-    "witness_hash": "81F9552562648773F84123BADD5957A3DA50A65ED47FB962AEC9E1D9518E1069"
+    "witness_hash": "6E9712AFA89C2014F1557B28988891209E30F5C05F3F1881519D0F19AB5673EE"
   },
   "roles": {
     "governance_scope": "nc25.governance",

@@ -10,19 +10,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_ACCEPTANCE_STEP_COUNT = 8
+REQUIRED_ACCEPTANCE_STEP_COUNT = 9
 EXPECTED_STEP_PATHS = {
     'functional_behaviour': 'tests/test_universal_connection.py',
     'semantic_contracts': 'tests/test_semantic_contracts.py',
     'safety_mutations': 'tests/test_safety_mutations.py',
     'contract_conformance': 'tests/test_contract_conformance.py',
+    'declaration_field_census': 'tests/test_declaration_field_census.py',
     'contract_regressions': 'tests/test_contract_regressions.py',
     'otcs_bridge': 'tests/test_otcs_bridge.py',
     'failure_surface_ratchet': 'tests/check_failure_surface.py',
     'package_verifier': 'tests/verify_package.py',
 }
 
-# The four unittest steps require a bare `OK` line as well as the count. The
+# The five unittest steps require a bare `OK` line as well as the count. The
 # count is taken from `Ran N tests`, and that line does not change when a test
 # is skipped - unittest reports the skip on the verdict line instead, as
 # `OK (skipped=N)`, and still exits zero. Requiring `^OK$` is what makes a
@@ -33,6 +34,7 @@ STEPS = (
     ("semantic_contracts", "tests/test_semantic_contracts.py", (r"Ran \d+ tests", r"(?m)^OK$"), r"Ran (?P<passed>\d+) tests"),
     ("safety_mutations", "tests/test_safety_mutations.py", (r"SAFETY_MUTATIONS=\d+/\d+ PASS",), r"SAFETY_MUTATIONS=(?P<passed>\d+)/(?P<total>\d+) PASS"),
     ("contract_conformance", "tests/test_contract_conformance.py", (r"CONTRACT_CONFORMANCE=\d+/\d+ PASS",), r"CONTRACT_CONFORMANCE=(?P<passed>\d+)/(?P<total>\d+) PASS"),
+    ("declaration_field_census", "tests/test_declaration_field_census.py", (r"Ran \d+ tests", r"(?m)^OK$"), r"Ran (?P<passed>\d+) tests"),
     ("contract_regressions", "tests/test_contract_regressions.py", (r"Ran \d+ tests", r"(?m)^OK$"), r"Ran (?P<passed>\d+) tests"),
     # Run the bridge separately so its failures keep their own step name
     # and its tests are counted once.

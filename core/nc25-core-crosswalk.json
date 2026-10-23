@@ -71,8 +71,8 @@
       "id": "A60-A61-BUDGET",
       "source_lines": "1839-1935",
       "core_object": "Tau-constrained predicate and structural pressure",
-      "universal_use": "Committed-action structural capacity channel, separate from domain resource limits, with a declared capacity provenance coding.",
-      "constraint": "Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package."
+      "universal_use": "Committed-action structural capacity channel, separate from domain resource limits.",
+      "constraint": "The package does not verify the provenance of structural capacity. Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package."
     },
     {
       "id": "A64-A66-SEPARATION",

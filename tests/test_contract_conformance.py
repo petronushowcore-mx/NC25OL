@@ -50,7 +50,7 @@ from nc25_universal_adapter import UniversalConnectionHttpAdapter  # noqa: E402
 EXPECTED_CONFORMANCE_IDS = frozenset(
     {
         "schema_format_keyword_active", "schema_max_length_keyword_active",
-        "schema_rejects_unknown_provenance",
+        "schema_rejects_removed_provenance",
         "schema_banking_profile", "schema_second_profile", "schema_declaration",
         "schema_second_declaration", "schema_authority_grant", "schema_intent",
         "schema_evidence_bundle", "schema_live_operator_allow",
@@ -319,24 +319,24 @@ def schema_conformance() -> None:
         "overlong domain name was accepted",
     )
 
-    misdeclared_provenance = copy.deepcopy(
+    removed_provenance = copy.deepcopy(
         load_json(ROOT / "examples" / "synthetic-connection-declaration.json")
     )
-    misdeclared_provenance["structural_budget"]["provenance"] = "vendor_asserted"
-    misdeclared_provenance_errors = list(
+    removed_provenance["structural_budget"]["provenance"] = "vendor_asserted"
+    removed_provenance_errors = list(
         Draft202012Validator(
             declaration_schema,
             format_checker=format_checker,
-        ).iter_errors(misdeclared_provenance)
+        ).iter_errors(removed_provenance)
     )
     check(
         any(
-            error.validator == "enum"
-            and list(error.path) == ["structural_budget", "provenance"]
-            for error in misdeclared_provenance_errors
+            error.validator == "additionalProperties"
+            and list(error.path) == ["structural_budget"]
+            for error in removed_provenance_errors
         ),
-        "schema_rejects_unknown_provenance",
-        "capacity provenance outside the published coding was accepted",
+        "schema_rejects_removed_provenance",
+        "removed capacity-provenance metadata was accepted",
     )
 
     validate(
@@ -738,8 +738,8 @@ def _exec_request(intent, permit_hash):
 def http_adapter_conformance() -> None:
     """Drive the reference WSGI adapter in-process and prove the wire MUSTs.
 
-    Standard-library only (no jsonschema or pyyaml), so this section runs even
-    when the optional conformance libraries are absent.
+    The adapter requires jsonschema for POST bodies; the conformance suite
+    additionally uses PyYAML to inspect the published OpenAPI contract.
     """
 
     expected_scopes = {
@@ -1124,9 +1124,9 @@ def http_adapter_conformance() -> None:
         f"status={fault_status} body={fault_body}",
     )
 
-    # A body with no idempotency_key is an incomplete intent (400 from the
-    # engine's form check), not a header mismatch; a present, differing key
-    # stays the 409 the http_idempotency_mismatch row certifies.
+    # A body with no idempotency_key is refused by the ingress schema with
+    # its field path. A present, differing key stays the 409 certified by
+    # http_idempotency_mismatch after schema validation.
     field_app, field_grant, field_intent, field_evidence = _adapter_fixture()
     _activate_and_grant(field_app, field_grant)
     keyless = dict(field_intent)
@@ -1140,7 +1140,9 @@ def http_adapter_conformance() -> None:
         idem=field_intent["idempotency_key"],
     )
     check(
-        field_status == 400 and field_body.get("code") == "INTENT_FIELDS",
+        field_status == 400 and field_body == {
+            "code": "BODY_SCHEMA", "message": "$.intent.idempotency_key: required"
+        },
         "http_missing_idempotency_field_400",
         f"status={field_status} body={field_body}",
     )
@@ -1204,7 +1206,7 @@ def http_adapter_conformance() -> None:
     )
     check(
         shape_status == 400
-        and shape_body.get("code") == "INTENT_BINDING"
+        and shape_body == {"code": "BODY_SCHEMA", "message": "$.intent.binding: type"}
         and shape_app._engine.ledger.head()["event_count"] == shape_events
         and not shape_app._engine.idempotency,
         "http_intent_binding_400",
@@ -1230,9 +1232,9 @@ def http_adapter_conformance() -> None:
     )
     check(
         wrap_activate_status == 400
-        and wrap_activate_body.get("code") == "ACTIVATE_BODY"
+        and wrap_activate_body == {"code": "BODY_SCHEMA", "message": "$.extra: additionalProperties"}
         and wrap_eval_status == 400
-        and wrap_eval_body.get("code") == "OPERATOR_BODY",
+        and wrap_eval_body == {"code": "BODY_SCHEMA", "message": "$.extra: additionalProperties"},
         "http_wrapper_unknown_key_400",
         f"activate={wrap_activate_status}/{wrap_activate_body} "
         f"evaluate={wrap_eval_status}/{wrap_eval_body}",

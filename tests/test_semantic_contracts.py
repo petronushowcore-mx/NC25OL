@@ -135,15 +135,10 @@ class SemanticContractTests(unittest.TestCase):
         with self.assertRaisesRegex(IntegrityViolation, "^PROFILE_HASH_MISMATCH(:|$)"):
             validate_declaration(changed, self.profile)
 
-    def test_interface_roles_cannot_collapse(self) -> None:
+    def test_removed_interface_service_id_is_refused(self) -> None:
         changed = copy.deepcopy(self.declaration)
-        changed["interfaces"]["executor_service_id"] = changed["interfaces"][
-            "operator_service_id"
-        ]
-        with self.assertRaisesRegex(
-            ContractViolation,
-            "^INTERFACE_ROLE_OVERLAP(:|$)",
-        ):
+        changed["interfaces"]["executor_service_id"] = "synthetic-executor"
+        with self.assertRaisesRegex(ContractViolation, "^INTERFACES(:|$)"):
             validate_declaration(changed, self.profile)
 
     def test_operator_cannot_submit_gate_data(self) -> None:

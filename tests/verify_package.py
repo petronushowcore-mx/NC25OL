@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "tools"))
 import failure_surface  # noqa: E402
+import build_package_manifest  # noqa: E402
 sys.path.pop(0)
 
 # A virtual environment made in the package root (`python -m venv .venv`) is not part of
@@ -29,14 +30,15 @@ def in_environment_directory(relative: Path) -> bool:
 
 
 EXPECTED_PROFILE_HASH = (
-    "D0467762926BF45A856431BF8038044852681456D1FBBAEEEBC80A4EC1674C6F"
+    "925EF12281DB3777A5A11585B8DE8AF7224B10154CF525640C8B31BFCD3532FA"
 )
 EXPECTED_DECLARATION_HASH = (
-    "54E6C072FA6D20F2F4E32030E26F124C339BEE10F9307B6FA2D35EDF33DFC78E"
+    "62601DECE55120E53BA550B9D4640AF9CF433D501BE0C8EFFB0AF793FDA9A440"
 )
 STANDALONE_PACKAGE_CHECK_IDS = frozenset(
     {
         "required_files", "no_build_artefacts", "gitignore_python_caches",
+        "nonstandard_environment_directory",
         "dependency_lock", "package_manifest_shape",
         "package_manifest_coverage", "package_manifest_hashes",
         "collectible_script_suites", "documented_acceptance_route",
@@ -108,8 +110,8 @@ class Checks:
     def passed_ids(self) -> set[str]:
         return {label for label, kind in self.verdicts.items() if kind == "PASS"}
 
-    def require(self, condition: bool, label: str) -> None:
-        self._record(label, "PASS" if condition else "FAIL")
+    def require(self, condition: bool, label: str, reason: str = "") -> None:
+        self._record(label, "PASS" if condition else "FAIL", reason)
 
     def passed(self, label: str) -> None:
         self._record(label, "PASS")
@@ -528,12 +530,11 @@ def package_version_mismatches(sections: dict[str, list[str]]) -> list[str]:
 def spectrum_pair_mismatches(package_version: str) -> list[str]:
     """The Spectrum release this version pairs with, as every carrier in the package states it.
 
-    The pairing rule (CHANGELOG, `LL.MM.PP`) gives the release from the version; the recorded
-    source release in examples/spectrum_release must be a run on exactly that release. Three
-    carriers state one fact: the pairing line of the current CHANGELOG section, the RESULT.md
-    prose, table and reproduction commands, and result.json. When the version moves, RESULT.md
-    can stay on the previous pair while the other carriers move; this compares them. The commit
-    is read from RESULT.md, never written here."""
+    The current CHANGELOG section names the exact release. Its minor line must match the
+    package's, but a Ledger-only revision may advance the patch independently. The recorded
+    source release in examples/spectrum_release must be a run on the named release. Three
+    carriers state one fact: the CHANGELOG pairing line, the RESULT.md prose, table and
+    reproduction commands, and result.json. The commit is read from RESULT.md."""
     problems: list[str] = []
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     section = re.search(
@@ -541,12 +542,12 @@ def spectrum_pair_mismatches(package_version: str) -> list[str]:
     )
     if section is None:
         return [f"changelog has no section {package_version}"]
-    tags = re.findall(r"Paired with Spectrum `(v\d{2}\.\d{2}\.\d{2})`", section.group(1))
+    tags = re.findall(r"Paired with Spectrum `(v00\.\d{2}\.\d{2})`", section.group(1))
     if len(tags) != 1:
         return [f"changelog {package_version}: Spectrum pairing lines={len(tags)}"]
     tag = tags[0]
-    if tag.split(".")[1:] != package_version.split(".")[1:]:
-        problems.append(f"pairing rule: {package_version} is not paired with {tag}")
+    if tag.split(".")[1] != package_version.split(".")[1]:
+        problems.append(f"Spectrum minor line: {package_version} is not paired with {tag}")
     result_md = (ROOT / "examples" / "spectrum_release" / "RESULT.md").read_text(
         encoding="utf-8"
     )
@@ -602,6 +603,9 @@ def acceptance_report_row_mismatches() -> list[str]:
         "JSON Schema and OpenAPI conformance": counts.literal_collection_size(
             ROOT / "tests" / "test_contract_conformance.py",
             "EXPECTED_CONFORMANCE_IDS",
+        ),
+        "Declaration field census": counts.test_method_count(
+            ROOT / "tests" / "test_declaration_field_census.py", "DeclarationFieldCensusTests"
         ),
         # The bridge has its own acceptance step and its own gate row, so the
         # two suites are counted apart. Summing them here would refuse a
@@ -827,6 +831,14 @@ def package_counter_literal_mismatches() -> list[str]:
 def _run_checks(
     checks: "Checks", source_root: Path | None, source_mode: str
 ) -> None:
+    unexpected_environments = (
+        build_package_manifest.nonstandard_environment_directories(ROOT)
+    )
+    checks.require(
+        not unexpected_environments,
+        "nonstandard_environment_directory",
+        ",".join(unexpected_environments),
+    )
     required_files = [
         ".gitignore",
         "README.md",
@@ -836,6 +848,8 @@ def _run_checks(
         "requirements-lock.txt",
         "UNIVERSAL-CONNECTION-RUNBOOK.md",
         "ACCEPTANCE-REPORT.md",
+        "READING.md",
+        "DECLARATION-FIELDS.md",
         load_spec_counts().spec_docx_name(ROOT),
         "core/nc25-core-crosswalk.json",
         "core/schemas/profile.schema.json",
@@ -846,6 +860,7 @@ def _run_checks(
         "sdk/python/nc25_universal_ledger.py",
         "sdk/python/nc25_universal_adapter.py",
         "sdk/python/nc25_otcs_bridge.py",
+        "sdk/python/nc25ol_reader.py",
         "profiles/PROFILE-AUTHORING-CHECKLIST.md",
         "profiles/banking/bank-profile.json",
         "profiles/banking/questionnaire-crosswalk.json",
@@ -855,20 +870,30 @@ def _run_checks(
         "examples/synthetic-authority-grant.json",
         "examples/synthetic-intent-allow.json",
         "examples/synthetic-evidence-bundle.json",
+        "examples/local_release/quickstart.py",
+        "examples/local_release/quickstart-expected.txt",
+        "examples/local_release/test_quickstart.py",
+        "examples/local_release/mutate_quickstart.py",
         "tests/test_universal_connection.py",
         "tests/test_semantic_contracts.py",
         "tests/test_safety_mutations.py",
         "tests/test_contract_conformance.py",
+        "tests/test_declaration_field_census.py",
+        "tests/test_adapter_schema_gate.py",
+        "tests/mutate_adapter_schema_gate.py",
         "tests/run_acceptance.py",
         "tests/check_failure_surface.py",
         "tests/failure-surface-baseline.json",
         "tests/test_contract_regressions.py",
+        "tests/test_reader.py",
         "tests/test_otcs_bridge.py",
         "tests/verify_package.py",
+        "tests/mutate_reader_json.py",
         "tools/build_acceptance_report.py",
         "tools/build_review_bundle.py",
         "tools/build_docx_audit_projection.py",
         "tools/build_error_code_enum.py",
+        "tools/declaration_field_census.py",
         "tools/failure_surface.py",
         "tools/build_universal_specification.py",
         "tools/build_package_manifest.py",
@@ -911,6 +936,8 @@ def _run_checks(
         "pyyaml": "6.0.3",
         "referencing": "0.37.0",
         "rpds-py": "2026.6.3",
+        "rfc3339-validator": "0.1.4",
+        "six": "1.17.0",
         "typing-extensions": "4.16.0",
     }
     lock_versions: dict[str, str] = {}

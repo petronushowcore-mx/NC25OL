@@ -62,14 +62,16 @@ The declaration binds:
 
 - the immutable NC2.5 core anchor;
 - one exact profile identifier, version, and hash;
-- one connector and workload identity issuer;
+- one connector;
 - allowed actions, effects, targets, explicit action-target bindings, and scope values;
-- a structural capacity, its declared provenance coding, and a selector
-  identifier;
-- domain resource limits;
-- governance owners and role-separated interfaces;
-- the profile mapping witness;
-- immutable evidence references.
+- a non-negative structural capacity and domain resource limits;
+- approval and authority issuers, revision authorities, no live override, and
+  off-limits systems;
+- the profile mapping witness.
+
+Workload identity, environment restrictions, capacity provenance, service
+separation, and declaration-level approval evidence require external governance
+and transport records; this schema does not encode or validate them.
 
 Failure outcomes are fixed by the profile and runtime contract. A declaration
 cannot add or override a disposition or error posture.
@@ -93,17 +95,16 @@ the same way grant issue and revocation pin their actors.
 
 The connector cannot activate or revise its own declaration.
 
-The reference engine implements `DRAFT` to `ACTIVE` and blocks runtime use
-outside the declaration validity interval. `SUSPENDED`, `REVOKED`, and
-`EXPIRED` are production registry projection states; a production governance
-adapter must define and persist their transitions. They are not implemented as
-reference-engine lifecycle commands.
+The reference engine and its registry schema expose only `DRAFT` and
+`ACTIVE`; runtime use is blocked outside the declaration validity interval.
+Suspension, connector-wide revocation, and expiry transitions require an
+external governance adapter and are not states of this registry interface.
 
 Activating a new declaration version starts a new accounting instance: the
 structural budget begins at the declared capacity, and no burden is carried
-over from the predecessor. `predecessor_declaration_hash` preserves lineage
-only. A deployment that claims continuation across declaration versions must
-keep that account outside this package and argue it separately.
+over. The declaration does not encode predecessor lineage. A deployment
+that claims continuation across versions must keep the genealogy and
+account outside this package and argue them separately.
 
 ## 5. Issue a workload authority grant
 

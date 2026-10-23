@@ -7,8 +7,8 @@ relationships, content types and core metadata. The package manifest identifies 
 
 - Format: `nc25-docx-audit-projection/v1`
 - Source: `NC25OL Specification v01.09.docx`
-- Source bytes: `68458`
-- Source SHA-256: `5F591F538F35A0B97C28D3C56DCB786265004560DB2A9A20C5E6AA38787C4BF6`
+- Source bytes: `68539`
+- Source SHA-256: `4CFFD177671A7123C212CB6E54888A5317BE5F093B1BD0E7C855F4A7CB4FA903`
 - Generator: `tools/build_docx_audit_projection.py`
 
 ## ZIP member inventory
@@ -24,7 +24,7 @@ relationships, content types and core metadata. The package manifest identifies 
 | `docProps/core.xml` | 946 | `9937E898E47823EF9DDC97A8B81A0ABF6F560C4EFC27EE1E7BA3F12F2C04102C` |
 | `docProps/thumbnail.jpeg` | 8324 | `96367138DC44CE09BF2C8F0F8E49348A1478D2C5C0AF69BBC2BBC38B63CDCEAD` |
 | `word/_rels/document.xml.rels` | 1613 | `92BA0B0C1DCEF764CD7BA71FAA371AA1714446753442B3F3F2804A50A330FF41` |
-| `word/document.xml` | 401265 | `B1E04D4A60B19907CBAB3B21EBD5A13E81D3EC61B508A79ACED6F97946A86408` |
+| `word/document.xml` | 401635 | `31D553EB777D72EF7FACBC8D573E013F226E7318954C2F404EC6AC1B41D072E9` |
 | `word/fontTable.xml` | 2811 | `79385FB7F60247507ECAFFC292E9EBD52EA0657B8634F629BA6FCCC54011D6BB` |
 | `word/footer1.xml` | 1690 | `5AE994C4D3889A1FC58D88009A7F8F63C216AAC94713254E567358CF3BB1EA20` |
 | `word/footer2.xml` | 1494 | `182E82C76996BFE2986520193E30C014C84D0FA4A666EBB74C01C59EFEDD9ACC` |
@@ -105,9 +105,9 @@ relationships, content types and core metadata. The package manifest identifies 
 5. Document
 6. Value
 7. Version
-8. 01.09.02
+8. 01.09.03
 9. Date
-10. 18 October 2026
+10. 22 October 2026
 11. Author
 12. Maksim Barziankou (MxBv)
 13. Affiliation
@@ -256,7 +256,7 @@ relationships, content types and core metadata. The package manifest identifies 
 156. The structural budget is a monotone committed-action counter read by the gate. It debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so it is narrower than the core's structural-pressure accounting.
 157. Resource limits are sliding windows; committed amounts age out, so they are rate boundaries, not burden.
 158. A new declaration version starts a new accounting instance. No burden crosses versions, and a cross-version continuation claim requires an external ledger.
-159. The declared capacity carries a provenance coding (fully stipulated, empirically calibrated, derived from a load model, or mixed). The coding is sealed by the declaration hash and never read by the gate.
+159. The declaration enforces a non-negative capacity but does not encode its empirical origin. Any calibration or load-model evidence belongs to an external governance record; this package does not bind it.
 160. 3. Architecture
 161. 3.1 Seven contract layers
 162. Layer
@@ -366,12 +366,12 @@ relationships, content types and core metadata. The package manifest identifies 
 266. Preserves interface separation
 267. 5.2 Connection declaration
 268. binds one profile identifier, version, and canonical hash;
-269. identifies one connector, identity issuer, and permitted environments;
+269. identifies one connector; runtime workload identity and permitted environments require external identity and transport enforcement;
 270. narrows actions, effects, targets, explicit action-target bindings, and scope values;
-271. declares a structural selector, capacity, and capacity provenance coding independently from domain limits;
+271. declares a non-negative structural capacity independently from domain resource limits; capacity provenance is outside this schema;
 272. declares resource limits per intent and per time window;
-273. names owners, interfaces, off-limits systems, and change process;
-274. binds the mapping witness and immutable approval evidence.
+273. names approval and authority issuers, revision authorities, a no-live-override constraint, and off-limits systems; other ownership and service-separation facts require external governance;
+274. binds the mapping witness; declaration-level approval-evidence references are outside this schema.
 275. 5.3 Runtime objects
 276. Object
 277. Binding
@@ -413,7 +413,7 @@ relationships, content types and core metadata. The package manifest identifies 
 313. OUTSIDE VALIDITY (guard)
 314. Current time is before effective_from or at/after expires_at
 315. Execution is blocked; use a new approved version or a production governance transition
-316. The reference engine implements DRAFT to ACTIVE plus validity blocking. SUSPENDED, REVOKED, and EXPIRED are production registry projection states whose transitions must be defined and persisted by a production governance adapter.
+316. The reference engine and registry expose only DRAFT and ACTIVE plus validity blocking. Suspension, connector-wide revocation, and expiry transitions require an external governance adapter; they are not states of this registry interface.
 317. 6.2 Evaluation order
 318. Verify profile seal, declaration seal, and local ledger chain.
 319. Verify active validity, strict message shape, and forbidden operator inputs.
@@ -489,8 +489,8 @@ relationships, content types and core metadata. The package manifest identifies 
 389. New profile version, witness hash, profile hash, and approval
 390. Control flag or evidence requirement
 391. New profile version and affected declarations
-392. Connector, target, scope, limit, owner, or interface
-393. New declaration version and approval
+392. Connector, target, scope, limit, approval authority, or off-limits set
+393. New declaration version and approval; external service and lineage records require separate governance
 394. Grant scope or validity
 395. New grant; old permit remains bound to old grant
 396. Runtime observation only
@@ -530,16 +530,16 @@ relationships, content types and core metadata. The package manifest identifies 
 430. profile.controls.required_prerequisite_ids; profile.controls.hard_block_flag_ids; profile.controls.manual_review_flag_ids; profile.failure_posture
 431. Separates binary gate logic from non-executable workflow routing.
 432. 5. Audit, Evidence, and Compliance
-433. profile.evidence_requirements; declaration.evidence_refs; declaration.interfaces.architect_store_id; profile.registry_policy
+433. profile.evidence_requirements; profile.mapping_witness.evidence_refs; profile.registry_policy
 434. Defines immutable local evidence and a minimal hash-only shared projection.
 435. 6. Ownership and Change Control
-436. declaration.governance; profile.change_control; declaration.predecessor_declaration_hash
+436. declaration.governance; profile.change_control
 437. A material edit creates a new declaration or profile hash. No owner may flip a refusal inside the live version.
 438. 7. Exception and Failure Handling
 439. profile.failure_posture
 440. The profile mirrors protocol-fixed routing: missing required data is REFUSAL and ambiguity is MANUAL_REVIEW. Integrity failures remain hard errors; downstream and rule-conflict handling require explicit runtime branches rather than decorative configuration.
 441. 8. Supporting Documents
-442. profile.mapping_witness.evidence_refs; declaration.evidence_refs
+442. profile.mapping_witness.evidence_refs
 443. Stores immutable references and hashes without placing raw documents or secrets in the runtime ledger or shared registry.
 444. 9.2 Reference banking actions
 445. Action
@@ -654,7 +654,7 @@ relationships, content types and core metadata. The package manifest identifies 
 554. Signer configuration is external runtime configuration. Reopening a state_path whose event chain contains Ed25519 envelopes requires a verifier-compatible event_signer with the same key_id; SQLite deliberately persists neither signer configuration nor private keys. Omitting the verifier, or supplying one that declares both an algorithm and a key_id and differs from the persisted envelope in either, fails closed with EVENT_SIGNER_REQUIRED. The EventSigner protocol requires only sign and verify, so a signer that does not declare both cannot be compared against the envelope at all; for such a signer the mismatch is not distinguished and reaches the caller as a chain verdict. A signer declaring the same key_id with different key material likewise cannot be told apart from a forged chain and so fails full-chain integrity verification.
 555. External JSON Schema references define profile, declaration, and runtime payloads.
 556. The HTTP adapter wraps the reference engine's primitive declaration and grant hashes into the response objects defined by OpenAPI.
-557. A standard-library reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and enforces these wire rules end-to-end: it derives the route scope from the transport identity and never the body, binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.
+557. A reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and validates each POST body against the packaged JSON Schemas with pinned jsonschema before calling the engine. It derives the route scope from the transport identity and never the body, binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.
 558. A contract error is distinct from a normalized non-executable business result.
 559. Integrity failure returns no permit and requires an operational halt.
 560. 11. Failure matrix
@@ -791,7 +791,7 @@ relationships, content types and core metadata. The package manifest identifies 
 691. Integrity failures remain raised hard errors because a compromised seal or ledger cannot safely author a new disposition.
 692. This reference has no downstream caller or independent rule-conflict detector, so integrity_failure, downstream_unavailable, and rule_conflict are not decorative configuration fields.
 693. A production extension adds a reviewed runtime branch and a new schema version before adding another configurable failure condition.
-694. Every inbound profile, declaration, and runtime message has a normative JSON Schema, exercised by the shipped conformance suite. The reference engine enforces its semantic contract itself; wire-ingress schema validation is an integrator obligation (README step 5), because the standard-library reference adapter deliberately carries no third-party schema dependency.
+694. Every inbound profile, declaration, and runtime message has a normative JSON Schema, exercised by the shipped conformance suite. The reference adapter validates each POST body before the engine and refuses with SCHEMA_VALIDATION_UNAVAILABLE if jsonschema or the packaged schemas are absent or invalid. The engine enforces its semantic contract; integrators must enforce the same schema boundary on any other ingress path.
 695. The conformance suite activates date-time format checking and carries negative probes for malformed formats and overlong strings.
 696. 13. Acceptance
 697. 13.1 Reference package checks
@@ -906,8 +906,8 @@ relationships, content types and core metadata. The package manifest identifies 
 806. No unlimited micro-revision and no post-failure rule rescue.
 807. A60-A61-BUDGET
 808. 1839-1935
-809. Committed-action structural capacity channel, separate from domain resource limits, with a declared capacity provenance coding.
-810. Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package.
+809. Committed-action structural capacity channel, separate from domain resource limits.
+810. The package does not verify the provenance of structural capacity. Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package.
 811. A64-A66-SEPARATION
 812. 10334-10387
 813. Read-only profile and gate, validated debit, role-restricted trace.

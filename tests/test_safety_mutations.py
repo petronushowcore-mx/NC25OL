@@ -50,7 +50,7 @@ EXPECTED_MUTATION_IDS = frozenset(
         "ACTIVATION_ATOMICITY", "REVOKED_GRANT_REISSUE",
         "AUTHORITY_NOT_YET_VALID", "EXECUTION_REPLAY_CONFLICT",
         "STRUCTURAL_RESERVATION_SERIALIZATION", "REVOCATION_CLOCK_SKEW",
-        "STRUCTURAL_PROVENANCE", "UNAUTHORIZED_ACTIVATOR",
+        "REMOVED_STRUCTURAL_METADATA", "UNAUTHORIZED_ACTIVATOR",
         "CUSTODY_ROTATE_SCOPE", "CUSTODY_REVOKE_SCOPE",
     }
 )
@@ -307,8 +307,8 @@ def main() -> None:
     changed_declaration = copy.deepcopy(declaration)
     changed_declaration["structural_budget"]["provenance"] = "vendor_asserted"
     expect_exception(
-        "STRUCTURAL_PROVENANCE",
-        "STRUCTURAL_PROVENANCE",
+        "REMOVED_STRUCTURAL_METADATA",
+        "STRUCTURAL_BUDGET",
         lambda: validate_declaration(changed_declaration, profile),
     )
 

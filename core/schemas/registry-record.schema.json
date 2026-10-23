@@ -68,10 +68,7 @@
     "status": {
       "enum": [
         "DRAFT",
-        "ACTIVE",
-        "SUSPENDED",
-        "REVOKED",
-        "EXPIRED"
+        "ACTIVE"
       ]
     },
     "activated_at": {

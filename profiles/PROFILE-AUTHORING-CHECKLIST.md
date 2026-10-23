@@ -57,19 +57,14 @@ Use this checklist before sealing a profile.
 
 ## Structural budget
 
-- The declaration codes the origin of its capacity with the published
-  four-value instrument: fully stipulated, empirically calibrated, derived
-  from a load model, or mixed (NC2.5 Probe II, DOI 10.17605/OSF.IO/7SQMY, R2).
-- A capacity written into configuration is `fully_stipulated`. That is a
-  legitimate coding, not a defect — and it leaves the relation between the
-  configured threshold and the system's actual exhaustion capacity as a
-  separate, undischarged obligation.
-- A declaration claiming `empirically_calibrated`, `derived_from_load_model`,
-  or `mixed` references its calibration or model evidence in
-  `evidence_refs`.
-- The reset regime is declared: a new declaration version starts a fresh
-  budget, and any cross-version continuation claim names the external ledger
-  that carries it.
+- The declaration enforces a non-negative integer `capacity`; it does not
+  encode or validate the origin of that capacity. A configured threshold alone
+  does not establish the system's actual exhaustion capacity.
+- Any empirical calibration or load model, including its evidence and limits,
+  must be identified and verified in an external governance record. This
+  package does not bind that record in the declaration schema.
+- A new declaration version starts a fresh budget. Cross-version continuation
+  claims require an external ledger and a separate argument.
 
 ## Mapping witness
 
@@ -82,12 +77,13 @@ Use this checklist before sealing a profile.
 
 ## Interface separation
 
-- Governance, operator, executor, and architect scopes are distinct.
-- Observer output is a non-mutating projection.
+- The reference runtime enforces role-scoped calls and a non-mutating
+  observer projection. The declaration does not name or verify distinct
+  governance, operator, executor, architect, or observer services.
 - Operator inputs and outputs exclude boundary geometry, margins, thresholds,
   sub-verdicts, reason vectors, statistics, and architect trace.
-- The connector cannot write the profile, declaration, gate, or architect
-  store.
+- A deployment must establish service separation and protect profile,
+  declaration, gate, and architect storage outside this schema.
 
 ## Change and registry policy
 

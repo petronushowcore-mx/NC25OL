@@ -45,8 +45,7 @@
       "questionnaire_section": "5. Audit, Evidence, and Compliance",
       "universal_paths": [
         "profile.evidence_requirements",
-        "declaration.evidence_refs",
-        "declaration.interfaces.architect_store_id",
+        "profile.mapping_witness.evidence_refs",
         "profile.registry_policy"
       ],
       "connection_effect": "Defines immutable local evidence and a minimal hash-only shared projection."
@@ -55,8 +54,7 @@
       "questionnaire_section": "6. Ownership and Change Control",
       "universal_paths": [
         "declaration.governance",
-        "profile.change_control",
-        "declaration.predecessor_declaration_hash"
+        "profile.change_control"
       ],
       "connection_effect": "A material edit creates a new declaration or profile hash. No owner may flip a refusal inside the live version."
     },
@@ -70,8 +68,7 @@
     {
       "questionnaire_section": "8. Supporting Documents",
       "universal_paths": [
-        "profile.mapping_witness.evidence_refs",
-        "declaration.evidence_refs"
+        "profile.mapping_witness.evidence_refs"
       ],
       "connection_effect": "Stores immutable references and hashes without placing raw documents or secrets in the runtime ledger or shared registry."
     }

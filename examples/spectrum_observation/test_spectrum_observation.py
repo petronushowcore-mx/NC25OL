@@ -258,7 +258,7 @@ class Cases(unittest.TestCase):
     def test_12_receive_refuses_registry_drift_and_foreign_connector(self):
         session, engine = self.session()
         raw = session.collect()
-        engine.status = 'SUSPENDED'
+        engine.status = 'ACTIVE'
         with self.assertRaisesRegex(s.Refusal, '^LEDGER_CONTEXT_CHANGED$'): session.receive(raw)
         engine.status = 'DRAFT'
         self.assertEqual(session.receive(raw), json.loads(raw))

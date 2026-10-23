@@ -24,8 +24,11 @@ enforced and testable end-to-end, rather than left to each integrator:
     raises 403 for scope and 413 for the body cap on its own, and answers
     200/201/204 on success.
 
-It is standard-library only and framework-free (a plain WSGI callable), so it
-is driven in-process by the conformance suite with no network. The engine it
+It is framework-free (a plain WSGI callable) and checks every POST object body
+with the pinned `jsonschema` validator before any engine validation or mutation.
+A schema-invalid body receives BODY_SCHEMA with its field path; domain checks
+run only after the body satisfies its schema. If the
+validator, its date-time checker or packaged schemas are unavailable, POST requests fail closed. The engine it
 wraps is standard-library on every default path; only the optional Ed25519
 signers need the pinned `cryptography` wheel. It is a REFERENCE: production
 replaces the scope header with mutual TLS plus scoped OAuth derived from a
@@ -36,6 +39,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from nc25_universal_ledger import (
@@ -58,6 +62,7 @@ IDEMPOTENCY_HEADER = "HTTP_IDEMPOTENCY_KEY"
 
 # A reference bound so a hostile Content-Length cannot force an unbounded read.
 MAX_BODY_BYTES = 1 << 20
+SCHEMA_DIR = Path(__file__).resolve().parents[2] / "core" / "schemas"
 
 # ContractViolation codes that are HTTP conflicts, not contract errors.
 _CONFLICT_CODES = frozenset(
@@ -130,6 +135,87 @@ MAX_DETAIL_LENGTH = 128
 
 def _bounded(detail: str) -> str:
     return detail if len(detail) <= MAX_DETAIL_LENGTH else detail[:MAX_DETAIL_LENGTH] + "..."
+
+
+def _request_schema(kind: str) -> dict[str, Any]:
+    """Bind each POST body to the same source schemas named by OpenAPI."""
+    runtime = json.loads((SCHEMA_DIR / "runtime-contracts.schema.json").read_text(encoding="utf-8"))
+    if kind in {"authority_grant", "authority_revocation", "execution_request"}:
+        return {
+            "$schema": runtime["$schema"],
+            "$defs": runtime["$defs"],
+            "$ref": f"#/$defs/{kind}",
+        }
+    if kind == "evaluate_intent":
+        return {
+            "$schema": runtime["$schema"],
+            "$defs": runtime["$defs"],
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["intent", "evidence_bundle"],
+            "properties": {
+                "intent": {"$ref": "#/$defs/intent"},
+                "evidence_bundle": {"$ref": "#/$defs/evidence_bundle"},
+            },
+        }
+    if kind == "activate":
+        profile = json.loads((SCHEMA_DIR / "profile.schema.json").read_text(encoding="utf-8"))
+        declaration = json.loads((SCHEMA_DIR / "connection-declaration.schema.json").read_text(encoding="utf-8"))
+        return {
+            "$schema": runtime["$schema"],
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["profile", "declaration", "activated_by", "approval_evidence_ref"],
+            "properties": {
+                "profile": profile,
+                "declaration": declaration,
+                "activated_by": {"type": "string"},
+                "approval_evidence_ref": {"type": "string"},
+            },
+        }
+    raise WireError(503, "SCHEMA_VALIDATION_UNAVAILABLE", "unknown request schema")
+
+
+def _schema_error_path(error: Any) -> str:
+    parts = list(error.absolute_path)
+    if error.validator == "required" and isinstance(error.instance, dict):
+        missing = next((key for key in error.validator_value if key not in error.instance), None)
+        if missing is not None:
+            parts.append(missing)
+    elif error.validator == "additionalProperties" and isinstance(error.instance, dict):
+        unknown = next((key for key in error.instance if key not in error.schema.get("properties", {})), None)
+        if unknown is not None:
+            parts.append(unknown)
+    return "$" + "".join(
+        f".{part}" if isinstance(part, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part)
+        else f"[{json.dumps(part)}]" for part in parts
+    )
+
+
+def _validate_request_schema(body: dict[str, Any], kind: str) -> None:
+    try:
+        from jsonschema import Draft202012Validator, FormatChecker
+        from jsonschema.exceptions import SchemaError
+    except ImportError as exc:
+        raise WireError(503, "SCHEMA_VALIDATION_UNAVAILABLE", "JSON Schema validator unavailable") from exc
+    try:
+        schema = _request_schema(kind)
+        Draft202012Validator.check_schema(schema)
+        error = min(
+            Draft202012Validator(schema, format_checker=FormatChecker(formats=["date-time"])).iter_errors(body),
+            key=lambda item: (
+                {"required": 0, "additionalProperties": 1}.get(item.validator, 2),
+                _schema_error_path(item),
+                str(item.validator),
+            ),
+            default=None,
+        )
+    except (OSError, ValueError, KeyError, SchemaError) as exc:
+        raise WireError(503, "SCHEMA_VALIDATION_UNAVAILABLE", "request schema unavailable") from exc
+    if error is not None:
+        # Schema-invalid bodies never reach domain validation. The refusal
+        # names the field even when the same body also violates a domain rule.
+        raise WireError(400, "BODY_SCHEMA", _bounded(f"{_schema_error_path(error)}: {error.validator}"))
 
 
 def _header_text(environ: Mapping[str, Any], name: str) -> str:
@@ -327,6 +413,7 @@ class UniversalConnectionHttpAdapter:
     # ---- handlers ----------------------------------------------------------
     def _activate(self, environ, _params) -> tuple[int, Any]:
         body = self._read_json(environ)
+        _validate_request_schema(body, "activate")
         # Seal binding: the wire contract requires the caller to present the
         # exact profile and declaration objects being activated. Their
         # canonical hashes must equal the engine's sealed pair; a mismatch is
@@ -345,6 +432,7 @@ class UniversalConnectionHttpAdapter:
         }
         if unknown:
             raise WireError(400, "ACTIVATE_BODY", _bounded(f"unknown fields: {sorted(unknown)}"))
+
         if sha256_hex(profile) != self._engine.profile_hash:
             raise WireError(
                 409, "ACTIVATE_PROFILE_MISMATCH",
@@ -375,6 +463,7 @@ class UniversalConnectionHttpAdapter:
 
     def _issue_grant(self, environ, _params) -> tuple[int, Any]:
         body = self._read_json(environ)
+        _validate_request_schema(body, "authority_grant")
         # Validate and determine creation in the SAME state transaction.
         # Reading engine.grants here would use stale state across instances
         # and would hash an unvalidated grant_id before the engine can refuse it.
@@ -388,11 +477,13 @@ class UniversalConnectionHttpAdapter:
 
     def _revoke_grant(self, environ, _params) -> tuple[int, Any]:
         body = self._read_json(environ)
+        _validate_request_schema(body, "authority_revocation")
         self._engine.revoke_grant(body, actor_scope=ROLE_GOVERNANCE)
         return 204, None
 
     def _evaluate_intent(self, environ, _params) -> tuple[int, Any]:
         body = self._read_json(environ)
+        _validate_request_schema(body, "evaluate_intent")
         intent = body.get("intent")
         evidence_bundle = body.get("evidence_bundle")
         if not isinstance(intent, dict) or not isinstance(evidence_bundle, dict):
@@ -400,11 +491,8 @@ class UniversalConnectionHttpAdapter:
         unknown = set(body) - {"intent", "evidence_bundle"}
         if unknown:
             raise WireError(400, "OPERATOR_BODY", _bounded(f"unknown fields: {sorted(unknown)}"))
-        # Idempotency-Key MUST exactly equal intent.idempotency_key, rejected
-        # before evaluation. A missing header is a contract error. A body that
-        # carries NO key is not a mismatch but an incomplete intent, and the
-        # engine answers that as the form error it is (400 INTENT_FIELDS);
-        # comparing the header against an absent field answered 409 for it.
+        # The schema has already required and typed intent.idempotency_key.
+        # Its transport header must still be present and match before evaluation.
         header_key = _header_text(environ, IDEMPOTENCY_HEADER)
         if not header_key:
             raise WireError(400, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key required")
@@ -412,6 +500,7 @@ class UniversalConnectionHttpAdapter:
             raise WireError(
                 409, "IDEMPOTENCY_KEY_MISMATCH", "Idempotency-Key != intent.idempotency_key"
             )
+
         result = self._engine.evaluate_intent(
             intent,
             evidence_bundle,
@@ -421,6 +510,7 @@ class UniversalConnectionHttpAdapter:
 
     def _consume_permit(self, environ, params) -> tuple[int, Any]:
         body = self._read_json(environ)
+        _validate_request_schema(body, "execution_request")
         # The URL path permit hash is bound to the body through the engine's
         # required route_permit_hash argument; a mismatch fails closed.
         receipt = self._engine.commit_execution(

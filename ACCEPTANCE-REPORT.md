@@ -1,8 +1,8 @@
 # NC25OL Acceptance Report
 
-Version: `01.09.02`
+Version: `01.09.03`
 
-Verification date: `2026-10-19 UTC`
+Verification date: `2026-10-23 UTC`
 
 Status: `PASS`
 
@@ -17,7 +17,7 @@ python -B tests/run_acceptance.py
 Required terminal result:
 
 ```text
-ACCEPTANCE_STEPS=8/8 PASS
+ACCEPTANCE_STEPS=9/9 PASS
 ```
 
 | Gate | Recorded result |
@@ -26,10 +26,11 @@ ACCEPTANCE_STEPS=8/8 PASS
 | Semantic contracts | `15/15 PASS` |
 | Named safety mutations | `51/51 PASS` |
 | JSON Schema and OpenAPI conformance | `55/55 PASS` |
+| Declaration field census | `8/8 PASS` |
 | Contract regression cases | `89/89 PASS` |
 | OTCS bridge behaviour and refusal vocabulary | `68/68 PASS` |
 | Failure-surface ratchet | `1/1 PASS` |
-| Package integrity checks | `66/66 PASS` |
+| Package integrity checks | `67/67 PASS` |
 
 The contract regression cases cover hash-case normalization, executor route/body
 permit binding, malformed evidence and execution-request refusal without
@@ -46,8 +47,8 @@ audit-projection currency, source-bundle determinism and manifest
 binding,
 acceptance-report machine-field discipline, DOCX property hygiene,
 public-report hygiene, detached Ed25519 tamper/wrong-key rejection,
-authoritative resolver override, declared capacity provenance typing across
-the schema and engine surfaces, hostile values across the wire, the persisted
+authoritative resolver override, schema refusal of removed capacity provenance
+metadata, hostile values across the wire, the persisted
 state row and the stored chain answering inside the refusal vocabulary, every
 refusal of the acceptance-report generator by name, and
 resolver exception or malformed-output
@@ -56,9 +57,9 @@ fail-closed behavior.
 ## Bound bytes
 
 This report was generated for one exact tree. The manifest entries it
-certifies, every entry except this report, digest to `4AF36CC16BC76B8EE502DDAFB02C8FDE4E941EF4C401C5C5197AC84120258C45`
+certifies, every entry except this report, digest to `2D5E2D4A64E7B703C5C2CCC50B88B49161F421881E7869C972C576B549A104FD`
 as path-ordered (path, SHA-256, byte length) triples; the specification
-document the geometry below describes has SHA-256 `5F591F538F35A0B97C28D3C56DCB786265004560DB2A9A20C5E6AA38787C4BF6`.
+document the geometry below describes has SHA-256 `4CFFD177671A7123C212CB6E54888A5317BE5F093B1BD0E7C855F4A7CB4FA903`.
 The package verifier recomputes both from the shipped bytes and refuses
 this report when either differs.
 
@@ -71,8 +72,8 @@ release-grade acceptance report is refused unless this external-core
 verification passed.
 
 The core is not shipped with this package, so a run without it reports
-`PACKAGE_CHECKS=61/61` and `EXTERNAL_SOURCE_CHECKS=NOT_RUN` while the
-overall verdict stays `ACCEPTANCE_STEPS=8/8 PASS`. The package-integrity figure
+`PACKAGE_CHECKS=62/62` and `EXTERNAL_SOURCE_CHECKS=NOT_RUN` while the
+overall verdict stays `ACCEPTANCE_STEPS=9/9 PASS`. The package-integrity figure
 recorded in the table above is the release configuration, with the bound
 local core file supplied through `NC25_SOURCES_ROOT`. This revision
 is not part of the public deposit; the DOI identifies the core line,
@@ -81,10 +82,10 @@ not the availability of this exact file.
 ## Failure-surface figures
 
 The failure-surface step measured, for the exact bytes this report
-certifies: 296 engine refusal codes and 16 wire error codes in the
-closed world; raise and helper-emission points all=531, static=519, dynamic=12;
-296 engine refusal codes constructed and 296 witnessed during the
-recorded run; 0 codes unwitnessed; 1 code re-emitted by the
+certifies: 291 engine refusal codes and 18 wire error codes in the
+closed world; raise and helper-emission points all=532, static=520, dynamic=12;
+289 engine refusal codes constructed and 289 witnessed during the
+recorded run; 2 codes unwitnessed; 1 code re-emitted by the
 translation site belonging to neither vocabulary; and 73 OTCS bridge refusal codes in a closed world of their own. Each figure is a property
 of the named procedure recorded in the baseline, not of the engine in the
 abstract, and the committed baseline is a no-growth debt ratchet, not a

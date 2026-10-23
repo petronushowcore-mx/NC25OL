@@ -44,7 +44,7 @@ def _package_version() -> str:
 
 SPEC_VERSION = _package_version()
 SPEC_VERSION_MAJOR_MINOR = ".".join(SPEC_VERSION.split(".")[:2])
-SPEC_DATE_TEXT = "18 October 2026"
+SPEC_DATE_TEXT = "22 October 2026"
 
 CONFORMANCE_CHECK_COUNT = literal_collection_size(ROOT / "tests" / "test_contract_conformance.py", "EXPECTED_CONFORMANCE_IDS")
 # The two sets are counted apart, because the acceptance report names them
@@ -673,7 +673,7 @@ def add_nc25_relationship(doc: Document, crosswalk: dict) -> None:
             "The structural budget is a monotone committed-action counter read by the gate. It debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so it is narrower than the core's structural-pressure accounting.",
             "Resource limits are sliding windows; committed amounts age out, so they are rate boundaries, not burden.",
             "A new declaration version starts a new accounting instance. No burden crosses versions, and a cross-version continuation claim requires an external ledger.",
-            "The declared capacity carries a provenance coding (fully stipulated, empirically calibrated, derived from a load model, or mixed). The coding is sealed by the declaration hash and never read by the gate.",
+            "The declaration enforces a non-negative capacity but does not encode its empirical origin. Any calibration or load-model evidence belongs to an external governance record; this package does not bind it.",
         ],
     )
 
@@ -775,12 +775,12 @@ def add_contract_objects(doc: Document) -> None:
         doc,
         [
             "binds one profile identifier, version, and canonical hash;",
-            "identifies one connector, identity issuer, and permitted environments;",
+            "identifies one connector; runtime workload identity and permitted environments require external identity and transport enforcement;",
             "narrows actions, effects, targets, explicit action-target bindings, and scope values;",
-            "declares a structural selector, capacity, and capacity provenance coding independently from domain limits;",
+            "declares a non-negative structural capacity independently from domain resource limits; capacity provenance is outside this schema;",
             "declares resource limits per intent and per time window;",
-            "names owners, interfaces, off-limits systems, and change process;",
-            "binds the mapping witness and immutable approval evidence.",
+            "names approval and authority issuers, revision authorities, a no-live-override constraint, and off-limits systems; other ownership and service-separation facts require external governance;",
+            "binds the mapping witness; declaration-level approval-evidence references are outside this schema.",
         ],
     )
 
@@ -829,7 +829,7 @@ def add_state_machine(doc: Document) -> None:
         font_size=8,
     )
     doc.add_paragraph(
-        "The reference engine implements DRAFT to ACTIVE plus validity blocking. SUSPENDED, REVOKED, and EXPIRED are production registry projection states whose transitions must be defined and persisted by a production governance adapter."
+        "The reference engine and registry expose only DRAFT and ACTIVE plus validity blocking. Suspension, connector-wide revocation, and expiry transitions require an external governance adapter; they are not states of this registry interface."
     )
 
     doc.add_heading("6.2 Evaluation order", level=2)
@@ -949,7 +949,7 @@ def add_integrity_revision(doc: Document) -> None:
         [
             ("Action, effect, or resource mapping", "New profile version, witness hash, profile hash, and approval"),
             ("Control flag or evidence requirement", "New profile version and affected declarations"),
-            ("Connector, target, scope, limit, owner, or interface", "New declaration version and approval"),
+            ("Connector, target, scope, limit, approval authority, or off-limits set", "New declaration version and approval; external service and lineage records require separate governance"),
             ("Grant scope or validity", "New grant; old permit remains bound to old grant"),
             ("Runtime observation only", "Append evidence; do not rewrite the live gate"),
         ],
@@ -1128,7 +1128,7 @@ def add_api(doc: Document) -> None:
             "Signer configuration is external runtime configuration. Reopening a state_path whose event chain contains Ed25519 envelopes requires a verifier-compatible event_signer with the same key_id; SQLite deliberately persists neither signer configuration nor private keys. Omitting the verifier, or supplying one that declares both an algorithm and a key_id and differs from the persisted envelope in either, fails closed with EVENT_SIGNER_REQUIRED. The EventSigner protocol requires only sign and verify, so a signer that does not declare both cannot be compared against the envelope at all; for such a signer the mismatch is not distinguished and reaches the caller as a chain verdict. A signer declaring the same key_id with different key material likewise cannot be told apart from a forged chain and so fails full-chain integrity verification.",
             "External JSON Schema references define profile, declaration, and runtime payloads.",
             "The HTTP adapter wraps the reference engine's primitive declaration and grant hashes into the response objects defined by OpenAPI.",
-            "A standard-library reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and enforces these wire rules end-to-end: it derives the route scope from the transport identity and never the body, binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.",
+            "A reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and validates each POST body against the packaged JSON Schemas with pinned jsonschema before calling the engine. It derives the route scope from the transport identity and never the body, binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.",
             "A contract error is distinct from a normalized non-executable business result.",
             "Integrity failure returns no permit and requires an operational halt.",
         ],
@@ -1216,7 +1216,7 @@ def add_production(doc: Document) -> None:
             "Integrity failures remain raised hard errors because a compromised seal or ledger cannot safely author a new disposition.",
             "This reference has no downstream caller or independent rule-conflict detector, so integrity_failure, downstream_unavailable, and rule_conflict are not decorative configuration fields.",
             "A production extension adds a reviewed runtime branch and a new schema version before adding another configurable failure condition.",
-            "Every inbound profile, declaration, and runtime message has a normative JSON Schema, exercised by the shipped conformance suite. The reference engine enforces its semantic contract itself; wire-ingress schema validation is an integrator obligation (README step 5), because the standard-library reference adapter deliberately carries no third-party schema dependency.",
+            "Every inbound profile, declaration, and runtime message has a normative JSON Schema, exercised by the shipped conformance suite. The reference adapter validates each POST body before the engine and refuses with SCHEMA_VALIDATION_UNAVAILABLE if jsonschema or the packaged schemas are absent or invalid. The engine enforces its semantic contract; integrators must enforce the same schema boundary on any other ingress path.",
             "The conformance suite activates date-time format checking and carries negative probes for malformed formats and overlong strings.",
         ],
     )
