@@ -203,10 +203,11 @@ paths:
           in: header
           required: true
           description: >-
-            Must exactly equal intent.idempotency_key in the request body. A
-            body that carries a different value is rejected as 409 before
-            evaluation. A body that carries no idempotency_key at all is not a
-            mismatch but an incomplete intent, refused as 400 INTENT_FIELDS.
+            Must exactly equal intent.idempotency_key in the request body. After
+            request schema validation, a different value is rejected as 409
+            IDEMPOTENCY_KEY_MISMATCH before evaluation. An otherwise valid body
+            that omits intent.idempotency_key is refused as 400 BODY_SCHEMA with
+            the field path $.intent.idempotency_key before domain validation.
           schema:
             type: string
             pattern: '^[A-Za-z][A-Za-z0-9._:-]{1,127}$'

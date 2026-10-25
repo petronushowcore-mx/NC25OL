@@ -21,7 +21,7 @@
     {
       "path": "ACCEPTANCE-REPORT.md",
       "byte_length": 5972,
-      "sha256": "253E88E4A00901BEC7B25EEC17AB65A8EA8EF469C54B2B68E00194BF8A8F67AB"
+      "sha256": "0FEFE8857BDF38E41579A96CEF9C3DC0D4DF0DDEC77C9DB0BD2ACBE3817E5F5A"
     },
     {
       "path": "ADOPTERS.md",
@@ -300,8 +300,8 @@
     },
     {
       "path": "protocol/universal-connection.openapi.yaml",
-      "byte_length": 33213,
-      "sha256": "D53B16EEEED3DFF755348B2D50302E3F5068F6383CDD655D66DFB57DF79BFCD3"
+      "byte_length": 33302,
+      "sha256": "E3797E5A0FA33E6430BB8C1029C68C25AB92D08FD9B9065E5DD0095CC716CE61"
     },
     {
       "path": "requirements-lock.txt",
