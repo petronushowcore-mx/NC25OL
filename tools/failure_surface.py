@@ -1773,6 +1773,14 @@ def main() -> None:
                     "reason": args.accept_regression,
                     "losses": losses,
                 }
+                if "accepted_regression" in previous:
+                    # Accepting a second loss must not erase the first: the record
+                    # already on file, with whatever history it carries, stays one
+                    # level down. Without this the only trace of why earlier
+                    # coverage was given up was overwritten by the next acceptance.
+                    snapshot["accepted_regression"]["previous"] = previous[
+                        "accepted_regression"
+                    ]
             elif "accepted_regression" in previous:
                 # A recorded loss outlives the regeneration that recorded it.
                 # Dropping it here would erase the only trace of what coverage

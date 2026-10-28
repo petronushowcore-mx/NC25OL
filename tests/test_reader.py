@@ -244,5 +244,32 @@ class ReaderTests(unittest.TestCase):
             build_observer_export(engine, self.signer, actor_scope=ROLE_ARCHITECT)
 
 
+
+    def test_export_limits_match_published_literals(self) -> None:
+        import nc25ol_reader as reader
+        self.assertEqual((reader.MAX_EVENTS, reader.MAX_EXPORT_BYTES), (100000, 33554432))
+
+    def assert_export_succeeds(self) -> dict:
+        try:
+            return build_observer_export(self.engine, self.signer, actor_scope=ROLE_ARCHITECT)
+        except ContractViolation as exc:
+            self.fail(f"in-bound export refused as {exc.code}")
+
+    def test_exporter_event_limit_is_inclusive(self) -> None:
+        self.assertEqual(self.bundle["head"]["event_count"], 3)
+        with patch("nc25ol_reader.MAX_EVENTS", 3):
+            self.assertEqual(self.assert_export_succeeds()["head"]["event_count"], 3)
+        with patch("nc25ol_reader.MAX_EVENTS", 2):
+            with self.assertRaisesRegex(ContractViolation, "^OBSERVER_EXPORT_EVENT_LIMIT(:|$)"):
+                build_observer_export(self.engine, self.signer, actor_scope=ROLE_ARCHITECT)
+
+    def test_exporter_canonical_byte_limit_is_inclusive(self) -> None:
+        bound = len(canonical_json(self.bundle))
+        with patch("nc25ol_reader.MAX_EXPORT_BYTES", bound):
+            self.assertEqual(len(canonical_json(self.assert_export_succeeds())), bound)
+        with patch("nc25ol_reader.MAX_EXPORT_BYTES", bound - 1):
+            with self.assertRaisesRegex(ContractViolation, "^OBSERVER_EXPORT_BYTE_LIMIT(:|$)"):
+                build_observer_export(self.engine, self.signer, actor_scope=ROLE_ARCHITECT)
+
 if __name__ == "__main__":
     unittest.main()

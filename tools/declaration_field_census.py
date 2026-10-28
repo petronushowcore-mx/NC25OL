@@ -49,7 +49,7 @@ DECLARATION = {
     "resource_limits[].max_per_intent": ("G", 'limit["max_per_intent"]', "per-intent limit"),
     "resource_limits[].max_committed_per_window": ("G", 'limit["max_committed_per_window"]', "window commitment limit"),
     "resource_limits[].window_seconds": ("G", 'limit["window_seconds"]', "window length"),
-    "governance.approval_owner_id": ("G", 'self.declaration["governance"]["approval_owner_id"]', "grant approval actor"),
+    "governance.approval_owner_id": ("G", 'self.declaration["governance"]["approval_owner_id"]', "declaration activation actor; also a permitted grant revoker"),
     "governance.authority_issuer_id": ("G", 'self.declaration["governance"]["authority_issuer_id"]', "grant issuer actor"),
     "governance.revision_authority_ids": ("G", 'governance["revision_authority_ids"]', "grant revokers; no revision permission"),
     "governance.no_live_gate_override": ("B", 'governance["no_live_gate_override"] is not True', "constant true; no external governance proof"),
@@ -319,7 +319,7 @@ def main() -> int:
         (args.root / "DECLARATION-FIELDS.md").write_text(
             render_document(args.root), encoding="utf-8", newline="\n"
         )
-    print("DECLARATION_FIELDS_OK: 31 declaration fields; 16 registry fields")
+    print(f"DECLARATION_FIELDS_OK: {len(DECLARATION)} declaration fields; {len(REGISTRY)} registry fields")
     return 0
 
 

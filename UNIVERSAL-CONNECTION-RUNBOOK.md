@@ -144,7 +144,10 @@ the verified workload identity.
 These control flags and evidence statuses are claims at the connector
 boundary, not authority. Supply `evidence_resolver` at untrusted ingress so the
 gate uses only the resolver's authoritative bundle; resolver exceptions,
-malformed output, and intent mismatch fail closed. Without a resolver, the SDK
+malformed output, intent mismatch and future-dated resolved evidence become
+a recorded generic `REFUSAL`/`EXECUTION_DENIED`, consume the submitted key and
+replay the same refusal. Only the architect decision names
+`AUTHORITATIVE_RESOLUTION_FAILED`. Without a resolver, the SDK
 contract remains an internal post-resolution object. Production must retrieve
 records from approved systems, verify provenance and hashes, derive controls
 inside the independent evaluator, and bind the results to request and state.
@@ -162,6 +165,8 @@ at issuance, with freshness bounded by the sealed permit TTL.
 
 For the HTTP adapter, the `Idempotency-Key` header must exactly equal
 `intent.idempotency_key`. Reject a mismatch as a conflict before evaluation.
+The key namespace is shared by every requester on the engine/connector;
+allocate distinct keys across those requesters.
 An exact replay may return an active permit or the original non-executable
 result, but replay of a consumed, expired, revoked, or otherwise invalidated
 permit fails closed and never reissues `ALLOW`.
@@ -273,6 +278,13 @@ not affected by this field.
 - after a successful commit, an exact retry returns the stored receipt without a
   second debit even after permit, grant, or declaration expiry or revocation; a
   changed retry fails.
+
+A downstream effect reported as `COMMITTED` is recorded and debited only if
+this new report passes the current commit checks. A late or invalidated report
+can be refused without an `EXECUTION_RECORDED` event or a debit, even when its
+`committed_at` describes an earlier physical effect. Keep that external receipt
+and reconcile outside the reference engine. Rejection does not prove that no
+external effect occurred and does not grant a new authorization.
 
 If a safe fallback is needed, submit it as a new intent. A refusal is never
 converted into execution inside the current request.

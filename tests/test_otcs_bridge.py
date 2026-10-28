@@ -31,6 +31,7 @@ from nc25_otcs_bridge import (  # noqa: E402
 from nc25_universal_ledger import (  # noqa: E402
     ContractViolation,
     FixedClock,
+    HmacDetachedSigner,
     IntegrityViolation,
     ROLE_GOVERNANCE,
     ROLE_OPERATOR,
@@ -592,6 +593,280 @@ class OTCSBridgeRegressions(unittest.TestCase):
                 stored = bridge.outbox_record(project_id, idempotency_key)
                 self.assertEqual(stored["state"], "RECONCILIATION_REQUIRED")
                 self.assertEqual(stored["rejection_code"], "PERMIT_EXPIRED")
+
+    def test_definitive_rejection_after_the_permit_died_ends_not_executed(self) -> None:
+        """A refusal known to have produced no effect reaches a terminal state even when
+        the permit stopped being live before the refusal came back.
+
+        The downstream answers with a definitive refusal, but only after the permit's
+        lifetime has run out (a slow client). The engine cannot record a failed
+        execution under a dead permit, so local finalisation is refused with a raw
+        ContractViolation. Before this case was handled the row stayed DOWNSTREAM_REJECTED
+        for good: every execute and recover re-asked the engine and raised again, and the
+        chain never held an EXECUTION_RECORDED event for the attempt. The same situation
+        after an ambiguous or committed answer already ends in RECONCILIATION_REQUIRED.
+
+        NOT_EXECUTED is the honest end here, unlike for CALLING and AMBIGUOUS, because a
+        definitive refusal is by the client contract known to have produced no effect.
+        The downstream's own code stays the rejection code; the reason local finalisation
+        was refused is kept in last_error.
+
+        Two controls separate the cause from the fixture: the same refusing client with a
+        live permit still ends LOCAL_FAILED with a ledger receipt (the existing path), and
+        a committed answer under a dead permit still ends RECONCILIATION_REQUIRED.
+        """
+        project_id = self.bundle["bridge_operation"]["project_id"]
+        idempotency_key = self.bundle["bridge_operation"]["idempotency_key"]
+
+        class RefusesAfterExpiry:
+            """Definitive refusal, returned after the clock has passed the permit's expiry."""
+
+            def __init__(self, clock, advance: bool) -> None:
+                self.clock = clock
+                self.advance = advance
+                self.calls = 0
+                self.effects = 0
+
+            def append_event(self, request):
+                self.calls += 1
+                if self.advance:
+                    self.clock.advance(seconds=301)
+                raise OTCSAppendRejected("DOWNSTREAM_SYNTHETIC_REFUSAL")
+
+        def recorded(engine) -> bool:
+            return any(
+                event["event_type"] == "EXECUTION_RECORDED"
+                for event in engine.ledger.events_copy()
+            )
+
+        # Control 1: the permit is still live when the refusal arrives.
+        live_client = RefusesAfterExpiry(self.clock, advance=False)
+        live = self.bridge(live_client).execute(
+            self.bundle["bridge_operation"], self.bundle["intent"], self.bundle["evidence"]
+        )
+        self.assertEqual(live["status"], "DOWNSTREAM_REJECTED")
+        self.assertIsNotNone(live["ledger_receipt"])
+        self.assertTrue(recorded(self.engine))
+        self.assertEqual(
+            self.bridge(live_client).outbox_record(project_id, idempotency_key)["state"],
+            "LOCAL_FAILED",
+        )
+
+        # Control 1b: a refusal of local finalisation that is NOT a dead permit still leaves
+        # loudly and leaves the row where it was; only the dead-permit case is a terminal end.
+        self.setUp()
+        other_client = RefusesAfterExpiry(self.clock, advance=False)
+        other_bridge = self.bridge(other_client)
+        with patch.object(
+            self.engine,
+            "commit_execution",
+            side_effect=ContractViolation("SYNTHETIC_OTHER_REFUSAL"),
+        ):
+            with self.assertRaisesRegex(ContractViolation, r"^SYNTHETIC_OTHER_REFUSAL$"):
+                other_bridge.execute(
+                    self.bundle["bridge_operation"],
+                    self.bundle["intent"],
+                    self.bundle["evidence"],
+                )
+        self.assertEqual(
+            other_bridge.outbox_record(project_id, idempotency_key)["state"],
+            "DOWNSTREAM_REJECTED",
+        )
+
+        # The case: the same refusal, after the permit died.
+        self.setUp()
+        client = RefusesAfterExpiry(self.clock, advance=True)
+        bridge = self.bridge(client)
+        try:
+            result = bridge.execute(
+                self.bundle["bridge_operation"],
+                self.bundle["intent"],
+                self.bundle["evidence"],
+            )
+        except ContractViolation as exc:
+            self.fail(
+                "a definitive refusal under a dead permit left the row mid-call: "
+                f"{exc.code} (row {bridge.outbox_record(project_id, idempotency_key)['state']})"
+            )
+        self.assertEqual(result["status"], "NOT_EXECUTED")
+        self.assertEqual(result["rejection_code"], "DOWNSTREAM_SYNTHETIC_REFUSAL")
+        self.assertIsNone(result["otcs_receipt"])
+        self.assertIsNone(result["ledger_receipt"])
+        stored = bridge.outbox_record(project_id, idempotency_key)
+        self.assertEqual(stored["state"], "NOT_EXECUTED")
+        self.assertEqual(stored["last_error"], "PERMIT_EXPIRED")
+        self.assertFalse(recorded(self.engine))
+        self.assertEqual((client.calls, client.effects), (1, 0))
+
+        # The end is terminal: another execute and a recovery answer the same, without a call.
+        again = bridge.execute(
+            self.bundle["bridge_operation"], self.bundle["intent"], self.bundle["evidence"]
+        )
+        recovered = bridge.recover(project_id, idempotency_key)
+        # (A first execute also carries the admission's operator_result; later answers do not.)
+        stable = {key: value for key, value in result.items() if key != "operator_result"}
+        self.assertEqual(again, stable)
+        self.assertEqual(recovered, stable)
+        self.assertEqual(client.calls, 1)
+
+        # Control 2: a COMMITTED answer under a dead permit keeps its own end.
+        self.setUp()
+        committed_client = FakeOTCSClient(self.bundle["downstream_receipt"])
+
+        def expire_after_response(point: str) -> None:
+            if point == "after_downstream_response":
+                self.clock.advance(seconds=301)
+
+        with self.assertRaisesRegex(
+            OTCSReconciliationRequired, r"^OTCS_LOCAL_FINALIZATION_REFUSED(:|$)"
+        ):
+            self.bridge(committed_client, fault_hook=expire_after_response).execute(
+                self.bundle["bridge_operation"],
+                self.bundle["intent"],
+                self.bundle["evidence"],
+            )
+        self.assertEqual(
+            self.bridge(committed_client).outbox_record(project_id, idempotency_key)["state"],
+            "RECONCILIATION_REQUIRED",
+        )
+
+    def test_a_permit_the_engine_cannot_verify_is_refused_before_the_downstream_call(
+        self,
+    ) -> None:
+        """The bridge asks the engine whether it can verify the permit BEFORE the append.
+
+        The verifier registry is runtime configuration: after a restart whose rotation
+        ceremony was not replayed, a permit signed under a retired key fails closed with
+        PERMIT_KEY_UNKNOWN at `commit_execution`. That check used to be the only one, and
+        it comes after the append, so the bridge produced the external effect first and
+        was refused second - the very case this module exists to prevent (a first effect
+        that cannot be finalised locally).
+
+        The control is the same row after the ceremony is replayed: it resumes and
+        commits once, so the refusal belonged to the key and not to the row.
+        """
+        project_id = self.bundle["bridge_operation"]["project_id"]
+        idempotency_key = self.bundle["bridge_operation"]["idempotency_key"]
+        key_one = HmacDetachedSigner(b"rotating-permit-key", "permit-key-1")
+        key_two = HmacDetachedSigner(b"rotating-permit-key-2", "permit-key-2")
+        state_path = self.temporary_root / "rotating-ledger.sqlite"
+        outbox_path = self.temporary_root / "rotating-outbox.sqlite"
+
+        def engine_with(signer) -> UniversalConnectionLedger:
+            engine = UniversalConnectionLedger(
+                self.bundle["profile"],
+                self.bundle["declaration"],
+                signing_key=b"synthetic-reference-signing-key",
+                clock=self.clock,
+                state_path=state_path,
+                permit_signer=signer,
+            )
+            if engine.status == "DRAFT":
+                engine.activate(
+                    self.bundle["declaration"]["governance"]["approval_owner_id"],
+                    "evidence://synthetic/otcs/declaration-activation",
+                    actor_scope=ROLE_GOVERNANCE,
+                )
+            if self.bundle["grant"]["grant_id"] not in engine.grants:
+                engine.issue_grant(
+                    copy.deepcopy(self.bundle["grant"]), actor_scope=ROLE_GOVERNANCE
+                )
+            return engine
+
+        client = FakeOTCSClient(self.bundle["downstream_receipt"])
+
+        def pause_after_prepare(point: str) -> None:
+            if point == "after_prepare":
+                raise RuntimeError("SYNTHETIC_PREPARED_PAUSE")
+
+        first = engine_with(key_one)
+        with self.assertRaisesRegex(RuntimeError, "^SYNTHETIC_PREPARED_PAUSE$"):
+            OTCSBridge(
+                first, client, outbox_path, _fault_hook=pause_after_prepare
+            ).execute(
+                self.bundle["bridge_operation"],
+                self.bundle["intent"],
+                self.bundle["evidence"],
+            )
+        first.rotate_permit_signer(key_two, actor_scope=ROLE_GOVERNANCE)
+        self.assertEqual(client.calls, 0)
+
+        # Restart with only the new signer: the retired key is unknown to the registry.
+        restarted = OTCSBridge(engine_with(key_two), client, outbox_path)
+        with self.assertRaisesRegex(IntegrityViolation, r"^PERMIT_KEY_UNKNOWN(:|$)"):
+            restarted.recover(project_id, idempotency_key)
+        self.assertEqual(
+            (client.calls, client.effects),
+            (0, 0),
+            "OTCS_CALLED_FOR_A_PERMIT_THE_ENGINE_CANNOT_VERIFY",
+        )
+        self.assertEqual(
+            restarted.outbox_record(project_id, idempotency_key)["state"], "PREPARED"
+        )
+
+        # Control: replay the ceremony (original signer, then rotate) - the same row resumes.
+        replayed_engine = engine_with(key_one)
+        replayed_engine.rotate_permit_signer(
+            HmacDetachedSigner(b"rotating-permit-key-2", "permit-key-2"),
+            actor_scope=ROLE_GOVERNANCE,
+        )
+        result = OTCSBridge(replayed_engine, client, outbox_path).recover(
+            project_id, idempotency_key
+        )
+        self.assertEqual(result["status"], "COMMITTED")
+        self.assertEqual((client.calls, client.effects), (1, 1))
+
+    def test_a_contract_refusal_from_the_permit_verification_is_a_dead_permit(self) -> None:
+        """A policy refusal from the engine's permit verification ends a PREPARED row.
+
+        An integrity failure there is re-raised (see the neighbouring test): the engine
+        cannot vouch for itself. A contract refusal is different - the permit is dead for a
+        stated reason - so the row ends NOT_EXECUTED under that code with no OTCS call, the
+        same as an expired permit. Honest `revoke_permit_key` marks the permit invalid first,
+        so the engine reaches this branch only when its permit record and its key registry
+        disagree; the test produces that disagreement by replacing the engine method, and
+        says so here rather than pretending the path is reachable through the API.
+
+        Control: the same kind of row with the real method (no replacement) commits once.
+        """
+        project_id = self.bundle["bridge_operation"]["project_id"]
+        idempotency_key = self.bundle["bridge_operation"]["idempotency_key"]
+        client = FakeOTCSClient(self.bundle["downstream_receipt"])
+
+        def pause_after_prepare(point: str) -> None:
+            if point == "after_prepare":
+                raise RuntimeError("SYNTHETIC_PREPARED_PAUSE")
+
+        with self.assertRaisesRegex(RuntimeError, "^SYNTHETIC_PREPARED_PAUSE$"):
+            self.bridge(client, fault_hook=pause_after_prepare).execute(
+                self.bundle["bridge_operation"], self.bundle["intent"], self.bundle["evidence"]
+            )
+        self.assertEqual(client.calls, 0)
+
+        with patch.object(
+            self.engine,
+            "architect_permit_verification",
+            side_effect=ContractViolation("PERMIT_KEY_REVOKED"),
+        ):
+            bridge = self.bridge(client)
+            result = bridge.recover(project_id, idempotency_key)
+        self.assertEqual(result["status"], "NOT_EXECUTED")
+        self.assertEqual(result["rejection_code"], "PERMIT_KEY_REVOKED")
+        self.assertEqual((client.calls, client.effects), (0, 0))
+        self.assertEqual(
+            bridge.outbox_record(project_id, idempotency_key)["state"], "NOT_EXECUTED"
+        )
+
+        # Control: without the replacement the same kind of row commits once.
+        self.setUp()
+        control_client = FakeOTCSClient(self.bundle["downstream_receipt"])
+        with self.assertRaisesRegex(RuntimeError, "^SYNTHETIC_PREPARED_PAUSE$"):
+            self.bridge(control_client, fault_hook=pause_after_prepare).execute(
+                self.bundle["bridge_operation"], self.bundle["intent"], self.bundle["evidence"]
+            )
+        committed = self.bridge(control_client).recover(project_id, idempotency_key)
+        self.assertEqual(committed["status"], "COMMITTED")
+        self.assertEqual((control_client.calls, control_client.effects), (1, 1))
 
     def test_an_unknown_stored_state_is_reachable_through_the_public_read(
         self,
@@ -3419,6 +3694,11 @@ class OTCSBridgeRegressions(unittest.TestCase):
             engine, case_ledger = case_engines[base_state]
             if reset_engine:
                 state_copy(base_ledger, case_ledger)
+                # A restart, not a rewind under a live engine: an engine refuses a stored
+                # snapshot that holds less history than it has already seen (STATE_ROLLBACK),
+                # so the reset file gets a fresh engine, which has seen nothing.
+                engine = engine_on(case_ledger)
+                case_engines[base_state] = (engine, case_ledger)
             with closing(sqlite3.connect(path)) as connection:
                 connection.execute(
                     "CREATE TABLE otcs_bridge_outbox ("

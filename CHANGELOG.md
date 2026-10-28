@@ -35,6 +35,17 @@ Spectrum source observation and adds the Pack A connection and reading paths.
   against an externally pinned key fingerprint without importing the engine.
 - Extends the acceptance and package checks to the field census, reader,
   failure-surface records, and the exact document and manifest bytes.
+- Records authoritative resolver failures as generic non-executable refusals
+  without exposing authorization progress or leaving the request key reusable.
+- Requires native Python identity and role strings and uses real container types
+  in JSON conversion and secret/forbidden-field walkers. Arbitrary Python
+  objects supplied in process remain outside the reference JSON boundary.
+- Keeps observer exports within the independent reader's count and canonical
+  byte limits; documents instance-attribution and late-report limitations.
+- Evaluates resource windows with exact integer elapsed time, including very
+  large positive windows and the inclusive microsecond boundary.
+- Names the reading and field-inventory documents in the documentation licence
+  and checks root-document coverage.
 
 ## 01.09.02
 

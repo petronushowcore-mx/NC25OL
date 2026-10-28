@@ -56,7 +56,11 @@ signed export proves post-export integrity of the
 projected events up to its declared head. It does **not** prove completeness
 against the private ledger, that omitted event types never happened, that
 the operator published every eligible event, or that a named organization
-controls the key. Such claims require external evidence and key binding.
+controls the key. The signed v1 statement also contains no connector, profile
+or declaration identifier: a shared operator key does not identify which
+Ledger instance produced the projection. Instance attribution requires an
+independently authenticated mapping from this export to its source instance.
+Such claims require external evidence and key binding.
 
 The five required causal rejection examples use different codes:
 
@@ -68,6 +72,22 @@ The five required causal rejection examples use different codes:
 | Replace with a valid export signed by a different key while retaining the expected pin | `KEY_UNEXPECTED` |
 | Attach a valid signature of a different head | `HEAD_SIGNATURE_INVALID` |
 
-Reader input is bounded to 32 MiB and 100,000 projected events. Duplicate JSON
-keys are rejected. This bound is for a standalone export file, not for a live
-Ledger database. The current tests are in `tests/test_reader.py`.
+Reader input is bounded to 32 MiB and 100,000 projected events. The exporter
+uses the same bounds and refuses `OBSERVER_EXPORT_EVENT_LIMIT` or
+`OBSERVER_EXPORT_BYTE_LIMIT` before returning an export that exceeds them.
+Save the returned object with the canonical serializer so file size agrees
+with the producer check:
+
+```python
+from pathlib import Path
+from nc25_universal_ledger import canonical_json
+Path("observer-export.json").write_bytes(canonical_json(export))
+```
+
+The byte bound applies to those canonical UTF-8 bytes; adding whitespace or
+other formatting can make an otherwise accepted object exceed the file limit.
+Duplicate JSON keys are rejected. The bounds describe a standalone full
+projection export, not the capacity of a live Ledger database. A history beyond
+the export limits requires a separately specified export or archive mechanism;
+this v1 format provides no pagination. The current tests are in
+`tests/test_reader.py`.

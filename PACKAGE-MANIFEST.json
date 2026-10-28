@@ -20,8 +20,8 @@
     },
     {
       "path": "ACCEPTANCE-REPORT.md",
-      "byte_length": 5972,
-      "sha256": "0FEFE8857BDF38E41579A96CEF9C3DC0D4DF0DDEC77C9DB0BD2ACBE3817E5F5A"
+      "byte_length": 5973,
+      "sha256": "9A865F1D457F30D2EF45094DB80136B39F9C882D84A6EC9A7EEC5E2C72B78E20"
     },
     {
       "path": "ADOPTERS.md",
@@ -30,8 +30,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "byte_length": 21344,
-      "sha256": "68A448EFB13846A34BAA33206A6DD988DF42F85D554E5FA014516EA3A86AC0A5"
+      "byte_length": 22139,
+      "sha256": "2D21719EF45B4DCDA41122CA67C3B7977609F716750A5E49D41829D6F3F9A704"
     },
     {
       "path": "CITATION.cff",
@@ -40,33 +40,33 @@
     },
     {
       "path": "DECLARATION-FIELDS.md",
-      "byte_length": 8190,
-      "sha256": "C267C5CD94B9AF2830570C671E449EC14DECF341B641D2D4DA1E10BA2F23D100"
+      "byte_length": 8230,
+      "sha256": "953A5EB14CD7A4202B978CA792FF8E8C99995BD9331730C0E4E00DFCEC06FFF0"
     },
     {
       "path": "DOCX-AUDIT-PROJECTION.md",
-      "byte_length": 62016,
-      "sha256": "4A8B23F015D30FD57328C684E99E95D7B5C0EC9CB23F2E03FF267DBC904F162B"
+      "byte_length": 62618,
+      "sha256": "21C9593A6B4DAE2E900D2C1B5B7B0E2555BE0135BE40D2AF8A19573172C8CE34"
     },
     {
       "path": "LICENSE",
-      "byte_length": 3044,
-      "sha256": "35C6AF6EBD6AC2D77BB1DBCE10AB6C2287D342023D08B961D407A5B84FC61564"
+      "byte_length": 3082,
+      "sha256": "ED56B58C9343C353575F86E22E115F703E18FC70D2650F03619FB1D2F9A48914"
     },
     {
       "path": "NC25OL Specification v01.09.docx",
-      "byte_length": 68539,
-      "sha256": "4CFFD177671A7123C212CB6E54888A5317BE5F093B1BD0E7C855F4A7CB4FA903"
+      "byte_length": 68783,
+      "sha256": "6821137C9746B72A5BA719F5C78D85C68F9B76634EEBDDE8D9A099A93D978DAB"
     },
     {
       "path": "READING.md",
-      "byte_length": 4260,
-      "sha256": "9B8AC933E2B785943BDDFF6B0E54543130742378C04D57912847FEB8AB0F7870"
+      "byte_length": 5267,
+      "sha256": "BB4366A7E9219A065BC18693BBAB3AE3401F66E7DF33B33ED094A8DFACA10A16"
     },
     {
       "path": "README.md",
-      "byte_length": 44602,
-      "sha256": "758E79B9231A1B6108C15A2C9BB955EA05700CF0977D8A9F2CBA8663CB50E34F"
+      "byte_length": 47731,
+      "sha256": "921A27F6D612557C277171B4DE00DA84A5BBDDFDF0B95E0FE65A3065962CABFF"
     },
     {
       "path": "SECURITY.md",
@@ -80,8 +80,8 @@
     },
     {
       "path": "UNIVERSAL-CONNECTION-RUNBOOK.md",
-      "byte_length": 26084,
-      "sha256": "DA183678E8B12662AE777F92B1ED5EF40AEF4114F1A57997FF2E46FC0593A88B"
+      "byte_length": 26859,
+      "sha256": "37122E50E447B2D527DF3A9C51D05840EA92B492AD3CFEDED3D0D76F36961556"
     },
     {
       "path": "assets/NC25OL-poster.gif",
@@ -300,8 +300,8 @@
     },
     {
       "path": "protocol/universal-connection.openapi.yaml",
-      "byte_length": 33302,
-      "sha256": "E3797E5A0FA33E6430BB8C1029C68C25AB92D08FD9B9065E5DD0095CC716CE61"
+      "byte_length": 34059,
+      "sha256": "9FCD6D0FFCEF081F5E14F8E20139979719BCDA13DC6D1F0BA47126D850EB15BA"
     },
     {
       "path": "requirements-lock.txt",
@@ -310,18 +310,18 @@
     },
     {
       "path": "sdk/python/nc25_otcs_bridge.py",
-      "byte_length": 116260,
-      "sha256": "489D75B2D303D637F1A32C68AEFB3107715708353B8F39CBA72F9EDA627E6BE9"
+      "byte_length": 118578,
+      "sha256": "C2C03BC6438608119FFD00AA1C28FCAE1C4DCB286A086936B37F22C26BCCA931"
     },
     {
       "path": "sdk/python/nc25_universal_adapter.py",
-      "byte_length": 25695,
-      "sha256": "D9C9B5B09B426D15425C01B7DFB0C5690B15ED19734259CCAFD82EE746F63FA9"
+      "byte_length": 25606,
+      "sha256": "9090483F06077F3DFFF6B49B1565A6C3E63061A957254A2B675B1D0ABA44321D"
     },
     {
       "path": "sdk/python/nc25_universal_ledger.py",
-      "byte_length": 178761,
-      "sha256": "987F339A20B66F9FA15D6CED58478927B8C8753F5A095D105219495C628C5F4D"
+      "byte_length": 183834,
+      "sha256": "60C3BFED839BE7CC26A4A848C2A81860AA5E5BC4544C068F8A8CC4CE73B3EE6F"
     },
     {
       "path": "sdk/python/nc25ol_reader.py",
@@ -335,8 +335,8 @@
     },
     {
       "path": "tests/failure-surface-baseline.json",
-      "byte_length": 133581,
-      "sha256": "F6AE83DD80E4EC84ACF7605406E3789FE0B0E4E337905B9E746FEF87ABA69A78"
+      "byte_length": 138339,
+      "sha256": "6B14BDCE55EAFF50DC06A439E73F3AD4D208DD1DBA221A3D1B4EFAC31B8713F9"
     },
     {
       "path": "tests/mutate_adapter_schema_gate.py",
@@ -360,13 +360,13 @@
     },
     {
       "path": "tests/test_contract_conformance.py",
-      "byte_length": 51687,
-      "sha256": "CEE3ED5320BE2D9CB65FFEF553DE3583D5EF0D4323F064F69FAEB28D1335AB29"
+      "byte_length": 51864,
+      "sha256": "216BD76595BF643A03D65284A351DF07CAA89B90C0B946B4E0794FC36E2D8929"
     },
     {
       "path": "tests/test_contract_regressions.py",
-      "byte_length": 401754,
-      "sha256": "0958FEE2AF8C0CDAC3E005CD92BB364BCD45DC1CE1982EA4A60A22A057048294"
+      "byte_length": 439265,
+      "sha256": "374E04DEEDBAB35C0FC0A20EA88D8E500A7C30FE834FCE72ADFA136A4274DEB7"
     },
     {
       "path": "tests/test_declaration_field_census.py",
@@ -375,13 +375,13 @@
     },
     {
       "path": "tests/test_otcs_bridge.py",
-      "byte_length": 197221,
-      "sha256": "37B8430275324E4A71CE15AE8719B3FB860A40C80AFA3EDF23CEF7A05704E422"
+      "byte_length": 211120,
+      "sha256": "B5DE8DBF0195006C43A7DA87689DC48EA52AA7FA7F3ED98566350DF29F9BA409"
     },
     {
       "path": "tests/test_reader.py",
-      "byte_length": 11122,
-      "sha256": "56EFBAB830A9EA8D46C65564D9C81333C0F89F47E8318DFF86BA18319FB9C7F2"
+      "byte_length": 12608,
+      "sha256": "6AE5A51460845535794D79115F0F9EE8D0C4EDC37FF7C27B2C2E0E349A31B0EA"
     },
     {
       "path": "tests/test_safety_mutations.py",
@@ -395,13 +395,13 @@
     },
     {
       "path": "tests/test_universal_connection.py",
-      "byte_length": 65138,
-      "sha256": "1F0C80D738C55F25EF3B8215ADE3799A5101B9B53E2B710AFA764EE5904DC4E1"
+      "byte_length": 72755,
+      "sha256": "AB6C41AED53679E131BAC2DA5D5CC8D3E09324AF11BAD85451F921E8EE02F97C"
     },
     {
       "path": "tests/verify_package.py",
-      "byte_length": 69551,
-      "sha256": "413B00214158BAD2BAAA522B19BD2C5BC8056A08D6B77463BC0D59348BB0FA5D"
+      "byte_length": 70517,
+      "sha256": "E41E1D57AEB774118387059D0532C26805C36B00E776D4188A5F251F9288DDEA"
     },
     {
       "path": "tools/build_acceptance_report.py",
@@ -415,8 +415,8 @@
     },
     {
       "path": "tools/build_error_code_enum.py",
-      "byte_length": 2786,
-      "sha256": "2209B984F456320CF624E9FDB9856507A69D6A998209DCAAD9988AF62232E935"
+      "byte_length": 3685,
+      "sha256": "F636F850B450939F88E21BA5410F7142001D0FE491E7FEF3C57DEC59E8238A03"
     },
     {
       "path": "tools/build_package_manifest.py",
@@ -430,18 +430,18 @@
     },
     {
       "path": "tools/build_universal_specification.py",
-      "byte_length": 78032,
-      "sha256": "C9EE5AF1DF1C671C6FB46264A4D881024500681AE77131BE44138CE256501954"
+      "byte_length": 78650,
+      "sha256": "AA4C8D283641DF685648B461759A61C3A56043001090BB01EFDACD6092BF914C"
     },
     {
       "path": "tools/declaration_field_census.py",
-      "byte_length": 16501,
-      "sha256": "542D385549DD0A121712149129CD3DA772867F2306E768F5CC6DDE109D9404CE"
+      "byte_length": 16571,
+      "sha256": "814A9A5B02821B2815F250AABBEE99D8E1506FD3623EEDECC913E20C0D3FE501"
     },
     {
       "path": "tools/failure_surface.py",
-      "byte_length": 77556,
-      "sha256": "17576A648DF5D5AA555063C08B92C3B30CFBA5C95F32BDDAA74DA813DB66A209"
+      "byte_length": 78081,
+      "sha256": "F75D0A6528B92CAA7B25844EF381D5A016CBD2247D982AD511982DD47A8AD836"
     },
     {
       "path": "tools/spec_counts.py",

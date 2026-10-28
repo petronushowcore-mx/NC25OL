@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -35,7 +35,9 @@ from nc25_universal_ledger import (  # noqa: E402
     UniversalConnectionLedger,
     bind_fixture,
     load_json,
+    parse_utc,
     sha256_hex,
+    utc_text,
 )
 
 
@@ -229,6 +231,10 @@ UNROUTED_BY_DESIGN = {
     "rotate_permit_signer": "key custody is out of band; no route is mounted",
     "revoke_permit_key": "key custody is out of band; no route is mounted",
     "observer_projection": "documented as intentionally not a route",
+    "architect_permit_verification": (
+        "an in-process check the bridge makes before a downstream call; the wire "
+        "contract exposes the permit view, not a verification verdict"
+    ),
 }
 
 
@@ -711,6 +717,56 @@ class ConnectionSuite:
         )
 
     def test_the_resource_window_slides(self) -> None:
+        # Positive integer windows have no schema maximum. Both admission and
+        # commit must work beyond the calendar and timedelta ranges.
+        for seconds in (10**12, 10**40):
+            declaration = copy.deepcopy(self.declaration)
+            for limit in declaration["resource_limits"]:
+                limit["window_seconds"] = seconds
+            engine, intent, _ = self.engine(declaration=declaration)
+            try:
+                allowed = engine.evaluate_intent(
+                    intent, self.evidence, actor_scope="nc25.operator"
+                )
+                self.assertEqual(
+                    allowed["disposition"], "ALLOW", "large_resource_window_admission"
+                )
+                committed = engine.commit_execution(
+                    self.execution_request(engine, allowed, intent),
+                    actor_scope="nc25.executor",
+                    route_permit_hash=allowed["permit_hash"],
+                )
+            except OverflowError as exc:
+                self.fail(f"resource_window_integer_range:{seconds}:{exc}")
+            self.assertEqual(committed["outcome"], "COMMITTED")
+            self.assertEqual(
+                engine._committed_resource_in_window(
+                    self.fx.resource_id, self.clock.now(), seconds
+                ),
+                self.fx.claim,
+                "large_resource_window_counts_commit",
+            )
+
+        # 800 Gregorian years still fit in datetime, but float seconds lose a
+        # microsecond at this distance. The literal boundary is independent of
+        # the implementation; future records retain the existing inclusion.
+        engine, _, _ = self.engine()
+        now = datetime(2026, 8, 1, 10, 0, 0, tzinfo=timezone.utc)
+        boundary = now - timedelta(seconds=25_245_561_600)
+        engine.committed_resources = [
+            (boundary, {self.fx.resource_id: 1}),
+            (boundary + timedelta(microseconds=1), {self.fx.resource_id: 2}),
+            (boundary - timedelta(microseconds=1), {self.fx.resource_id: 4}),
+            (now + timedelta(microseconds=1), {self.fx.resource_id: 8}),
+        ]
+        self.assertEqual(
+            engine._committed_resource_in_window(
+                self.fx.resource_id, now, 25_245_561_600
+            ),
+            11,
+            "resource_window_inclusive_microsecond_boundary",
+        )
+
         # A committed claim counts against its window only until window_seconds have passed.
         # The boundary tests pin the inclusive edge; this one pins that old commitments age out.
         declaration = copy.deepcopy(self.declaration)
@@ -1179,7 +1235,7 @@ class ConnectionSuite:
         # Without it the list absorbs the loss quietly, which is how an
         # exemption field returns after being refused entry.
         self.assertEqual(
-            len(UNROUTED_BY_DESIGN), 3,
+            len(UNROUTED_BY_DESIGN), 4,
             "the exempt list changed size - an operation left the routed set",
         )
         # The other way work escapes every sweep: mount it on the adapter and
@@ -1411,6 +1467,89 @@ class ConnectionSuite:
                 },
                 actor_scope="nc25.governance",
             )
+
+    def test_utc_range_failures_are_contract_errors(self) -> None:
+        import io
+        import json
+        import nc25_universal_adapter as adapter
+
+        for text, expected in (
+            ("2026-08-01T12:00:00+02:00", "2026-08-01T10:00:00Z"),
+            ("0001-01-02T00:00:00+14:00", "0001-01-01T10:00:00Z"),
+            ("9999-12-30T23:59:59-14:00", "9999-12-31T13:59:59Z"),
+        ):
+            try:
+                actual = utc_text(parse_utc(text))
+            except Exception as exc:
+                self.fail(f"representable UTC neighbour {text}: {type(exc).__name__}")
+            self.assertEqual(actual, expected)
+        for text in ("0001-01-01T00:00:00+14:00", "9999-12-31T23:59:59-14:00"):
+            try:
+                parse_utc(text)
+            except Exception as exc:
+                self.assertIs(type(exc), ContractViolation)
+                self.assertEqual(exc.code, "INVALID_TIMESTAMP")
+            else:
+                self.fail(f"unrepresentable UTC timestamp accepted: {text}")
+            for field in ("received_at", "collected_at"):
+                engine, intent, _ = self.engine()
+                evidence = copy.deepcopy(self.evidence)
+                (intent if field == "received_at" else evidence)[field] = text
+                before = engine.ledger.head()
+                body = json.dumps({"intent": intent, "evidence_bundle": evidence}).encode()
+                statuses = []
+                env = {
+                    "REQUEST_METHOD": "POST", "PATH_INFO": "/v1/operator/intents:evaluate",
+                    "CONTENT_LENGTH": str(len(body)), "wsgi.input": io.BytesIO(body),
+                    adapter.SCOPE_HEADER: ROLE_OPERATOR,
+                    adapter.IDEMPOTENCY_HEADER: intent["idempotency_key"],
+                }
+                reply = b"".join(adapter.UniversalConnectionHttpAdapter(engine)(
+                    env, lambda status, headers: statuses.append(status)))
+                self.assertEqual(statuses, ["400 Bad Request"])
+                self.assertEqual(json.loads(reply)["code"], "INVALID_TIMESTAMP")
+                self.assertEqual(engine.ledger.head(), before)
+                self.assertNotIn(intent["idempotency_key"], engine.idempotency)
+
+    def test_calendar_edges_preserve_valid_operations(self) -> None:
+        for instant in (
+            datetime(1, 1, 1, tzinfo=timezone.utc),
+            datetime(9999, 12, 31, 23, 59, 50, tzinfo=timezone.utc),
+            datetime(9999, 12, 31, 23, 59, 58, tzinfo=timezone.utc),
+        ):
+            profile, declaration, grant, intent = copy.deepcopy(
+                (self.profile, self.declaration, self.grant, self.intent))
+            profile["created_at"] = declaration["created_at"] = "0001-01-01T00:00:00Z"
+            declaration["effective_from"] = grant["valid_from"] = "0001-01-01T00:00:00Z"
+            declaration["expires_at"] = grant["valid_until"] = "9999-12-31T23:59:59.999999Z"
+            intent["received_at"] = utc_text(instant)
+            evidence = copy.deepcopy(self.evidence)
+            evidence["collected_at"] = utc_text(instant)
+            self.clock = FixedClock(instant)
+            try:
+                engine, bound_intent, bound_grant = self.engine(
+                    profile=profile, declaration=declaration, grant=grant, intent=intent)
+                result = engine.evaluate_intent(bound_intent, evidence, actor_scope=ROLE_OPERATOR)
+                self.assertEqual(result["disposition"], "ALLOW")
+                permit = engine.architect_permit(result["permit_hash"], actor_scope=ROLE_ARCHITECT)
+                self.assertLessEqual(parse_utc(result["expires_at"]), parse_utc(declaration["expires_at"]))
+                self.assertEqual(permit["permit_body"]["ttl_seconds"],
+                                 300 if instant.year == 1 else (10 if instant.second == 50 else 2))
+                request = self.execution_request(engine, result, bound_intent)
+                request["committed_at"] = utc_text(instant)
+                receipt = engine.commit_execution(request, actor_scope=ROLE_EXECUTOR,
+                                                  route_permit_hash=request["permit_hash"])
+                self.assertEqual(receipt["outcome"], "COMMITTED")
+                self.assertEqual(receipt["structural_debit"], self.fx.action_cost)
+                engine.revoke_grant({
+                    "message_type": "authority_revocation", "grant_id": bound_grant["grant_id"],
+                    "declaration_hash": engine.declaration_hash, "revoked_at": utc_text(instant),
+                    "revoked_by": self.fx.authority_issuer, "reason_code": "SYNTHETIC_REVOCATION",
+                    "evidence_ref": "evidence://synthetic/calendar-boundary",
+                }, actor_scope=ROLE_GOVERNANCE)
+                self.assertIn(bound_grant["grant_id"], engine.revoked_grants)
+            except Exception as exc:
+                self.fail(f"valid calendar edge {utc_text(instant)}: {type(exc).__name__}: {exc}")
 
 
 class BankingConnectionTests(ConnectionSuite, unittest.TestCase):

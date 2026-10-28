@@ -2050,6 +2050,22 @@ class OTCSBridge:
             return "DECLARATION_OUTSIDE_VALIDITY"
         if now >= parse_utc(body["expires_at"]):
             return "PERMIT_EXPIRED"
+        # Last, so every reason above keeps its place: a permit the engine can no longer
+        # verify (a signer key it does not hold, a failing signature) is refused HERE, before
+        # the downstream call. `commit_execution` makes the same two checks, but only after
+        # the append, so the effect had already happened when the refusal came.
+        try:
+            self._engine.architect_permit_verification(
+                row["permit_hash"],
+                actor_scope=ROLE_ARCHITECT,
+            )
+        except IntegrityViolation:
+            # Same reasoning as above: the engine cannot vouch for the permit, which is
+            # not the permit being dead. The row stays where it was; a repaired registry
+            # lets it resume without touching OTCS twice.
+            raise
+        except ContractViolation as exc:
+            return exc.code
         return None
 
     def _fault(self, point: str) -> None:
@@ -2282,6 +2298,31 @@ class OTCSBridge:
                 raise OTCSReconciliationRequired(
                     "OTCS_LOCAL_FINALIZATION_REFUSED", exc.code
                 ) from exc
+            if (
+                row["state"] == "DOWNSTREAM_REJECTED"
+                and self._permit_not_live_reason(row, operation) is not None
+            ):
+                # A definitive refusal is by the client contract known to have
+                # produced no external effect, and the engine cannot record a
+                # failed execution under a permit that stopped being live. Left
+                # alone, the row stayed DOWNSTREAM_REJECTED for good: every execute
+                # and recover asked the engine again and raised again, and the
+                # chain never held an event for the attempt. NOT_EXECUTED is the
+                # honest end here, which it is not for CALLING and AMBIGUOUS, where
+                # "nothing happened" cannot be established. The downstream's own
+                # code stays the rejection code; why local finalisation was
+                # refused is kept in last_error. A refusal for any other reason is
+                # not a dead permit and still leaves loudly, as before.
+                row = transition(
+                    project_id,
+                    idempotency_key,
+                    {"DOWNSTREAM_REJECTED"},
+                    "NOT_EXECUTED",
+                    execution_request=execution_request,
+                    rejection_code=row.get("rejection_code"),
+                    last_error=exc.code,
+                )
+                return self._result(row)
             raise
         self._fault("after_local_commit")
         final_state = (

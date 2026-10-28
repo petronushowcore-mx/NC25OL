@@ -1088,7 +1088,9 @@ def http_adapter_conformance() -> None:
     _activate_and_grant(halt_app, halt_grant)
 
     def _raise_integrity() -> None:
-        raise IntegrityViolation("LEDGER_TAMPERED")
+        # A code production can emit. A name invented here once reached the published
+        # Error.code enum through the recorded run, and no production path raised it.
+        raise IntegrityViolation("LEDGER_CHAIN_FAILURE")
 
     halt_app._engine._assert_integrity = _raise_integrity
     halt_status, _ = _http_call(

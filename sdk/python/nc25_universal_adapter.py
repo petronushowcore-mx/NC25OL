@@ -424,9 +424,8 @@ class UniversalConnectionHttpAdapter:
             raise WireError(
                 400, "ACTIVATE_BODY", "profile and declaration required"
             )
-        # The wrapper is closed in the contract (additionalProperties: false),
-        # and closed here too: an unknown top-level key is refused, not accepted
-        # in silence.
+        # Defensive mirror of the schema above. Normal wire traffic with an
+        # unknown wrapper field has already been refused as BODY_SCHEMA.
         unknown = set(body) - {
             "profile", "declaration", "activated_by", "approval_evidence_ref"
         }
@@ -443,10 +442,8 @@ class UniversalConnectionHttpAdapter:
                 409, "ACTIVATE_DECLARATION_MISMATCH",
                 "posted declaration does not hash to the sealed declaration",
             )
-        # Required by the contract, so its absence is a body defect and is
-        # answered as one. Passing the missing value through produced
-        # `ACTIVATION_ACTOR` with the message "None" - Python's repr of an
-        # absent field, shown to the caller as if it were their input.
+        # Defensive mirror of the schema-required actor. A normal missing or
+        # mistyped actor is refused as BODY_SCHEMA before reaching this guard.
         activated_by = body.get("activated_by")
         if not isinstance(activated_by, str):
             raise WireError(400, "ACTIVATE_BODY", "activated_by required")
@@ -484,6 +481,7 @@ class UniversalConnectionHttpAdapter:
     def _evaluate_intent(self, environ, _params) -> tuple[int, Any]:
         body = self._read_json(environ)
         _validate_request_schema(body, "evaluate_intent")
+        # Defensive mirrors: normal malformed wrappers fail BODY_SCHEMA above.
         intent = body.get("intent")
         evidence_bundle = body.get("evidence_bundle")
         if not isinstance(intent, dict) or not isinstance(evidence_bundle, dict):

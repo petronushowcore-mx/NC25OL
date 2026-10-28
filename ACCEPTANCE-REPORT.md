@@ -2,7 +2,7 @@
 
 Version: `01.09.03`
 
-Verification date: `2026-10-25 UTC`
+Verification date: `2026-10-27 UTC`
 
 Status: `PASS`
 
@@ -22,15 +22,15 @@ ACCEPTANCE_STEPS=9/9 PASS
 
 | Gate | Recorded result |
 |---|---:|
-| Functional behavior across all three reference profiles | `102/102 PASS` |
+| Functional behavior across all three reference profiles | `108/108 PASS` |
 | Semantic contracts | `15/15 PASS` |
 | Named safety mutations | `51/51 PASS` |
 | JSON Schema and OpenAPI conformance | `55/55 PASS` |
 | Declaration field census | `8/8 PASS` |
-| Contract regression cases | `89/89 PASS` |
-| OTCS bridge behaviour and refusal vocabulary | `68/68 PASS` |
+| Contract regression cases | `99/99 PASS` |
+| OTCS bridge behaviour and refusal vocabulary | `71/71 PASS` |
 | Failure-surface ratchet | `1/1 PASS` |
-| Package integrity checks | `67/67 PASS` |
+| Package integrity checks | `68/68 PASS` |
 
 The contract regression cases cover hash-case normalization, executor route/body
 permit binding, malformed evidence and execution-request refusal without
@@ -57,9 +57,9 @@ fail-closed behavior.
 ## Bound bytes
 
 This report was generated for one exact tree. The manifest entries it
-certifies, every entry except this report, digest to `FA42F5F5D2F1F29FA3B403AAC20ABE217047A4E0BB61EA4E58225C8237062B81`
+certifies, every entry except this report, digest to `7068BC9F4635B5CF50C354AC57AEECC35EC6BC793445468E6BDC463D86477276`
 as path-ordered (path, SHA-256, byte length) triples; the specification
-document the geometry below describes has SHA-256 `4CFFD177671A7123C212CB6E54888A5317BE5F093B1BD0E7C855F4A7CB4FA903`.
+document the geometry below describes has SHA-256 `6821137C9746B72A5BA719F5C78D85C68F9B76634EEBDDE8D9A099A93D978DAB`.
 The package verifier recomputes both from the shipped bytes and refuses
 this report when either differs.
 
@@ -72,7 +72,7 @@ release-grade acceptance report is refused unless this external-core
 verification passed.
 
 The core is not shipped with this package, so a run without it reports
-`PACKAGE_CHECKS=62/62` and `EXTERNAL_SOURCE_CHECKS=NOT_RUN` while the
+`PACKAGE_CHECKS=63/63` and `EXTERNAL_SOURCE_CHECKS=NOT_RUN` while the
 overall verdict stays `ACCEPTANCE_STEPS=9/9 PASS`. The package-integrity figure
 recorded in the table above is the release configuration, with the bound
 local core file supplied through `NC25_SOURCES_ROOT`. This revision
@@ -82,10 +82,10 @@ not the availability of this exact file.
 ## Failure-surface figures
 
 The failure-surface step measured, for the exact bytes this report
-certifies: 291 engine refusal codes and 18 wire error codes in the
-closed world; raise and helper-emission points all=532, static=520, dynamic=12;
-289 engine refusal codes constructed and 289 witnessed during the
-recorded run; 2 codes unwitnessed; 1 code re-emitted by the
+certifies: 294 engine refusal codes and 18 wire error codes in the
+closed world; raise and helper-emission points all=543, static=531, dynamic=12;
+292 engine refusal codes constructed and 292 witnessed during the
+recorded run; 2 codes unwitnessed; 0 codes re-emitted by the
 translation site belonging to neither vocabulary; and 73 OTCS bridge refusal codes in a closed world of their own. Each figure is a property
 of the named procedure recorded in the baseline, not of the engine in the
 abstract, and the committed baseline is a no-growth debt ratchet, not a

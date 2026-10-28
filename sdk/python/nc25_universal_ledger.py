@@ -216,7 +216,7 @@ def _plain_json(value: Any, path: str = "$", depth: int = 0) -> Any:
                 raise ContractViolation("JSON_OBJECT_KEY_TYPE", path)
             result[key] = _plain_json(item, f"{path}.{key}", depth + 1)
         return result
-    if isinstance(value, list):
+    if issubclass(type(value), list):
         return [
             _plain_json(item, f"{path}[{index}]", depth + 1)
             for index, item in enumerate(value)
@@ -462,7 +462,10 @@ def parse_utc(value: str) -> datetime:
         raise ContractViolation("INVALID_TIMESTAMP", _short_detail(value)) from exc
     if parsed.tzinfo is None:
         raise ContractViolation("TIMEZONE_REQUIRED", _short_detail(value))
-    return parsed.astimezone(timezone.utc)
+    try:
+        return parsed.astimezone(timezone.utc)
+    except OverflowError as exc:
+        raise ContractViolation("INVALID_TIMESTAMP", _short_detail(value)) from exc
 
 
 def load_json(path: str | Path) -> dict[str, Any]:
@@ -474,7 +477,7 @@ def load_json(path: str | Path) -> dict[str, Any]:
 
 
 def _require_scope(actual: str, expected: str) -> None:
-    if actual != expected:
+    if type(actual) is not str or actual != expected:
         raise ContractViolation("ROLE_SCOPE_MISMATCH", f"expected {expected}")
 
 
@@ -517,19 +520,20 @@ def _short_detail(value: Any) -> str:
 
 
 def _require_identifier(value: Any, code: str) -> str:
-    if not isinstance(value, str) or not IDENTIFIER_RE.fullmatch(value):
+    # Native protocol strings cannot override equality or hashing at actor checks.
+    if type(value) is not str or not IDENTIFIER_RE.fullmatch(value):
         raise ContractViolation(code, _short_detail(value))
     return value
 
 
 def _require_version(value: Any, code: str) -> str:
-    if not isinstance(value, str) or not VERSION_RE.fullmatch(value):
+    if type(value) is not str or not VERSION_RE.fullmatch(value):
         raise ContractViolation(code, _short_detail(value))
     return value
 
 
 def _require_sha256(value: Any, code: str) -> str:
-    if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+    if type(value) is not str or not SHA256_RE.fullmatch(value):
         raise ContractViolation(code, _short_detail(value))
     return value.upper()
 
@@ -650,7 +654,7 @@ def _deep_secret_scan(value: Any, path: str = "$", depth: int = 0) -> None:
             if _is_secret_key_name(key):
                 raise ContractViolation("SECRET_FIELD_FORBIDDEN", f"{path}.{key}")
             _deep_secret_scan(item, f"{path}.{key}", depth + 1)
-    elif isinstance(value, list):
+    elif issubclass(type(value), list):
         for index, item in enumerate(value):
             _deep_secret_scan(item, f"{path}[{index}]", depth + 1)
 
@@ -671,7 +675,7 @@ def _find_forbidden_key(
             nested = _find_forbidden_key(item, forbidden, item_path, depth + 1)
             if nested is not None:
                 return nested
-    elif isinstance(value, list):
+    elif issubclass(type(value), list):
         for index, item in enumerate(value):
             nested = _find_forbidden_key(
                 item,
@@ -1288,6 +1292,7 @@ ARCHITECT_DECISION_CODES = frozenset(
         "ACTION_OUT_OF_SCOPE",
         "ACTION_TARGET_MISMATCH",
         "ALLOW_ISSUED",
+        "AUTHORITATIVE_RESOLUTION_FAILED",
         "AMBIGUOUS_INTENT",
         "AUTHORITY_EXPIRED",
         "AUTHORITY_NOT_YET_VALID",
@@ -2104,6 +2109,7 @@ def _state_locked(required_scope: str) -> Any:
                         self.profile_hash,
                         self._key,
                     )
+                    self._refuse_state_rollback(persisted)
                     if persisted is not None:
                         self._restore_state(persisted)
                     rollback_state = self._snapshot_state()
@@ -2198,6 +2204,7 @@ def _state_read_locked(required_scope: str) -> Any:
                         self.profile_hash,
                         self._key,
                     )
+                    self._refuse_state_rollback(persisted)
                     if persisted is not None:
                         self._restore_state(persisted)
                 return method(self, *args, **kwargs)
@@ -2437,6 +2444,40 @@ class UniversalConnectionLedger:
             "receipt_hashes": copy.deepcopy(self.receipt_hashes),
             "ledger_events": self.ledger.events_copy(),
         }
+
+    def _refuse_state_rollback(self, persisted: Mapping[str, Any] | None) -> None:
+        """Refuse a stored snapshot that holds LESS history than this process has already seen.
+
+        The snapshot MAC covers the snapshot's own hash and nothing about where it stands in
+        time, so a genuine older row put back in the file would otherwise replace the newer
+        in-memory state on the next call, and a single-use permit that had been committed
+        could be committed again. What this process holds is a prefix of every later honest
+        snapshot, so the stored chain must be at least as long and carry the head seen at
+        that position. A longer chain that extends it - another instance appending to the
+        same file - is accepted. A row that has vanished while this process holds history is
+        the same loss.
+
+        Limit, by construction: a process that holds no history yet (a cold start) has
+        nothing to compare against and accepts what the file holds. Protection across a
+        restart needs an external monotonic anchor; a counter kept inside the same
+        rewritable snapshot is not one.
+
+        Only the part of the snapshot this check reads is looked at here. A stored snapshot
+        of the wrong shape is left to `_restore_state`, which refuses it under its own code.
+        """
+        seen = self.ledger.head()
+        if seen["event_count"] == 0:
+            return
+        if persisted is None:
+            raise IntegrityViolation("STATE_ROLLBACK")
+        stored = persisted.get("ledger_events") if isinstance(persisted, Mapping) else None
+        if not isinstance(stored, list):
+            return
+        if len(stored) < seen["event_count"]:
+            raise IntegrityViolation("STATE_ROLLBACK")
+        anchor = stored[seen["event_count"] - 1]
+        if not isinstance(anchor, Mapping) or anchor.get("event_hash") != seen["head_hash"]:
+            raise IntegrityViolation("STATE_ROLLBACK")
 
     def _restore_state(self, state: Mapping[str, Any]) -> None:
         required = {
@@ -2811,8 +2852,8 @@ class UniversalConnectionLedger:
         if revoked_by not in allowed_revokers:
             raise ContractViolation("REVOCATION_ACTOR_UNAUTHORIZED")
         if (
-            parse_utc(revocation["revoked_at"])
-            > self._now() + timedelta(seconds=5)
+            parse_utc(revocation["revoked_at"]) - self._now()
+            > timedelta(seconds=5)
         ):
             raise ContractViolation("REVOCATION_IN_FUTURE")
         _require_identifier(revocation["reason_code"], "REVOCATION_REASON")
@@ -2875,6 +2916,17 @@ class UniversalConnectionLedger:
         # decision in the signed chain and burn the caller's key.
         binding = _require_mapping(intent["binding"], "INTENT_BINDING")
         _require_exact_keys(binding, set(self._binding()), "INTENT_BINDING")
+        # The VALUES' forms are shape too. The wire schema's patterns end in `$`, which
+        # `re.search` also lets match before a trailing newline, so a value such as
+        # `<hash>\n` passes the body schema; checking only the keys here let it reach the
+        # comparison and be recorded as a BINDING_MISMATCH refusal in the signed chain,
+        # burning the caller's idempotency key. `fullmatch` is what the other fields use.
+        for key in ("profile_id", "declaration_id"):
+            _require_identifier(binding[key], "INTENT_BINDING")
+        for key in ("profile_version", "declaration_version"):
+            _require_version(binding[key], "INTENT_BINDING")
+        for key in ("profile_hash", "declaration_hash"):
+            _require_sha256(binding[key], "INTENT_BINDING")
         for key in {
             "intent_id",
             "idempotency_key",
@@ -3122,11 +3174,11 @@ class UniversalConnectionLedger:
         now: datetime,
         window_seconds: int,
     ) -> int:
-        start = now - timedelta(seconds=window_seconds)
+        window_microseconds = window_seconds * 1_000_000
         return sum(
             claims.get(resource_id, 0)
             for committed_at, claims in self.committed_resources
-            if committed_at >= start
+            if (now - committed_at) // timedelta(microseconds=1) <= window_microseconds
         )
 
     def _effect_gate(
@@ -3266,7 +3318,7 @@ class UniversalConnectionLedger:
         self._assert_active()
         self._validate_intent(intent)
         now = self._now()
-        if parse_utc(intent["received_at"]) > now + timedelta(seconds=5):
+        if parse_utc(intent["received_at"]) - now > timedelta(seconds=5):
             raise ContractViolation("INTENT_TIME_IN_FUTURE")
         # Validate the submitted evidence bundle's shape and time BEFORE the
         # authorization branches, mirroring the intent checks above. Deferring
@@ -3276,7 +3328,7 @@ class UniversalConnectionLedger:
         # an oracle for the authorization stage. The resolved bundle is
         # re-validated after resolution below.
         self._validate_evidence_bundle(evidence_bundle, intent["intent_id"])
-        if parse_utc(evidence_bundle["collected_at"]) > now + timedelta(seconds=5):
+        if parse_utc(evidence_bundle["collected_at"]) - now > timedelta(seconds=5):
             raise ContractViolation("EVIDENCE_TIME_IN_FUTURE")
         # Case-normalized on the DECLARED hash fields, exactly as the executor
         # replay identity is: the wire rule accepts a SHA-256 in either case,
@@ -3460,17 +3512,28 @@ class UniversalConnectionLedger:
                     False,
                 )
             )
-        resolved_evidence_bundle = self._resolve_evidence_bundle(
-            intent,
-            evidence_bundle,
-            now,
-        )
-        evidence_types, invalid_evidence_types = self._validate_evidence_bundle(
-            resolved_evidence_bundle,
-            intent["intent_id"],
-        )
-        if parse_utc(resolved_evidence_bundle["collected_at"]) > now + timedelta(seconds=5):
-            raise ContractViolation("EVIDENCE_TIME_IN_FUTURE")
+        try:
+            resolved_evidence_bundle = self._resolve_evidence_bundle(
+                intent,
+                evidence_bundle,
+                now,
+            )
+            evidence_types, invalid_evidence_types = self._validate_evidence_bundle(
+                resolved_evidence_bundle,
+                intent["intent_id"],
+            )
+            if parse_utc(resolved_evidence_bundle["collected_at"]) - now > timedelta(seconds=5):
+                raise ContractViolation("EVIDENCE_TIME_IN_FUTURE")
+            resolved_controls = self._resolve_controls(intent, now)
+        except ContractViolation:
+            # Resolution happens after authorization; its failure must not reveal
+            # that stage through an error status or a reusable idempotency key.
+            return finish(
+                self._record_non_executable(
+                    intent, request_hash, "REFUSAL",
+                    "AUTHORITATIVE_RESOLUTION_FAILED", False,
+                )
+            )
         # Authoritative controls: derived (or pass-through) maps are the gate
         # inputs from here on, and they are bound into the PERMIT request hash
         # so the issued permit commits to what was actually gated on. This hash
@@ -3479,7 +3542,6 @@ class UniversalConnectionLedger:
         # operator cannot tell an authorization-stage refusal (which carries the
         # submitted hash) from a control-stage refusal or an ALLOW by comparing
         # the returned request_hash to a locally computed submitted hash.
-        resolved_controls = self._resolve_controls(intent, now)
         permit_request_hash = sha256_hex(
             {
                 "intent": dict(intent),
@@ -3580,22 +3642,18 @@ class UniversalConnectionLedger:
             )
 
         issued_at = utc_text(now)
-        permit_expires_at = min(
-            now + timedelta(seconds=self.permit_ttl_seconds),
-            parse_utc(self.grants[intent["authority_grant_id"]]["valid_until"]),
-            parse_utc(self.declaration["expires_at"]),
+        permit_expires_at = now + min(
+            timedelta(seconds=self.permit_ttl_seconds),
+            parse_utc(self.grants[intent["authority_grant_id"]]["valid_until"]) - now,
+            parse_utc(self.declaration["expires_at"]) - now,
         )
         expires_at = utc_text(permit_expires_at)
         # ttl_seconds is the permit's EFFECTIVE lifetime, not the configured
-        # nominal: when the grant or the declaration expires earlier than the
-        # configured TTL, expires_at is capped and the sealed number must
-        # agree with it, so a reader of one signed permit computing
-        # issued_at + ttl_seconds lands on expires_at. The difference is
-        # rounded UP to whole seconds and never below one: the schema
-        # requires an integer of at least 1, and rounding down could make a
-        # permit that has a fraction of a second left read as having none.
-        # Equality with expires_at therefore holds to the second, not to the
-        # microsecond.
+        # nominal: the grant or declaration can cap expires_at before the
+        # configured TTL. The remaining duration is rounded UP to whole
+        # seconds and never below one, as required by the schema. Thus the
+        # sealed number is a ceiling with less than one second of rounding
+        # slack; expires_at remains the exact validity cutoff.
         remaining = (permit_expires_at - now).total_seconds()
         effective_ttl_seconds = max(1, int(remaining) + (remaining > int(remaining)))
         permit_body = {
@@ -3785,9 +3843,9 @@ class UniversalConnectionLedger:
         ):
             raise ContractViolation("STATE_ANCHOR_CHANGED")
         committed_at = parse_utc(execution_request["committed_at"])
-        if committed_at > now + timedelta(seconds=5):
+        if committed_at - now > timedelta(seconds=5):
             raise ContractViolation("EXECUTION_TIME_IN_FUTURE")
-        if committed_at < parse_utc(record.body["issued_at"]) - timedelta(seconds=5):
+        if parse_utc(record.body["issued_at"]) - committed_at > timedelta(seconds=5):
             raise ContractViolation("EXECUTION_TIME_PRECEDES_PERMIT")
 
         outcome = execution_request["outcome"]
@@ -3883,6 +3941,32 @@ class UniversalConnectionLedger:
             "reservation_active": record.reservation_active,
             "invalidated_reason": record.invalidated_reason,
         }
+
+    @_state_read_locked(ROLE_ARCHITECT)
+    def architect_permit_verification(
+        self,
+        permit_hash: str,
+        actor_scope: str | None = None,
+    ) -> dict[str, Any]:
+        """Report, changing nothing, whether this engine can verify the permit's seal.
+
+        These are the two checks `commit_execution` makes after its liveness checks: the
+        body against its hash, and the signature through the verifier registry. A caller
+        about to cause an external effect for a permit asks here first, so a permit this
+        engine cannot verify - a key it does not hold after a restart whose rotation
+        ceremony was not replayed, a signature that fails - is refused before the effect
+        and not discovered by the commit that follows it. Refuses with the codes the
+        commit would: PERMIT_UNKNOWN, PERMIT_HASH_FAILURE, PERMIT_SIGNATURE_ENVELOPE,
+        PERMIT_KEY_REVOKED, PERMIT_KEY_UNKNOWN and PERMIT_SIGNATURE_FAILURE.
+        """
+        self._assert_integrity()
+        record = self.permits.get(_require_sha256(permit_hash, "PERMIT_HASH"))
+        if record is None:
+            raise ContractViolation("PERMIT_UNKNOWN")
+        if sha256_hex(record.body) != record.permit_hash:
+            raise IntegrityViolation("PERMIT_HASH_FAILURE")
+        self._verify_permit_signature(record)
+        return {"permit_hash": record.permit_hash, "verified": True}
 
     @_state_read_locked(ROLE_ARCHITECT)
     def architect_decision(
@@ -4092,8 +4176,9 @@ def build_observer_export(
     Its hashes attest only the projected records, not the private ledger chain.
     The signing key's operator identity needs independent authentication.
     """
-    if actor_scope != ROLE_ARCHITECT:
-        raise ContractViolation("ROLE_SCOPE_MISMATCH", f"expected {ROLE_ARCHITECT}")
+    from nc25ol_reader import MAX_EVENTS, MAX_EXPORT_BYTES
+
+    _require_scope(actor_scope, ROLE_ARCHITECT)
     if not isinstance(engine, UniversalConnectionLedger):
         raise ContractViolation("OBSERVER_EXPORT_ENGINE")
     if not isinstance(signer, Ed25519DetachedSigner):
@@ -4109,6 +4194,9 @@ def build_observer_export(
         rows = _projected_observer_rows(engine, engine.ledger.events_copy())
     if projection != [original for original, _public in rows]:
         raise IntegrityViolation("OBSERVER_EXPORT_PROJECTION_MISMATCH")
+
+    if len(rows) > MAX_EVENTS:
+        raise ContractViolation("OBSERVER_EXPORT_EVENT_LIMIT")
 
     export_format = "nc25ol-observer-export/v1"
     events: list[dict[str, Any]] = []
@@ -4130,13 +4218,16 @@ def build_observer_export(
     }
     head = {"event_count": len(events), "head_hash": previous}
     statement = {"format": export_format, "head": head, "public_key": public_key}
-    return {
+    export = {
         "format": export_format,
         "events": events,
         "head": head,
         "public_key": public_key,
         "signature": dict(signer.sign(canonical_json(statement))),
     }
+    if len(canonical_json(export)) > MAX_EXPORT_BYTES:
+        raise ContractViolation("OBSERVER_EXPORT_BYTE_LIMIT")
+    return export
 
 
 def bind_fixture(

@@ -1117,7 +1117,8 @@ def add_api(doc: Document) -> None:
         doc,
         [
             "Every route requires mTLS and a workload identity carrying the exact route scope.",
-            "Every public SDK operation requires an explicit actor_scope; omission fails closed, no method supplies its required role as a default, and production derives the scope from verified workload identity.",
+            "Every public SDK operation requires an explicit actor_scope; omission fails closed, no method supplies its required role as a default, and production derives the scope from verified workload identity. Identifier, version, hash and role arguments require native Python str values so caller-defined equality cannot impersonate an actor.",
+            "Post-authorization resolver failures produce recorded REFUSAL/EXECUTION_DENIED with the submitted request hash and a consumed idempotency key. The architect decision names AUTHORITATIVE_RESOLUTION_FAILED; an exact retry preserves that refusal.",
             "The runtime intent and evidence schemas are internal evaluator inputs; a production adapter ignores connector-asserted truth values and overwrites them with authoritative evidence resolution and independently derived controls.",
             "Resolved evidence and derived controls are bound to the request and current-state anchor before evaluation.",
             "The operator route requires an Idempotency-Key header exactly equal to intent.idempotency_key; mismatch is rejected before evaluation.",
@@ -1128,7 +1129,7 @@ def add_api(doc: Document) -> None:
             "Signer configuration is external runtime configuration. Reopening a state_path whose event chain contains Ed25519 envelopes requires a verifier-compatible event_signer with the same key_id; SQLite deliberately persists neither signer configuration nor private keys. Omitting the verifier, or supplying one that declares both an algorithm and a key_id and differs from the persisted envelope in either, fails closed with EVENT_SIGNER_REQUIRED. The EventSigner protocol requires only sign and verify, so a signer that does not declare both cannot be compared against the envelope at all; for such a signer the mismatch is not distinguished and reaches the caller as a chain verdict. A signer declaring the same key_id with different key material likewise cannot be told apart from a forged chain and so fails full-chain integrity verification.",
             "External JSON Schema references define profile, declaration, and runtime payloads.",
             "The HTTP adapter wraps the reference engine's primitive declaration and grant hashes into the response objects defined by OpenAPI.",
-            "A reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and validates each POST body against the packaged JSON Schemas with pinned jsonschema before calling the engine. It derives the route scope from the transport identity and never the body, binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.",
+            "A reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and validates each POST body against the packaged JSON Schemas with pinned jsonschema before calling the engine. It reads the reference X-Workload-Scope header rather than the body; that header does not authenticate a principal. Production derives role and requester from verified workload identity. It binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.",
             "A contract error is distinct from a normalized non-executable business result.",
             "Integrity failure returns no permit and requires an operational halt.",
         ],
@@ -1143,7 +1144,8 @@ def add_failure_matrix(doc: Document) -> None:
         [
             ("Missing required evidence", "REFUSAL", "No", "None"),
             ("Structurally valid evidence with INVALID, REVOKED, or EXPIRED status", "REFUSAL", "No", "None"),
-            ("Malformed evidence object, hash, reference, or unknown status", "Contract error / halt", "No decision", "None"),
+            ("Malformed submitted evidence object, hash, reference, or unknown status", "Contract error / halt", "No decision", "None"),
+            ("Resolver failure or malformed/future authoritative output", "REFUSAL", "No", "None"),
             ("Ambiguous request", "MANUAL_REVIEW", "No", "None"),
             ("Manual-review flag true", "MANUAL_REVIEW", "No", "None"),
             ("Hard-block flag true", "REFUSAL", "No", "None"),

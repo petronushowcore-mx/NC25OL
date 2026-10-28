@@ -64,7 +64,7 @@ STANDALONE_PACKAGE_CHECK_IDS = frozenset(
         "logical_quote_punctuation", "docx_document_part", "docx_title",
         "docx_projection_source_bound", "docx_acceptance_counts_current",
         "docx_header_version_matches_title", "package_version_consistency",
-        "citation_metadata_contract",
+        "citation_metadata_contract", "documentation_licence_coverage",
         "acceptance_report_gate_rows_current",
         "failure_surface_static_ratchet", "package_counter_literals_current",
         "acceptance_report_ratchet_figures_current",
@@ -400,6 +400,23 @@ def docx_header_version_mismatches(sections: dict[str, list[str]]) -> list[str]:
                 f"header v{header_versions[0]} != title {title_version}"
             )
     return problems
+
+
+def documentation_licence_mismatches(root: Path = ROOT) -> list[str]:
+    """Root Markdown documents must be named in the documentation licence list.
+
+    This checks that list only; nested code/example documents use the existing
+    directory grants and are outside this check's declared population.
+    """
+    text = (root / "LICENSE").read_text(encoding="utf-8")
+    documentation = text.split("2. CODE, SCHEMAS, AND MACHINE-READABLE ARTEFACTS", 1)[0]
+    return [
+        path.name for path in sorted(root.glob("*.md"))
+        if path.is_file() and not re.search(
+            r"(?<![A-Za-z0-9_.-])" + re.escape(path.name) + r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_.-])",
+            documentation,
+        )
+    ]
 
 
 def citation_metadata_mismatches() -> list[str]:
@@ -1378,13 +1395,17 @@ def _run_checks(
         openapi.count("mutualTLS: []") >= len(required_paths),
         "openapi_mtls_declaration_floor",
     )
-    # The contract's Error.code enum is the vocabulary a caller can actually
+    # The contract's Error.code enum is the published union, including defensive
     # receive, and it is held to the LIVE static scan rather than to the
     # recorded baseline: a code added to the engine or the adapter without a
     # baseline regeneration would otherwise stay invisible here. The codes the
     # translation site re-emits from an integrity halt belong to neither
-    # vocabulary and are observable only at run time, so that part is read
-    # from the baseline's recorded run. Reddens in either direction.
+    # vocabulary and are observable only at run time - and by the baseline's own
+    # definition were injected from outside production, typically by a test replacing
+    # an engine method. No production path emits them, so they are NOT part of the
+    # published union: a test-only name in the enum would be a public contract
+    # nothing can produce (LEDGER_TAMPERED was). They stay in the baseline as a
+    # visible ratchet. Reddens in either direction.
     enum_block = re.search(
         r"(?ms)^        code:\n.*?^          enum:\n((?:^            - \S+\n)+)",
         openapi,
@@ -1395,13 +1416,8 @@ def _run_checks(
         else set()
     )
     static_surface, _ = failure_surface.static_snapshot()
-    recorded_baseline = json.loads(
-        (ROOT / "tests" / "failure-surface-baseline.json").read_text(encoding="utf-8")
-    )
-    live_codes = (
-        set(static_surface["engine_refusal_codes"])
-        | set(static_surface["wire_error_codes"])
-        | set(recorded_baseline["runtime"]["foreign_translated_codes"])
+    live_codes = set(static_surface["engine_refusal_codes"]) | set(
+        static_surface["wire_error_codes"]
     )
     checks.require(
         bool(enum_block) and declared_codes == live_codes,
@@ -1530,6 +1546,9 @@ def _run_checks(
     )
     checks.require(
         not citation_metadata_mismatches(), "citation_metadata_contract",
+    )
+    checks.require(
+        not documentation_licence_mismatches(), "documentation_licence_coverage",
     )
     checks.require(
         not package_version_mismatches(projection_sections),

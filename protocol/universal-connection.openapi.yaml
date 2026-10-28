@@ -11,7 +11,10 @@ info:
     local integrity-halt condition and 400 on a malformed path parameter. Every
     status the reference WSGI adapter can emit is declared: 403 for a missing
     or wrong workload scope on every route, and 413 for an oversized body on
-    every body-bearing route.
+    every body-bearing route. The reference WSGI adapter reads the role from
+    X-Workload-Scope; this header is a reference convention, not identity
+    authentication. Production ingress must derive role and requester identity
+    from the verified workload identity.
 servers:
   - url: https://ledger.example.invalid
     description: Non-routable documentation placeholder
@@ -92,10 +95,12 @@ paths:
       operationId: issueAuthorityGrant
       summary: Issue one scoped, time-bounded workload grant
       description: >-
-        The first valid request records the grant once. An exact re-issue of a
-        grant already on the chain is a replay: it returns 200 with the same
-        grant_hash and records no second event. A differing body under an
-        existing grant_id is a 409 conflict. A grant whose valid_until is not
+        The first valid request records the grant once. Every re-issue first
+        passes current declaration, grant validity and revocation checks.
+        An exact re-issue of a still-valid, non-revoked grant already on the
+        chain returns 200 with the same grant_hash and no second event. A
+        differing body under an existing grant_id conflicts with 409 only
+        after those checks pass. A grant whose valid_until is not
         after the trusted processing clock is refused at issue with
         AUTHORITY_EXPIRED; a grant whose whole window lies in the future is
         issued and refuses use with AUTHORITY_NOT_YET_VALID until it opens.
@@ -569,12 +574,15 @@ components:
       properties:
         code:
           description: >-
-            The complete vocabulary a caller can receive: every engine refusal
-            code, every adapter wire code, and every code the adapter re-emits
-            from an integrity halt. Generated from the shipped source by the
-            failure-surface scan and held in step with it by the package
-            verifier; adding a code to the engine or the adapter without
-            adding it here fails acceptance.
+            The closed declared vocabulary includes engine refusal codes
+            and adapter wire codes.
+            It is a conservative superset of codes reachable through any one
+            request path: schema validation can refuse a body before a domain
+            guard, and authoritative resolver failures become recorded generic
+            non-executable refusals rather than exposing resolver details.
+            Generated from the shipped source by the failure-surface scan and
+            held in step with it by the package verifier; adding an engine or
+            adapter refusal code without adding it here fails acceptance.
           type: string
           enum:
             - ACTION_DESCRIPTION
@@ -710,7 +718,6 @@ components:
             - JSON_OBJECT_REQUIRED
             - JSON_VALUE_TYPE
             - LEDGER_CHAIN_FAILURE
-            - LEDGER_TAMPERED
             - LIVE_GATE_OVERRIDE
             - MANUAL_REVIEW_FLAGS
             - MANUAL_REVIEW_IDS
@@ -718,7 +725,9 @@ components:
             - NESTING_DEPTH_EXCEEDED
             - NON_EXECUTABLE_WITH_PERMIT
             - NOT_FOUND
+            - OBSERVER_EXPORT_BYTE_LIMIT
             - OBSERVER_EXPORT_ENGINE
+            - OBSERVER_EXPORT_EVENT_LIMIT
             - OBSERVER_EXPORT_FIELDS
             - OBSERVER_EXPORT_PROJECTION_MISMATCH
             - OBSERVER_EXPORT_SIGNER
@@ -863,6 +872,7 @@ components:
             - STATE_REVOKED_ACTIVE_KEY
             - STATE_REVOKED_GRANTS
             - STATE_REVOKED_PERMIT_KEYS
+            - STATE_ROLLBACK
             - STATE_SHAPE
             - STATE_STATUS
             - STATE_VERSION
@@ -927,10 +937,11 @@ components:
             $ref: "#/components/schemas/Error"
     ServiceUnavailable:
       description: >-
-        The engine halted on an integrity failure, or the adapter caught a
-        fault it does not classify and answered with INTERNAL_FAILURE. In both
-        cases execution remains blocked and nothing was recorded for this
-        request. Declared on every operation: the adapter's last-resort guard
+        The engine halted on an integrity failure, the adapter caught an
+        unclassified fault and answered with INTERNAL_FAILURE, or request
+        schema validation was unavailable and answered with
+        SCHEMA_VALIDATION_UNAVAILABLE. Execution remains blocked and nothing
+        was recorded for this request. Declared on every operation: the adapter's last-resort guard
         can answer on any route.
       content:
         application/json:
