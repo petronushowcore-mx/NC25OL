@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import ast
 import base64
-from contextlib import closing
+import collections.abc
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta
 import copy
 import hashlib
@@ -44,7 +45,6 @@ from nc25_universal_ledger import (  # noqa: E402
     SHA256_RE,
     SIGNATURE_ENVELOPE_FIELDS,
     SQLiteStateStore,
-    STRUCTURAL_PROVENANCE_VALUES,
     sha256_hex,
     UniversalConnectionLedger,
     DECLARED_HASH_FIELDS,
@@ -67,6 +67,7 @@ from verify_package import (  # noqa: E402
     STANDALONE_PACKAGE_CHECK_IDS,
     core_deposit_availability_claims,
 )
+from run_acceptance import ACCEPTANCE_RUN_FLAG, REBIND_MARKER  # noqa: E402
 from build_review_bundle import BASELINE_FORMAT, build_artifact  # noqa: E402
 from spec_counts import sole_assignment, spec_docx_name  # noqa: E402
 
@@ -549,45 +550,25 @@ class ContractRegressions(unittest.TestCase):
             self.assertEqual(replay, receipt)
             self.assertEqual(engine._snapshot_state(), committed)
 
-    def test_structural_budget_provenance_is_required_and_typed(self) -> None:
-        # The declared capacity origin is coded with the published four-value
-        # instrument; the declaration cannot omit the coding or invent a fifth
-        # value, and every published value remains accepted.
+    def test_removed_capacity_provenance_refused_by_engine_and_schema(self) -> None:
         fixture = self.fixture()
-        missing = copy.deepcopy(fixture.declaration)
-        del missing["structural_budget"]["provenance"]
+        injected = copy.deepcopy(fixture.declaration)
+        injected["structural_budget"]["provenance"] = "vendor_asserted"
         with self.assertRaisesRegex(ContractViolation, "^STRUCTURAL_BUDGET(:|$)"):
-            validate_declaration(missing, fixture.profile)
-        mislabeled = copy.deepcopy(fixture.declaration)
-        mislabeled["structural_budget"]["provenance"] = "vendor_asserted"
-        with self.assertRaisesRegex(ContractViolation, "^STRUCTURAL_PROVENANCE(:|$)"):
-            validate_declaration(mislabeled, fixture.profile)
-        self.assertEqual(
-            STRUCTURAL_PROVENANCE_VALUES,
-            {
-                "fully_stipulated",
-                "empirically_calibrated",
-                "derived_from_load_model",
-                "mixed",
-            },
-        )
-        for value in sorted(STRUCTURAL_PROVENANCE_VALUES):
-            declared = copy.deepcopy(fixture.declaration)
-            declared["structural_budget"]["provenance"] = value
-            validate_declaration(declared, fixture.profile)
-        # The schema surface must carry the same contract as the engine: the
-        # two validation layers may not silently diverge on requiredness or on
-        # the value set.
+            validate_declaration(injected, fixture.profile)
         declaration_schema = json.loads(
-            (
-                ROOT / "core" / "schemas" / "connection-declaration.schema.json"
-            ).read_text(encoding="utf-8")
+            (ROOT / "core" / "schemas" / "connection-declaration.schema.json")
+            .read_text(encoding="utf-8")
         )
         budget_schema = declaration_schema["properties"]["structural_budget"]
-        self.assertIn("provenance", budget_schema["required"])
-        self.assertEqual(
-            set(budget_schema["properties"]["provenance"]["enum"]),
-            set(STRUCTURAL_PROVENANCE_VALUES),
+        self.assertNotIn("provenance", budget_schema["required"])
+        self.assertNotIn("provenance", budget_schema["properties"])
+        # The schema is run, not only read: the injected field must be refused by it.
+        errors = list(Draft202012Validator(declaration_schema, format_checker=FormatChecker()).iter_errors(injected))
+        self.assertTrue(
+            any(error.validator == "additionalProperties" and list(error.path) == ["structural_budget"]
+                for error in errors),
+            "the declaration schema accepted the removed provenance field",
         )
 
     def test_operator_request_hash_does_not_leak_authorization_stage(self) -> None:
@@ -894,6 +875,11 @@ class ContractRegressions(unittest.TestCase):
         # runs each revocation surface against the same invariant instead of
         # pinning one of them, so a third revocation path cannot ship holding
         # capacity for a dead permit.
+        revocations = {name for name in dir(UniversalConnectionLedger) if name.startswith("revoke")}
+        self.assertEqual(
+            revocations, {"revoke_grant", "revoke_permit_key"}, "a revocation path is not in the sweep below"
+        )
+
         def revoke_the_grant(fixture, engine, grant):
             engine.revoke_grant(
                 {
@@ -1053,9 +1039,14 @@ class ContractRegressions(unittest.TestCase):
         """
         import subprocess
 
+        # The copies are rebound by `_rebind_acceptance_report`, which is the
+        # acceptance bootstrap, and the verifier admits a rebound report only
+        # inside the acceptance run that regenerates the report; the copy's
+        # verifier runs as that run's step does.
         result = subprocess.run(
             [sys.executable, "-B", str(package_root / "tests" / "verify_package.py")],
             cwd=package_root,
+            env=dict(os.environ, **{ACCEPTANCE_RUN_FLAG: "1"}),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1106,6 +1097,88 @@ class ContractRegressions(unittest.TestCase):
             ),
         )
         return destination
+
+    def test_rebound_report_is_refused_outside_an_acceptance_run(self) -> None:
+        # The digests prove which bytes a report names; REBIND_MARKER says whether a run
+        # produced its figures. The bootstrap writes the marker; the verifier admits it
+        # only inside the acceptance run whose results regenerate the report - the run
+        # with --json-output - and refuses it in every other run, the final run and CI
+        # included; and the rewrite from a passing run removes it.
+        import subprocess
+        import run_acceptance
+
+        class Stopped(Exception):
+            pass
+
+        def first_step_flag(arguments, inherited):
+            # main() itself, stopped at its first step: the flag that step receives.
+            handed = {}
+
+            def first_step(command, **options):
+                handed.update(options["env"])
+                raise Stopped
+
+            with (
+                patch.object(sys, "argv", ["run_acceptance.py", *arguments]),
+                patch.dict(os.environ, inherited),
+                patch.object(run_acceptance.subprocess, "run", side_effect=first_step),
+                self.assertRaises(Stopped),
+            ):
+                run_acceptance.main()
+            return handed.get(ACCEPTANCE_RUN_FLAG)
+
+        evidence = str(Path(tempfile.gettempdir()) / "nc25-acceptance.json")
+        self.assertEqual(
+            first_step_flag(["--json-output", evidence], {}), "1",
+            "the run that regenerates the report does not mark its steps",
+        )
+        self.assertIsNone(
+            first_step_flag([], {ACCEPTANCE_RUN_FLAG: "1"}),
+            "a run that regenerates nothing marked its steps",
+        )
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        package = self._copy_package(Path(temporary.name) / "package")
+        # The manifest is rebuilt first, so the rebind below binds the copy's current
+        # entries whether or not the shipped manifest is current.
+        rebuilt = subprocess.run(
+            [sys.executable, "-B", str(package / "tools" / "build_package_manifest.py")],
+            cwd=package, capture_output=True, text=True,
+        )
+        self.assertEqual(rebuilt.returncode, 0, rebuilt.stdout + rebuilt.stderr)
+        self._rebind_acceptance_report(package)
+        report = package / "ACCEPTANCE-REPORT.md"
+        marker = " ".join(REBIND_MARKER.split())
+        self.assertIn(
+            marker, " ".join(report.read_text(encoding="utf-8").split()),
+            "the bootstrap did not mark the rebound report",
+        )
+        outside = {key: value for key, value in os.environ.items() if key != ACCEPTANCE_RUN_FLAG}
+        refused = subprocess.run(
+            [sys.executable, "-B", str(package / "tests" / "verify_package.py")],
+            cwd=package, env=outside, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        self.assertIn(
+            "FAIL acceptance_report_bound_to_bytes: ACCEPTANCE-REPORT.md: rebound without"
+            " an acceptance run",
+            refused.stdout, "a rebound report passed outside an acceptance run",
+        )
+        _, verdicts = self._package_verdicts(package)
+        self.assertEqual(
+            verdicts.get("acceptance_report_bound_to_bytes"), "PASS",
+            "an acceptance run refused the bootstrap it relies on",
+        )
+        acceptance = Path(temporary.name) / "acceptance.json"
+        geometry = Path(temporary.name) / "geometry.json"
+        acceptance.write_text(json.dumps(self._acceptance_report_fixture(
+            {"source_mode": "strict", "external_source_checks": "PASS"})), encoding="utf-8")
+        geometry.write_text(json.dumps(self._acceptance_geometry_fixture()), encoding="utf-8")
+        update_report(report, acceptance, geometry, root=package)
+        self.assertNotIn(
+            marker, " ".join(report.read_text(encoding="utf-8").split()),
+            "regenerating from a passing run left the marker",
+        )
 
     def test_every_declared_check_reports_its_own_verdict(self) -> None:
         # One failing check must cost exactly its own verdict. The package
@@ -1194,12 +1267,21 @@ class ContractRegressions(unittest.TestCase):
             self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr[-2000:])
             self._rebind_acceptance_report(package)
 
-            # The pair with Spectrum (verify_package.spectrum_pair_mismatches): the version
-            # names the Spectrum release it pairs with, and the recorded source release must
-            # be a run on that release. When the version moves, RESULT.md can stay on the
-            # previous pair. The plants have the shape of that regression: the RESULT.md
-            # table left on the previous release, and a result.json from a run on another
-            # commit. Each must redden package_version_consistency and nothing else.
+            # The current CHANGELOG names the exact Spectrum release; the minor line
+            # matches Ledger while its patch may advance independently. The recorded
+            # source release must be a run on that tag and commit. A wrong minor line,
+            # stale RESULT.md table, or result.json from another commit must each redden
+            # package_version_consistency and nothing else.
+            changelog_path = package / "CHANGELOG.md"
+            changelog_bytes = changelog_path.read_bytes()
+            pair_line = re.search(rb"Paired with Spectrum `v00\.(\d{2})\.(\d{2})`", changelog_bytes)
+            self.assertIsNotNone(pair_line, "CHANGELOG carries no Spectrum pair")
+            other_minor = b"%02d" % ((int(pair_line.group(1)) + 1) % 100)
+            wrong_minor = changelog_bytes.replace(
+                pair_line.group(0),
+                b"Paired with Spectrum `v00." + other_minor + b"." + pair_line.group(2) + b"`",
+                1,
+            )
             result_md_path = package / "examples" / "spectrum_release" / "RESULT.md"
             result_json_path = package / "examples" / "spectrum_release" / "result.json"
             result_md_bytes = result_md_path.read_bytes()
@@ -1210,6 +1292,8 @@ class ContractRegressions(unittest.TestCase):
             previous = stem + b"%02d" % (revision - 1 if revision > 0 else revision + 1)
             other = bytes(reversed(commit))
             for label, path, original, planted in (
+                ("CHANGELOG on another Spectrum minor line", changelog_path, changelog_bytes,
+                 wrong_minor),
                 ("RESULT.md table on the previous release", result_md_path, result_md_bytes,
                  result_md_bytes.replace(b"tag `" + stem + row.group(2) + b"`", b"tag `" + previous + b"`", 1)),
                 ("result.json from a run on another commit", result_json_path, result_json_bytes,
@@ -1284,6 +1368,38 @@ class ContractRegressions(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr[-2000:])
                 shutil.rmtree(package / name)
 
+            custom = package / "runenv-custom"
+            custom.mkdir()
+            (custom / "pyvenv.cfg").write_text(
+                "home = /usr/bin\n", encoding="utf-8"
+            )
+            with self.subTest(environment="runenv-custom"):
+                result, verdicts = self._package_verdicts(package)
+                first_failure = next(
+                    (line for line in result.stdout.splitlines()
+                     if line.startswith("FAIL ")),
+                    "",
+                )
+                self.assertEqual(
+                    first_failure,
+                    "FAIL nonstandard_environment_directory: runenv-custom",
+                )
+                self.assertEqual(
+                    verdicts["nonstandard_environment_directory"], "FAIL"
+                )
+                rejected = subprocess.run(
+                    [sys.executable, "-B",
+                     str(package / "tools" / "build_package_manifest.py")],
+                    cwd=package, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
+                )
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn(
+                    "NONSTANDARD_VENV_DIRECTORY runenv-custom",
+                    rejected.stdout + rejected.stderr,
+                )
+            shutil.rmtree(custom)
+
             artefact = package / "tests" / "__pycache__"
             artefact.mkdir(parents=True, exist_ok=True)
             (artefact / "planted.cpython-312.pyc").write_bytes(b"\x00planted")
@@ -1317,7 +1433,60 @@ class ContractRegressions(unittest.TestCase):
                         "the set of failing checks is not the set of planted defects",
                     )
 
+    def test_the_published_error_codes_are_exactly_the_codes_production_can_emit(self) -> None:
+        """The contract's Error.code enum holds no code that only a test produces.
+
+        `Error.code` is described as the complete vocabulary a caller can receive. The
+        generator used to add the baseline's foreign translated codes, which the baseline
+        itself defines as codes injected from outside production by a test replacing an
+        engine method. One conformance test raised `LEDGER_TAMPERED` that way; no
+        production path emits it, yet it was published, and every name a test invents
+        would have followed it into the contract. The enum is now the static scan's engine
+        and wire codes and nothing else; foreign codes stay in the baseline as a ratchet.
+
+        The control plants a foreign code in a copy of the recorded run and shows the
+        generator leaves it out while every production code is still there.
+        """
+        import build_error_code_enum
+        import failure_surface
+
+        snapshot, problems = failure_surface.static_snapshot()
+        self.assertEqual(problems, [])
+        production = set(snapshot["engine_refusal_codes"]) | set(snapshot["wire_error_codes"])
+        contract = (ROOT / "protocol" / "universal-connection.openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+        block = re.search(
+            r"(?ms)^        code:\n.*?^          enum:\n((?:^            - \S+\n)+)", contract
+        )
+        self.assertIsNotNone(block, "THE_ERROR_CODE_ENUM_BLOCK_IS_NOT_FOUND")
+        published = set(re.findall(r"(?m)^            - (\S+)$", block.group(1)))
+        self.assertEqual(
+            sorted(published - production),
+            [],
+            "PUBLISHED_CODES_THAT_NO_PRODUCTION_PATH_EMITS",
+        )
+        # The reverse direction, a production code the enum does not list, is held by the
+        # package verifier's enum check and not asserted here. The failure-surface ratchet test
+        # plants a new production code in a COPY of this package and runs this suite there
+        # without regenerating the enum; asserting the reverse direction in the suite turned
+        # every such plant red on this test and hid the marker each plant exists to produce.
+        # Published-without-producer cannot be tripped by a plant, which only adds codes.
+
+        recorded = json.loads(
+            (ROOT / "tests" / "failure-surface-baseline.json").read_text(encoding="utf-8")
+        )
+        planted = copy.deepcopy(recorded)
+        planted["runtime"]["foreign_translated_codes"] = ["PLANTED_TEST_ONLY_CODE"]
+        codes, _engine, _wire, foreign_count = build_error_code_enum.declared_codes(
+            snapshot, planted
+        )
+        self.assertNotIn("PLANTED_TEST_ONLY_CODE", codes)
+        self.assertEqual(foreign_count, 1)
+        self.assertEqual(set(codes), production)
+
     def test_failure_surface_ratchet_detects_each_regression(self) -> None:
+        import concurrent.futures
         import subprocess
 
         def rebuild_manifest(package: Path) -> None:
@@ -1419,8 +1588,9 @@ class ContractRegressions(unittest.TestCase):
             return code
 
         def append_scaffold_construction(package: Path) -> None:
-            # Test-only construction must not become production evidence.
-            code = seed_unwitnessed_code(package)
+            # Test-only construction must not become production evidence. The copy
+            # arrives seeded by seed_unwitnessed_code, which planted this code.
+            code = "PLANTED_FAILURE_CODE"
             path = package / "tests" / "test_semantic_contracts.py"
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(
@@ -1499,6 +1669,15 @@ class ContractRegressions(unittest.TestCase):
                 )["runtime"]["witnessed_codes"],
                 "the planted witness was not recorded before being neutered",
             )
+            self.assertIn(
+                "PLANTED_WITNESSED_CODE",
+                json.loads(
+                    (package / "tests" / "failure-surface-baseline.json").read_text(
+                        encoding="utf-8"
+                    )
+                )["runtime"]["asserted_codes"],
+                "the planted assertion was not recorded before being neutered",
+            )
             source = suite.read_text(encoding="utf-8")
             self.assertEqual(source.count(PLANTED_WITNESS), 1)
             suite.write_text(
@@ -1506,8 +1685,8 @@ class ContractRegressions(unittest.TestCase):
                     PLANTED_WITNESS,
                     "        try:\n"
                     "            _planted_witnessed()\n"
-                    "        except ContractViolation:\n"
-                    "            pass\n",
+                    "        except ContractViolation as exc:\n"
+                    '            _ = exc.code == "PLANTED_WITNESSED_CODE"\n',
                 ),
                 encoding="utf-8",
             )
@@ -1532,7 +1711,7 @@ class ContractRegressions(unittest.TestCase):
             rebuild_manifest(package)
 
         def append_regex_witness(package: Path, pattern: str) -> None:
-            seed_unwitnessed_code(package)
+            # The copy arrives seeded by seed_unwitnessed_code.
             path = package / "tests" / "test_semantic_contracts.py"
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(
@@ -1681,11 +1860,8 @@ class ContractRegressions(unittest.TestCase):
                 "neutered assertion drops its witness",
                 neuter_witnessing_assertion,
                 "--check",
-                (
-                    ("WITNESSED_REMOVED", "PLANTED_WITNESSED_CODE"),
-                    ("UNWITNESSED_ADDED", "PLANTED_WITNESSED_CODE"),
-                ),
-                (),
+                (("ASSERTED_REFUSAL_PAIR_REMOVED", "PLANTED_WITNESSED_CODE"),),
+                ("WITNESSED_REMOVED", "UNWITNESSED_ADDED"),
             ),
             (
                 "disarmed sink reddens by itself",
@@ -1714,25 +1890,69 @@ class ContractRegressions(unittest.TestCase):
                 (),
             ),
         )
+        # Three plants start from one seeded copy: seeding is a full traced run, so it is
+        # done once and copied to each. The copies are independent, so up to PLANT_WORKERS
+        # plants run at once; the runner's unit holds MemoryMax=2G, which bounds that number.
+        # Each outcome - the plant's run, or the exception its preparation raised - is read
+        # in the plants' order inside the plant's own subtest, so the checks, their order
+        # and their messages are those of a plant run alone.
+        seeded_plants = {
+            "scaffold construction is not credited",
+            "sloppy regex is not credited",
+            "anchored regex is credited",
+        }
+        self.assertEqual(seeded_plants - {row[0] for row in plants}, set())
+        PLANT_WORKERS = 3
+
+        def run_plant(package: Path, plant, mode: str, seeded: Path | None):
+            if seeded is None:
+                self._copy_package(package)
+            else:
+                shutil.copytree(seeded, package)
+            plant(package)
+            return subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(package / "tools" / "failure_surface.py"),
+                    mode,
+                ],
+                cwd=package,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
+            runs = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=PLANT_WORKERS) as pool:
+                seed = pool.submit(
+                    lambda: seed_unwitnessed_code(self._copy_package(root / "seeded"))
+                )
+                for index, (label, plant, mode, _present, _absent) in enumerate(plants):
+                    if label not in seeded_plants:
+                        runs[index] = pool.submit(
+                            run_plant, root / f"pkg-{index}", plant, mode, None
+                        )
+                try:
+                    seed.result()
+                    seed_failure = None
+                except Exception as exc:  # every plant that needs the seed fails with it
+                    seed_failure = exc
+                for index, (label, plant, mode, _present, _absent) in enumerate(plants):
+                    if label in seeded_plants:
+                        if seed_failure is None:
+                            runs[index] = pool.submit(
+                                run_plant, root / f"pkg-{index}", plant, mode, root / "seeded"
+                            )
+                        else:
+                            runs[index] = concurrent.futures.Future()
+                            runs[index].set_exception(seed_failure)
             for index, (label, plant, mode, present, absent) in enumerate(plants):
                 with self.subTest(plant=label):
-                    package = self._copy_package(root / f"pkg-{index}")
-                    plant(package)
-                    result = subprocess.run(
-                        [
-                            sys.executable,
-                            "-B",
-                            str(package / "tools" / "failure_surface.py"),
-                            mode,
-                        ],
-                        cwd=package,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                    )
+                    result = runs[index].result()
                     combined = "\n".join(
                         part for part in (result.stdout, result.stderr) if part
                     )
@@ -1768,6 +1988,46 @@ class ContractRegressions(unittest.TestCase):
                             [line for line in lines if line.startswith(marker)],
                             f"{marker} was reported\n{combined[-2000:]}",
                         )
+                    if label == "neutered assertion drops its witness":
+                        summary = next(
+                            i for i, line in enumerate(lines)
+                            if line.startswith("RUNTIME_UNITTEST_TESTS=")
+                        )
+                        self.assertEqual(
+                            lines[summary + 1],
+                            "ASSERTED_REFUSAL_PAIR_REMOVED "
+                            "scope=engine code=PLANTED_WITNESSED_CODE "
+                            f"python={sys.version_info.major}.{sys.version_info.minor}",
+                        )
+
+            from check_failure_surface import pair_problem
+
+            minor = f"{sys.version_info.major}.{sys.version_info.minor}"
+            baseline = {
+                "asserted_codes": ["PLANTED_WITNESSED_CODE"],
+                "asserted_bridge_codes": [],
+                "assertion_sites": [
+                    "engine|PLANTED_WITNESSED_CODE|fixture.Test@test"
+                ],
+            }
+            receipt = {
+                "python": minor,
+                "engine": [["PLANTED_WITNESSED_CODE", minor]],
+                "bridge": [],
+                "sites": baseline["assertion_sites"],
+            }
+            self.assertIsNone(pair_problem(receipt, baseline, minor))
+            wrong_version = dict(receipt, python="0.0")
+            self.assertTrue(
+                pair_problem(wrong_version, baseline, minor).startswith(
+                    "FAILURE_ASSERTED_VERSION_MISMATCH"
+                )
+            )
+            missing_assertion = dict(receipt, sites=[])
+            self.assertEqual(
+                pair_problem(missing_assertion, baseline, minor),
+                "FAILURE_ASSERTED_PAIR_INVALID unexpected-pair-or-site",
+            )
 
     def test_wire_witness_does_not_retire_engine_debt(self) -> None:
         # The two published vocabularies overlap: the adapter's translation
@@ -2084,16 +2344,18 @@ class ContractRegressions(unittest.TestCase):
         # The same sweep over validate_declaration, corrupting the DECLARATION
         # only and passing the untouched profile beside it.
         #
-        # Not covered here, by name: PROFILE_CORE_MISMATCH, PROFILE_WITNESS_HASH.
+        # Not covered here, by name: PROFILE_CORE_MISMATCH, PROFILE_WITNESS_HASH, SCOPE_ACTION_TARGET_IDS.
         # PROFILE_CORE_MISMATCH is shadowed for every declaration-only
         # corruption by the core-anchor check that runs just before it, and
         # PROFILE_WITNESS_HASH is raised from the PROFILE's witness hash, which
-        # this sweep does not touch.
+        # this sweep does not touch. SCOPE_ACTION_TARGET_IDS is driven only by
+        # the repeated-target row of test_scope_binding_coverage_and_range_refuse_separately,
+        # so its other shapes - a value that is not a list, an empty list, a
+        # non-identifier element - go undriven by name.
         fixture = self.fixture()
         self.assert_identifier_list_contracts(
             fixture.declaration, lambda value: validate_declaration(value, fixture.profile),
             (
-                ('ENVIRONMENT_IDS', ('connector', 'environment_ids'), False),
                 ('SCOPE_ACTION_IDS', ('instance_scope', 'action_ids'), False),
                 ('SCOPE_EFFECT_IDS', ('instance_scope', 'effect_class_ids'), False),
                 ('SCOPE_TARGET_IDS', ('instance_scope', 'target_system_ids'), False),
@@ -2107,17 +2369,14 @@ class ContractRegressions(unittest.TestCase):
             ('RESOURCE_LIMIT_ORDER', ((('resource_limits', 0, 'window_seconds'), 'set', 0),)),
             ('RESOURCE_LIMIT_COVERAGE', ((('resource_limits', 1), 'delete', None),)),
             ('GOVERNANCE', ((('governance',), 'set', None),)),
-            ('GOVERNANCE_ID', ((('governance', 'profile_owner_id'), 'set', ''),)),
+            ('GOVERNANCE_ID', ((('governance', 'approval_owner_id'), 'set', ''),)),
             ('GOVERNANCE_CHANGE_CONTROL', ((('governance', 'no_live_gate_override'), 'set', False),)),
             ('INTERFACES', ((('interfaces',), 'set', None),)),
-            ('INTERFACE_ID', ((('interfaces', 'governance_service_id'), 'set', ''),)),
-            ('INTERFACE_ROLE_OVERLAP', ((('interfaces', 'operator_service_id'), 'set', 'synthetic-governance-service'),)),
             ('TARGET_OFF_LIMITS_OVERLAP', ((('interfaces', 'off_limits_system_ids', 0), 'set', 'bank-sandbox-ledger'),)),
             ('WITNESS_BINDING', ((('mapping_witness_binding',), 'set', None),)),
             ('WITNESS_ID_MISMATCH', ((('mapping_witness_binding', 'witness_id'), 'set', 'bank-questionnaire-crosswalk-v2'),)),
             ('WITNESS_HASH', ((('mapping_witness_binding', 'witness_hash'), 'set', 'not-a-sha256'),)),
             ('WITNESS_BINDING_MISMATCH', ((('mapping_witness_binding', 'witness_hash'), 'set', '0000000000000000000000000000000000000000000000000000000000000000'),)),
-            ('DECLARATION_EVIDENCE', ((('evidence_refs',), 'set', []),)),
             ('SCOPE_ACTION_TARGET_COVERAGE', ((('instance_scope', 'action_target_bindings', 'NO_EFFECT_FALLBACK'), 'delete', None),)),
             ('SCOPE_ACTION_TARGET_RANGE', ((('instance_scope', 'action_target_bindings', 'NO_EFFECT_FALLBACK'), 'set', ['unbound-target']),)),
             ('SCOPE_UNKNOWN_EFFECT', ((('instance_scope', 'effect_class_ids', 2), 'set', 'UNKNOWN_EFFECT'),)),
@@ -2127,19 +2386,15 @@ class ContractRegressions(unittest.TestCase):
             ('SCOPE_DIMENSION_ID', ((('instance_scope', 'scope_constraints', '1product'), 'set', ['synthetic-payment']),)),
             ('SCOPE_CONSTRAINT_VALUES', ((('instance_scope', 'scope_constraints', 'product'), 'set', []),)),
             ('STRUCTURAL_BUDGET', ((('structural_budget',), 'set', []),)),
-            ('SELECTOR_ID', ((('structural_budget', 'selector_id'), 'set', ''),)),
             ('STRUCTURAL_CAPACITY', ((('structural_budget', 'capacity'), 'set', -1),)),
-            ('STRUCTURAL_UNIT', ((('structural_budget', 'unit'), 'set', ''),)),
-            ('STRUCTURAL_PROVENANCE', ((('structural_budget', 'provenance'), 'set', 'guessed'),)),
             ('RESOURCE_LIMITS', ((('resource_limits',), 'set', {}),)),
             ('RESOURCE_LIMIT', ((('resource_limits', 0), 'set', 'money_minor_units'),)),
             ('RESOURCE_LIMIT_ID', ((('resource_limits', 0, 'resource_id'), 'set', 42),)),
             ('RESOURCE_MAX_PER_INTENT', ((('resource_limits', 0, 'max_per_intent'), 'set', -1),)),
-            ('DECLARATION_FIELDS', ((('evidence_refs',), 'delete', None),)),
+            ('DECLARATION_FIELDS', ((('mapping_witness_binding',), 'delete', None),)),
             ('DECLARATION_SCHEMA_VERSION', ((('schema_version',), 'set', '2.0.0'),)),
             ('DECLARATION_ID', ((('declaration_id',), 'set', ''),)),
             ('DECLARATION_VERSION', ((('declaration_version',), 'set', '1.2'),)),
-            ('PREDECESSOR_HASH', ((('predecessor_declaration_hash',), 'set', 'not-a-hash'),)),
             ('DECLARATION_TIME_ORDER', ((('expires_at',), 'set', '2026-07-30T00:00:00Z'),)),
             ('PROFILE_BINDING', ((('profile_binding',), 'set', None),)),
             ('PROFILE_ID_MISMATCH', ((('profile_binding', 'profile_id'), 'set', 'banking.reference.v2'),)),
@@ -2148,7 +2403,6 @@ class ContractRegressions(unittest.TestCase):
             ('PROFILE_HASH_MISMATCH', ((('profile_binding', 'profile_hash'), 'set', '81F9552562648773F84123BADD5957A3DA50A65ED47FB962AEC9E1D9518E1069'),)),
             ('CONNECTOR', ((('connector',), 'set', None),)),
             ('CONNECTOR_ID', ((('connector', 'connector_id'), 'set', ''),)),
-            ('WORKLOAD_IDENTITY_ISSUER', ((('connector', 'workload_identity_issuer'), 'set', ''),)),
             ('INSTANCE_SCOPE', ((('instance_scope',), 'set', None),)),
             ('SCOPE_UNKNOWN_ACTION', ((('instance_scope', 'action_ids', 0), 'set', 'BANK_PAYMENT_REVERSE'),)),
             ('SCOPE_ACTION_TARGET_BINDINGS', ((('instance_scope', 'action_target_bindings'), 'set', None),)),
@@ -2314,25 +2568,41 @@ class ContractRegressions(unittest.TestCase):
                 )
 
         with self.subTest(claim="the executor surface narrows the same way"):
-            engine, intent, _grant = fixture.engine()
+            # Asked of commit_execution itself, not of the helper it uses: after
+            # a commit, a retry differing only in a declared hash field's case
+            # replays the receipt, and one differing only in the case of a
+            # hex-shaped connector id is a different request and conflicts.
+            connector = fixture.intent["connector_id"]
+
+            def hexed(document: dict) -> dict:
+                return json.loads(json.dumps(document).replace(json.dumps(connector), json.dumps("a" * 64)))
+
+            engine, intent, _grant = fixture.engine(
+                profile=hexed(fixture.profile),
+                declaration=hexed(fixture.declaration),
+                grant=hexed(fixture.grant),
+                intent=hexed(fixture.intent),
+            )
+            self.assertEqual(intent["connector_id"], "a" * 64)
             result = self.allow_permit(fixture, engine, intent)
             request = fixture.execution_request(engine, result, intent)
-            request["connector_id"] = "a" * 64
-            other = copy.deepcopy(request)
-            other["connector_id"] = "A" * 64
-            identity = sha256_hex(_normalize_declared_hash_case(request))
-            self.assertNotEqual(
-                identity,
-                sha256_hex(_normalize_declared_hash_case(other)),
-                "a hex-shaped connector_id collapsed two execution requests",
-            )
+            route = result["permit_hash"]
+            receipt = engine.commit_execution(request, actor_scope=ROLE_EXECUTOR, route_permit_hash=route)
             cased = copy.deepcopy(request)
             cased["permit_hash"] = cased["permit_hash"].lower()
-            self.assertEqual(
-                identity,
-                sha256_hex(_normalize_declared_hash_case(cased)),
-                "a declared hash field stopped being case-normalised",
-            )
+            try:
+                replayed = engine.commit_execution(cased, actor_scope=ROLE_EXECUTOR, route_permit_hash=route)
+            except ContractViolation as exc:
+                self.fail(f"a declared hash field stopped being case-normalised at the executor surface: {exc.code}")
+            self.assertEqual(replayed, receipt, "a declared hash field stopped being case-normalised at the executor surface")
+            other = copy.deepcopy(request)
+            other["connector_id"] = "A" * 64
+            try:
+                engine.commit_execution(other, actor_scope=ROLE_EXECUTOR, route_permit_hash=route)
+            except ContractViolation as exc:
+                self.assertEqual(exc.code, "EXECUTION_REPLAY_CONFLICT")
+            else:
+                self.fail("a hex-shaped connector_id collapsed two execution requests at the executor surface")
 
     def test_a_header_that_lies_in_comparison_authorises_nothing(self) -> None:
         """The wire reads a header's CHARACTERS, not the object a caller put in the environ.
@@ -2458,11 +2728,24 @@ class ContractRegressions(unittest.TestCase):
         # the anchor still matches. A sweep that stopped at /ledger/head would
         # be green with the second guard removed.
         events_before = engine.ledger.head()["event_count"]
+        # Every control character, not only the newline: DEL and C1 as well
+        # (U+0085 is a line break to str.splitlines).
+        spellings = (
+            ("trailing newline", "\n"),
+            ("trailing DEL", "\x7f"),
+            ("trailing C1 next line", "\x85"),
+            ("trailing C1 U+009F", "\x9f"),
+        )
         for method, path, scope in routes:
-            with self.subTest(route=path, spelling="trailing newline"):
-                status, body = call(method, path + "\n", {}, scope)
-                self.assertEqual(status, 404, f"{path} answered under an alias")
-                self.assertEqual(body.get("code"), "NOT_FOUND")
+            for spelling, suffix in spellings:
+                with self.subTest(route=path, spelling=spelling):
+                    status, body = call(method, path + suffix, {}, scope)
+                    self.assertEqual(status, 404, f"{path} answered under an alias ({spelling})")
+                    self.assertEqual(body.get("code"), "NOT_FOUND", f"{path} answered under an alias ({spelling})")
+        # The guard refuses control characters only: a printable non-ASCII
+        # selector reaches the handler and is answered as an unknown connector.
+        status, body = call("GET", "/v1/registry/connectors/caf\xe9-connector", {}, ROLE_ARCHITECT)
+        self.assertNotEqual(body.get("code"), "NOT_FOUND", "a printable non-ASCII path was refused as a control character")
         self.assertEqual(
             engine.ledger.head()["event_count"],
             events_before,
@@ -2545,7 +2828,8 @@ class ContractRegressions(unittest.TestCase):
                 ROLE_GOVERNANCE,
             )
             self.assertEqual(status, 400)
-            self.assertEqual(body.get("code"), "ACTIVATE_BODY")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.activated_by: required")
             self.assertNotEqual(
                 body.get("message"), "None", "the caller was shown a Python repr"
             )
@@ -2560,7 +2844,8 @@ class ContractRegressions(unittest.TestCase):
                 ROLE_OPERATOR,
                 idem=oversized["idempotency_key"],
             )
-            self.assertEqual(body.get("code"), "INVALID_TIMESTAMP")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.intent.received_at: format")
             self.assertLessEqual(len(body.get("message", "")), 131)
 
         with self.subTest(guard="a wrapper's unknown keys are not echoed in full"):
@@ -2572,18 +2857,33 @@ class ContractRegressions(unittest.TestCase):
                 ROLE_OPERATOR,
                 idem=intent["idempotency_key"],
             )
-            self.assertEqual(body.get("code"), "OPERATOR_BODY")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.k0: additionalProperties")
             self.assertLessEqual(len(body.get("message", "")), 131)
 
-        with self.subTest(guard="engine unknown keys are bounded at the wire boundary"):
+        with self.subTest(guard="schema unknown keys are bounded at the wire boundary"):
             payload = {**_grant, **{f"k{index}": 1 for index in range(400)}}
             status, body = call("POST", "/v1/authority-grants", payload, ROLE_GOVERNANCE)
             self.assertEqual(status, 400)
-            self.assertEqual(body.get("code"), "AUTHORITY_GRANT_FIELDS")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.k0: additionalProperties")
             self.assertLessEqual(len(body.get("message", "")), 131)
-        with self.subTest(guard="short engine explanations are preserved"):
+        with self.subTest(guard="short schema field paths are preserved"):
             status, body = call("POST", "/v1/authority-grants", {**_grant, "extra": 1}, ROLE_GOVERNANCE)
-            self.assertEqual(body.get("message"), "unknown fields: ['extra']")
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertEqual(body.get("message"), "$.extra: additionalProperties")
+        with self.subTest(guard="a schema field path cannot set the response length"):
+            payload = {**_grant, "k" * 5000: 1}
+            status, body = call("POST", "/v1/authority-grants", payload, ROLE_GOVERNANCE)
+            self.assertEqual(status, 400)
+            self.assertEqual(body.get("code"), "BODY_SCHEMA")
+            self.assertLessEqual(len(body.get("message", "")), 131)
+        with self.subTest(guard="short engine explanations for schema-valid bodies are preserved"):
+            payload = {**_grant, "connector_id": "synthetic-other"}
+            status, body = call("POST", "/v1/authority-grants", payload, ROLE_GOVERNANCE)
+            self.assertEqual(status, 400)
+            self.assertEqual(body.get("code"), "AUTHORITY_CONNECTOR_MISMATCH")
+            self.assertEqual(body.get("message"), "AUTHORITY_CONNECTOR_MISMATCH")
 
         with self.subTest(guard="a refused value is not echoed in full"):
             oversized = copy.deepcopy(intent)
@@ -3364,6 +3664,7 @@ class ContractRegressions(unittest.TestCase):
             ("signature", field) for field in sample_event["signature"]
         ]
         self.assertIn(("event_hash",), event_places)
+        pinned: set[str] = set()
         for place in event_places:
             for label, value in (
                 ("non-ASCII text", "é" * 64),
@@ -3408,10 +3709,15 @@ class ContractRegressions(unittest.TestCase):
                     escapes.append(f"verify() {'/'.join(place)} <- {label}: {type(exc).__name__}")
                     continue
                 if place in (("event_hash",), ("previous_event_hash",), ("event_index",)):
+                    pinned.add(place[0])
                     with self.subTest(member=f"{label} in stored {place[0]}"):
                         self.assertIs(verdict, False)
                         with self.assertRaisesRegex(IntegrityViolation, r"^LEDGER_CHAIN_FAILURE(:|$)"):
                             engine.ledger_head(ROLE_ARCHITECT)
+
+        self.assertEqual(
+            pinned, {"event_hash", "previous_event_hash", "event_index"}, "an event-field pin never ran"
+        )
 
         # The three canonicalisation exits verify() names, pinned by NAME. The sweep
         # above drives all three forms and cannot tell them apart - it records what
@@ -3645,7 +3951,8 @@ class ContractRegressions(unittest.TestCase):
                     malformed["grant_id"] = value
                     status, response = wire_issue(engine, malformed)
                     self.assertEqual(status, "400 Bad Request")
-                    self.assertEqual(response["code"], "AUTHORITY_IDENTIFIER")
+                    self.assertEqual(response["code"], "BODY_SCHEMA")
+                    self.assertEqual(response["message"], "$.grant_id: type")
             self.assertEqual(wire_issue(engine, grant)[0], "200 OK")
 
         with self.subTest(claim="grant replay status comes from the durable transaction"):
@@ -3746,6 +4053,251 @@ class ContractRegressions(unittest.TestCase):
                             paths[name].write_bytes(originals[name])
                 self.assertEqual(failure_surface.static_snapshot()[1], [], "WORLDS_RESTORED")
 
+    def test_failure_surface_scan_counts_bare_raises_and_derives_dynamic_codes(self) -> None:
+        # Each plant is appended to a copy of one scanned source and judged
+        # against that copy's own unplanted scan, so a problem the shipped
+        # sources already carry can neither stand in for nor hide the one the
+        # plant must cause; the unplanted scan itself must leave nothing
+        # unclassified. A bare `raise` is a raise statement, so it is counted
+        # and named. A code written into a permit's invalidation reason reaches
+        # the engine world through the raise that re-emits the field, a write
+        # the scan cannot read is named, and a local variable spelled like the
+        # field is not a write. The restore path's translation of a caught
+        # refusal is classified, and another dynamic raise in the same function
+        # stays named. A bridge helper call whose code is not a literal is
+        # credited with a pair table's codes only where it takes the code from
+        # the loop over that table.
+        import failure_surface
+
+        def unclassified(problems: list[str]) -> set[str]:
+            prefix = "FAILURE_SURFACE_UNCLASSIFIED:static "
+            return {
+                entry
+                for problem in problems
+                if problem.startswith(prefix)
+                for entry in problem[len(prefix):].split(",")
+            }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = {}
+            originals = {}
+            for name in ("ENGINE_PATH", "ADAPTER_PATH", "BRIDGE_PATH"):
+                source = getattr(failure_surface, name)
+                paths[name] = Path(temporary) / "sdk" / "python" / source.name
+                paths[name].parent.mkdir(parents=True, exist_ok=True)
+                originals[name] = source.read_bytes()
+                paths[name].write_bytes(originals[name])
+
+            def scan_with(name: str, plant: str) -> tuple[dict, list[str]]:
+                try:
+                    paths[name].write_bytes(originals[name] + plant.encode("utf-8"))
+                    return failure_surface.static_snapshot()
+                finally:
+                    paths[name].write_bytes(originals[name])
+
+            with patch.multiple(failure_surface, ROOT=Path(temporary), **paths):
+                control, control_problems = failure_surface.static_snapshot()
+                # The raise the invalidation writes feed is still classified, so
+                # a red below cannot come from that raise having moved.
+                self.assertIn(
+                    "sdk/python/nc25_universal_ledger.py:commit_execution:state-invalidated-reason#0",
+                    control["dynamic_emission_points"],
+                )
+                # The other direction: the shipped pair-table call is still the
+                # credited site.
+                self.assertIn(
+                    "sdk/python/nc25_otcs_bridge.py:__post_init__:bridge-pair-table#0",
+                    control["dynamic_emission_points"],
+                )
+                # The restore path's translation of a caught refusal is a dynamic
+                # kind of its own, and the shipped sources leave nothing
+                # unclassified: every shipped write of the field is read, and
+                # every raise and helper call is accounted for.
+                self.assertIn(
+                    "sdk/python/nc25_universal_ledger.py:_restore_state:"
+                    "integrity-translation-of-engine-code#0",
+                    control["dynamic_emission_points"],
+                    "RESTORE_TRANSLATION_NOT_CLASSIFIED",
+                )
+                self.assertEqual(
+                    [
+                        problem
+                        for problem in control_problems
+                        if problem.startswith("FAILURE_SURFACE_UNCLASSIFIED:")
+                    ],
+                    [],
+                    "SHIPPED_SOURCES_UNCLASSIFIED",
+                )
+
+                with self.subTest(plant="bare re-raise"):
+                    snapshot, problems = scan_with(
+                        "ENGINE_PATH",
+                        "\n\ndef _planted_bare_reraise():\n"
+                        "    try:\n"
+                        "        pass\n"
+                        "    except Exception:\n"
+                        "        raise\n",
+                    )
+                    self.assertEqual(
+                        snapshot["emission_points_all"],
+                        control["emission_points_all"] + 1,
+                        "BARE_RAISE_NOT_COUNTED",
+                    )
+                    self.assertEqual(
+                        sorted(
+                            set(snapshot["dynamic_emission_points"])
+                            - set(control["dynamic_emission_points"])
+                        ),
+                        ["sdk/python/nc25_universal_ledger.py:_planted_bare_reraise:re-raise#0"],
+                    )
+                    self.assertEqual(problems, control_problems)
+
+                for label, plant, code in (
+                    (
+                        "invalidation reason written as a literal",
+                        "\n\ndef _planted_invalidation(record):\n"
+                        '    record.invalidated_reason = "PLANTED_INVALIDATION_CODE"\n',
+                        "PLANTED_INVALIDATION_CODE",
+                    ),
+                    (
+                        "invalidation reason passed to the function that writes it",
+                        "\n\ndef _planted_writer(record, reason):\n"
+                        "    record.invalidated_reason = reason\n"
+                        "\n\ndef _planted_writer_call(record):\n"
+                        '    _planted_writer(record, "PLANTED_PASSED_CODE")\n',
+                        "PLANTED_PASSED_CODE",
+                    ),
+                    (
+                        "invalidation reason as a keyword argument",
+                        "\n\ndef _planted_keyword_writer(body):\n"
+                        "    return PermitRecord(\n"
+                        '        body=body, permit_hash="", signature={},\n'
+                        '        invalidated_reason="PLANTED_KEYWORD_CODE",\n'
+                        "    )\n",
+                        "PLANTED_KEYWORD_CODE",
+                    ),
+                    (
+                        "invalidation reason as an annotated default",
+                        "\n\nclass _PlantedRecord:\n"
+                        '    invalidated_reason: str = "PLANTED_DEFAULT_CODE"\n',
+                        "PLANTED_DEFAULT_CODE",
+                    ),
+                ):
+                    with self.subTest(plant=label):
+                        snapshot, problems = scan_with("ENGINE_PATH", plant)
+                        self.assertNotIn(code, control["engine_refusal_codes"])
+                        self.assertIn(
+                            code, snapshot["engine_refusal_codes"], "INVALIDATION_CODE_NOT_DERIVED"
+                        )
+                        self.assertEqual(problems, control_problems)
+
+                with self.subTest(plant="local variable spelled like the field"):
+                    # A bare name is the field only as a class-body default, so a
+                    # local of the same name is not a write and names nothing.
+                    snapshot, problems = scan_with(
+                        "ENGINE_PATH",
+                        "\n\ndef _planted_local(state):\n"
+                        '    invalidated_reason = state.get("reason")\n'
+                        "    return invalidated_reason\n",
+                    )
+                    self.assertEqual(problems, control_problems, "LOCAL_NAME_READ_AS_A_WRITE")
+                    self.assertEqual(
+                        snapshot["engine_refusal_codes"], control["engine_refusal_codes"]
+                    )
+
+                for label, plant, form in (
+                    (
+                        "unreadable invalidation reason",
+                        "\n\ndef _planted_unreadable_invalidation(record, source):\n"
+                        "    record.invalidated_reason = source.reason\n",
+                        ":Attribute",
+                    ),
+                    (
+                        "invalidation reason in a tuple target",
+                        "\n\ndef _planted_tuple_invalidation(record):\n"
+                        "    record.invalidated_reason, record.consumed = (\n"
+                        '        "PLANTED_TUPLE_CODE", False\n'
+                        "    )\n",
+                        ":tuple-target",
+                    ),
+                ):
+                    with self.subTest(plant=label):
+                        _snapshot, problems = scan_with("ENGINE_PATH", plant)
+                        added = [
+                            problem for problem in problems if problem not in control_problems
+                        ]
+                        self.assertEqual(len(added), 1, f"INVALIDATION_WRITE_NOT_NAMED {problems}")
+                        self.assertTrue(
+                            added[0].startswith("FAILURE_SURFACE_UNCLASSIFIED:invalidated-reason "),
+                            added,
+                        )
+                        self.assertTrue(added[0].endswith(form), added)
+
+                for label, plant in (
+                    (
+                        "restore translation of a code that is not the caught refusal's",
+                        "\n\nclass _PlantedRestore:\n"
+                        "    def _restore_state(self, state):\n"
+                        "        try:\n"
+                        "            self._restore_checked_state(state)\n"
+                        "        except ContractViolation as exc:\n"
+                        "            raise IntegrityViolation(state.code, exc.detail) from exc\n",
+                    ),
+                    (
+                        "restore translation of an exception that is not a refusal",
+                        "\n\nclass _PlantedRestore:\n"
+                        "    def _restore_state(self, state):\n"
+                        "        try:\n"
+                        "            self._restore_checked_state(state)\n"
+                        "        except ValueError as exc:\n"
+                        "            raise IntegrityViolation(exc.code, str(exc)) from exc\n",
+                    ),
+                ):
+                    with self.subTest(plant=label):
+                        # Only the raise of the caught refusal's own code is the
+                        # translation; another dynamic raise there stays named.
+                        snapshot, problems = scan_with("ENGINE_PATH", plant)
+                        added = unclassified(problems) - unclassified(control_problems)
+                        self.assertEqual(len(added), 1, f"RESTORE_TRANSLATION_TOO_WIDE {problems}")
+                        self.assertTrue(
+                            next(iter(added)).endswith(":dynamic-raise:_restore_state"), added
+                        )
+                        self.assertEqual(
+                            snapshot["dynamic_emission_points"],
+                            control["dynamic_emission_points"],
+                        )
+                        self.assertEqual(
+                            snapshot["engine_refusal_codes"], control["engine_refusal_codes"]
+                        )
+
+                for label, plant in (
+                    (
+                        "non-literal bridge code outside the pair loop",
+                        "\n\ndef _planted_bridge_code(value, planted_code):\n"
+                        "    return _text(value, planted_code)\n",
+                    ),
+                    (
+                        "non-literal bridge code inside a pair loop but not its code",
+                        "\n\ndef _planted_bridge_loop(record, planted_code):\n"
+                        '    for name, code in (("event_id", "OTCS_PLANTED_PAIR_CODE"),):\n'
+                        "        _text(getattr(record, name), planted_code)\n",
+                    ),
+                ):
+                    with self.subTest(plant=label):
+                        snapshot, problems = scan_with("BRIDGE_PATH", plant)
+                        added = unclassified(problems) - unclassified(control_problems)
+                        self.assertEqual(len(added), 1, problems)
+                        self.assertTrue(
+                            next(iter(added)).endswith(":dynamic-helper:_text"), added
+                        )
+                        self.assertEqual(
+                            snapshot["dynamic_emission_points"],
+                            control["dynamic_emission_points"],
+                        )
+                        self.assertEqual(
+                            snapshot["bridge_refusal_codes"], control["bridge_refusal_codes"]
+                        )
+
     def test_acceptance_step_names_bind_the_executed_files(self) -> None:
         from run_acceptance import STEPS, validate_step_manifest
         validate_step_manifest(STEPS)
@@ -3760,6 +4312,209 @@ class ContractRegressions(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "^ACCEPTANCE_STEP_MANIFEST "):
             validate_step_manifest(tuple(reversed(STEPS)))
         validate_step_manifest(STEPS)
+
+    def test_failure_surface_names_a_construction_outside_its_own_world(self) -> None:
+        # The runtime half named an engine refusal raised with a code outside the
+        # engine's closed world, but not a bridge refusal outside the bridge's:
+        # such a code was dropped in silence from the witnessed bridge set. Both
+        # worlds are asked now, by one function whose names runtime_snapshot
+        # adds to its problems.
+        import failure_surface
+
+        observation = failure_surface._Observation({"E_IN"}, {"W_IN"}, {"B_IN"})
+        observation.constructed_engine.add("E_IN")
+        observation.constructed_bridge.add("B_IN")
+        self.assertEqual(failure_surface._out_of_world(observation), [], "OUT_OF_WORLD_OVERFIRE")
+        observation.constructed_bridge.add("OTCS_X")
+        self.assertEqual(
+            failure_surface._out_of_world(observation),
+            ["FAILURE_RUNTIME_OUT_OF_WORLD bridge=['OTCS_X']"],
+            "BRIDGE_OUT_OF_WORLD_UNNAMED",
+        )
+        observation.constructed_engine.add("ENGINE_X")
+        self.assertEqual(
+            failure_surface._out_of_world(observation),
+            [
+                "FAILURE_RUNTIME_OUT_OF_WORLD engine=['ENGINE_X']",
+                "FAILURE_RUNTIME_OUT_OF_WORLD bridge=['OTCS_X']",
+            ],
+            "ENGINE_OUT_OF_WORLD_UNNAMED",
+        )
+        # Asked is not enough: the names must reach the run's problems, so only
+        # a call that is the sole argument of problems.extend counts.
+        tree = ast.parse(inspect.getsource(failure_surface.runtime_snapshot))
+        reported = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "extend"
+            and isinstance(node.func.value, ast.Name) and node.func.value.id == "problems"
+            and len(node.args) == 1 and isinstance(node.args[0], ast.Call)
+            and isinstance(node.args[0].func, ast.Name)
+            and node.args[0].func.id == "_out_of_world"
+        ]
+        self.assertEqual(len(reported), 1, "OUT_OF_WORLD_NOT_REPORTED_AT_RUN_TIME")
+
+    def test_package_verifier_holds_census_count_and_core_anchor_to_their_sources(self) -> None:
+        # The builder prints the census test count and the core anchor from
+        # their sources, and nothing compared the shipped document with them:
+        # a census test added, or the manifest's core entry changed, without a
+        # rebuilt DOCX left every package check green.
+        from spec_counts import test_method_count as count_tests
+        from verify_package import docx_acceptance_count_mismatches, docx_core_anchor_mismatches
+
+        census = count_tests(
+            ROOT / "tests" / "test_declaration_field_census.py", "DeclarationFieldCensusTests"
+        )
+        sentence = (
+            "{} tests holding each fixed declaration and registry field to its"
+            " classification in DECLARATION-FIELDS.md and to the engine line that"
+            " consumes it"
+        )
+
+        def census_mismatches(paragraphs: list[str]) -> list[str]:
+            return [
+                line for line in docx_acceptance_count_mismatches(paragraphs)
+                if line.startswith("declaration_field_census")
+            ]
+
+        self.assertEqual(census_mismatches([sentence.format(census)]), [], "CENSUS_COUNT_OVERFIRE")
+        self.assertEqual(
+            census_mismatches([sentence.format(census + 1)]),
+            [f"declaration_field_census: docx={census + 1} actual={census}"],
+            "CENSUS_COUNT_UNCHECKED",
+        )
+
+        manifest = json.loads((ROOT / "SOURCE-MANIFEST.json").read_text(encoding="utf-8"))
+        core = next(
+            entry for entry in manifest["inputs"] if entry.get("role") == "immutable_nc25_core"
+        )
+        printed = {
+            "Core SHA-256": core["sha256"],
+            "File": core["file_name"],
+            "SHA-256": core["sha256"],
+            "Bytes / lines": f"{core['byte_length']:,} bytes / {core['line_count']:,} lines",
+        }
+        paragraphs = [text for pair in printed.items() for text in pair]
+        self.assertEqual(docx_core_anchor_mismatches(paragraphs), [], "CORE_ANCHOR_OVERFIRE")
+        for label, value in printed.items():
+            with self.subTest(label=label):
+                stale = list(paragraphs)
+                stale[stale.index(label) + 1] = "stale"
+                self.assertEqual(
+                    docx_core_anchor_mismatches(stale),
+                    [f"{label}: docx='stale' manifest={value!r}"],
+                    "CORE_ANCHOR_UNCHECKED",
+                )
+
+    def test_regeneration_declares_the_direction_of_every_list(self) -> None:
+        # Twice a debt list defaulted to coverage: foreign translated codes,
+        # then dynamic emission points. A regeneration then charged the clean-up
+        # and let the growth through. Every published list now declares its
+        # direction, and a list with none is refused rather than defaulted.
+        import failure_surface
+
+        baseline = json.loads(
+            (ROOT / "tests" / "failure-surface-baseline.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            failure_surface.regeneration_regressions(baseline, copy.deepcopy(baseline)), [],
+            "POLARITY_UNDECLARED",
+        )
+        current = copy.deepcopy(baseline)
+        current["runtime"]["new_figure"] = ["X"]
+        self.assertEqual(
+            failure_surface.regeneration_regressions(baseline, current),
+            ["REGENERATION_UNCLASSIFIED_FIELD:new_figure"],
+            "NEW_FIGURE_POLARITY_DEFAULTED",
+        )
+        current = copy.deepcopy(baseline)
+        current["dynamic_emission_points"].append("tools/x.py:f:re-raise#0")
+        self.assertEqual(
+            failure_surface.regeneration_regressions(baseline, current),
+            ["REGENERATION_GROWS_DYNAMIC ['tools/x.py:f:re-raise#0']"],
+            "DYNAMIC_GROWTH_FREE",
+        )
+        current = copy.deepcopy(baseline)
+        current["dynamic_emission_points"].pop()
+        self.assertEqual(
+            failure_surface.regeneration_regressions(baseline, current), [],
+            "DYNAMIC_SHRINK_CHARGED",
+        )
+
+    def test_recorded_run_holds_every_acceptance_suite_and_names_the_rest(self) -> None:
+        # The recorded run was described as the modules the acceptance steps
+        # run. The census suite got a step without joining the run, and the
+        # reader suite is in the run with no step, so its verdicts were only
+        # ever taken under observation.
+        import failure_surface
+        from run_acceptance import STEPS
+
+        stepped = {Path(path).stem for _, path, _, _ in STEPS}
+        unittest_stepped = {
+            Path(path).stem for _, path, _, count in STEPS if count.startswith("Ran ")
+        }
+        self.assertLessEqual(
+            unittest_stepped, set(failure_surface.UNITTEST_SUITE_MODULES),
+            "STEP_SUITE_NOT_RECORDED",
+        )
+        recorded = (
+            set(failure_surface.UNITTEST_SUITE_MODULES)
+            | set(failure_surface.SCRIPT_SUITE_MODULES)
+        )
+        self.assertEqual(
+            recorded - stepped, set(failure_surface.RECORDED_ONLY_MODULES),
+            "RECORDED_ONLY_UNDECLARED",
+        )
+
+    def test_regeneration_names_a_smaller_selection_and_new_foreign_codes(self) -> None:
+        # The write path counted only a smaller test count as a loss: a dropped
+        # suite, a newly excluded test or a script marker counting fewer checks
+        # was written away with exit 0. And foreign translated codes - names a
+        # test injected from outside production - were ratcheted as coverage:
+        # cleaning one up cost an acknowledgement, a new one cost nothing.
+        import failure_surface
+
+        baseline = {"runtime": {
+            "unittest_modules": ["m1", "m2"],
+            "script_suites": ["s1", "s2"],
+            "excluded_tests": [".x"],
+            "unittest_test_count": 10,
+            "script_markers": {"s1": "55/55", "s2": "51/51"},
+            "foreign_translated_codes": ["F1"],
+        }}
+
+        def regenerated(change):
+            current = copy.deepcopy(baseline)
+            change(current["runtime"])
+            return failure_surface.regeneration_regressions(baseline, current)
+
+        self.assertEqual(regenerated(lambda runtime: None), [], "RATCHET_OVERFIRE")
+        for name, change, expected in (
+            ("module dropped", lambda r: r["unittest_modules"].remove("m2"),
+             "REGENERATION_LOSES:unittest_modules ['m2']"),
+            ("suite dropped", lambda r: r["script_suites"].remove("s2"),
+             "REGENERATION_LOSES:script_suites ['s2']"),
+            ("test excluded", lambda r: r["excluded_tests"].append(".y"),
+             "REGENERATION_EXCLUDES_MORE:excluded_tests ['.y']"),
+            ("marker shrank", lambda r: r["script_markers"].__setitem__("s2", "45/45"),
+             "REGENERATION_LOSES:script_markers s2 51/51 -> 45/45"),
+            ("marker gone", lambda r: r["script_markers"].pop("s2"),
+             "REGENERATION_LOSES:script_markers s2 51/51 -> None"),
+            ("foreign code new", lambda r: r["foreign_translated_codes"].append("F2"),
+             "REGENERATION_GROWS_FOREIGN ['F2']"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(regenerated(change), [expected], f"RATCHET_SILENT {name}")
+        with self.subTest(name="growth is free"):
+            self.assertEqual(
+                regenerated(lambda r: (
+                    r["unittest_modules"].append("m3"),
+                    r["script_markers"].__setitem__("s2", "52/52"),
+                    r["foreign_translated_codes"].remove("F1"),
+                )),
+                [],
+                "RATCHET_CHARGES_GROWTH",
+            )
 
     def test_regeneration_names_every_closed_world_shrink(self) -> None:
         # The guard that makes --write-baseline a ratchet rather than a
@@ -3838,6 +4593,132 @@ class ContractRegressions(unittest.TestCase):
                 ["REGENERATION_GROWS_BRIDGE_DEBT ['B1']"],
             )
 
+        # The function above names the losses. What `main` does with them is a second
+        # claim: it refuses without consent and keeps the file's bytes, it names every
+        # list that shrank, and when it accepts a loss it keeps the record already on
+        # file under `previous` instead of overwriting it - the reason and the losses
+        # accepted before were gone from the file by the next acceptance.
+        #
+        # The real `main` runs. Only the producer (`build_snapshot`), the two path
+        # constants and `sys.argv` are replaced, and the state file lives in a temporary
+        # directory. Every case builds its own state, so a red names one case and does
+        # not depend on the ones before it. The producer's snapshot has the shipped
+        # baseline's shape, with one closed-world list shrunk per case.
+        import contextlib
+
+        template = json.loads(
+            (ROOT / "tests" / "failure-surface-baseline.json").read_text(encoding="utf-8")
+        )
+        for key in ("accepted_regression", "adopted_baseline"):
+            template.pop(key, None)
+        engine_code = sorted(template["engine_refusal_codes"])[0]
+        wire_code = sorted(template["wire_error_codes"])[0]
+        witnessed_code = sorted(template["runtime"]["witnessed_codes"])[0]
+        lost_engine = f"REGENERATION_LOSES:engine_refusal_codes {[engine_code]}"
+        lost_wire = f"REGENERATION_LOSES:wire_error_codes {[wire_code]}"
+        lost_witnessed = f"REGENERATION_LOSES:witnessed_codes {[witnessed_code]}"
+
+        def produced(engine=False, wire=False, witnessed=False) -> dict:
+            snapshot = copy.deepcopy(template)
+            if engine:
+                snapshot["engine_refusal_codes"].remove(engine_code)
+            if wire:
+                snapshot["wire_error_codes"].remove(wire_code)
+            if witnessed:
+                snapshot["runtime"]["witnessed_codes"].remove(witnessed_code)
+            return snapshot
+
+        def with_record(record) -> dict:
+            state = copy.deepcopy(template)
+            if record is not None:
+                state["accepted_regression"] = copy.deepcopy(record)
+            return state
+
+        def run_main(state, snapshot, argv):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = root / "failure-surface-baseline.json"
+                path.write_text(
+                    json.dumps(state, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                    newline="\n",
+                )
+                before = path.read_bytes()
+                out = io.StringIO()
+                with patch.object(failure_surface, "ROOT", root), patch.object(
+                    failure_surface, "BASELINE_PATH", path
+                ), patch.object(
+                    failure_surface,
+                    "build_snapshot",
+                    return_value=(copy.deepcopy(snapshot), []),
+                ), patch.object(
+                    sys, "argv", ["failure_surface.py", *argv]
+                ), contextlib.redirect_stdout(out):
+                    try:
+                        failure_surface.main()
+                        code = 0
+                    except SystemExit as exc:
+                        code = exc.code
+                after = path.read_bytes()
+                return code, before, after, json.loads(after.decode("utf-8")), out.getvalue()
+
+        record_one = {"reason": "first acceptance", "losses": [lost_engine]}
+        record_two = {
+            "reason": "second acceptance",
+            "losses": [lost_wire],
+            "previous": copy.deepcopy(record_one),
+        }
+
+        with self.subTest(world="main: first loss has no previous"):
+            code, _, _, written, _ = run_main(
+                with_record(None), produced(engine=True),
+                ["--write-baseline", "--accept-regression", "first acceptance"],
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                written["accepted_regression"],
+                {"reason": "first acceptance", "losses": [lost_engine]},
+            )
+
+        with self.subTest(world="main: second shrink keeps the first record"):
+            code, _, _, written, _ = run_main(
+                with_record(record_one), produced(wire=True),
+                ["--write-baseline", "--accept-regression", "second acceptance"],
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                written["accepted_regression"],
+                {"reason": "second acceptance", "losses": [lost_wire], "previous": record_one},
+            )
+
+        with self.subTest(world="main: third shrink keeps both records"):
+            code, _, _, written, _ = run_main(
+                with_record(record_two), produced(witnessed=True),
+                ["--write-baseline", "--accept-regression", "third acceptance"],
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                written["accepted_regression"],
+                {"reason": "third acceptance", "losses": [lost_witnessed], "previous": record_two},
+            )
+
+        with self.subTest(world="main: no loss leaves the record as it was"):
+            code, _, _, written, _ = run_main(
+                with_record(record_two), produced(), ["--write-baseline"]
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(written["accepted_regression"], record_two)
+
+        with self.subTest(world="main: refusal without consent keeps the bytes and names every shrink"):
+            code, before, after, _, output = run_main(
+                with_record(record_one), produced(engine=True, wire=True, witnessed=True),
+                ["--write-baseline"],
+            )
+            self.assertEqual(code, 1)
+            self.assertEqual(before, after)
+            for line in (lost_engine, lost_wire, lost_witnessed, "REGENERATION_REFUSED"):
+                self.assertIn(line, output)
+
     def test_wrong_typed_values_refuse_with_their_declared_code(self) -> None:
         # A CLASS sweep, not two tests for two fixes. The package's central
         # claim is that every refusal is a code from a published vocabulary,
@@ -3876,10 +4757,10 @@ class ContractRegressions(unittest.TestCase):
                     with self.assertRaisesRegex(ContractViolation, rf"^{code}(:|$)"):
                         validate_profile(broken)
         for value in ([], {}):
-            with self.subTest(document="declaration", provenance=value):
+            with self.subTest(document="declaration", removed_provenance=value):
                 broken = copy.deepcopy(fixture.declaration)
                 broken["structural_budget"]["provenance"] = value
-                with self.assertRaisesRegex(ContractViolation, r"^STRUCTURAL_PROVENANCE(:|$)"):
+                with self.assertRaisesRegex(ContractViolation, r"^STRUCTURAL_BUDGET(:|$)"):
                     validate_declaration(broken, fixture.profile)
             with self.subTest(document="state", status=value):
                 engine, _intent, _grant = fixture.engine()
@@ -4232,6 +5113,9 @@ class ContractRegressions(unittest.TestCase):
     def test_exact_execution_replay_survives_declaration_expiry(self) -> None:
         fixture = self.fixture()
         engine, intent, _ = fixture.engine()
+        # A letters-bearing state anchor, so the case flip below is a real
+        # change (the fixture default "3"*64 has no case to flip).
+        intent["state_anchor_hash"] = "CD" * 32
         result = engine.evaluate_intent(
             intent,
             fixture.evidence,
@@ -4250,21 +5134,27 @@ class ContractRegressions(unittest.TestCase):
         before_replay = self.engine_state(engine, record)
 
         fixture.clock.advance(seconds=1_000_000_000)
-        # Every SHA-256 field is case-normalized in the replay identity: a
-        # retry differing only in hex case replays instead of conflicting.
+        # Every DECLARED SHA-256 field (DECLARED_HASH_FIELDS) is case-normalized
+        # in the replay identity: a retry differing only in their hex case
+        # replays instead of conflicting.
         replay_request = copy.deepcopy(request)
         replay_request["permit_hash"] = replay_request["permit_hash"].lower()
         replay_request["state_anchor_hash"] = replay_request[
             "state_anchor_hash"
         ].lower()
+        self.assertNotEqual(
+            replay_request["state_anchor_hash"], request["state_anchor_hash"], "the state-anchor flip changed nothing"
+        )
         replay_request["downstream_receipt_hash"] = replay_request[
             "downstream_receipt_hash"
         ].upper()
         # The NESTED hashes count too. Flipping only the top-level fields left
         # the binding pair unnormalized: a retry that differed just in binding
         # hex case conflicted, though the same lowercase binding is accepted on
-        # a first commit. The identity normalizes by shape, so every SHA-256 in
-        # the request — at any depth — must round-trip.
+        # a first commit. The identity normalizes the declared hash fields at
+        # any depth, so the nested binding hashes must round-trip. It does not
+        # normalize by shape: an identifier that merely looks like a hash keeps
+        # its case (test_request_identity_normalises_declared_hashes_only).
         replay_request["binding"]["profile_hash"] = replay_request["binding"][
             "profile_hash"
         ].lower()
@@ -4752,6 +5642,132 @@ class ContractRegressions(unittest.TestCase):
                 self.assertEqual(receipt["permit_hash"], result["permit_hash"])
                 self.assertEqual(len(engine.receipt_hashes), 1)
 
+    def test_a_malformed_binding_value_is_form_and_a_wellformed_mismatch_is_a_recorded_refusal(
+        self,
+    ) -> None:
+        """The binding's shape is refused before any event; only a well-formed mismatch is recorded.
+
+        `_validate_intent` promises that a binding of the wrong SHAPE is refused before the
+        idempotency key is consumed and before any event, and that only a well-formed binding
+        naming another profile is a refusal with an event. It checked the binding's keys and not
+        its values. The wire schema's patterns end in `$`, which `re.search` also lets match
+        before a trailing newline, so a value with a trailing newline passes the body schema,
+        reaches the comparison, is written into the signed chain as BINDING_MISMATCH and burns
+        the caller's key: the corrected retry answers IDEMPOTENCY_CONFLICT.
+
+        Both ingresses, for each of the six values. The control is the intended side of the
+        distinction: a well-formed binding naming another profile is still a recorded refusal
+        that consumes the key, on the SDK and on the wire.
+        """
+        import nc25_universal_adapter as wire
+
+        def wire_call(app, path, body, scope, idem):
+            raw = json.dumps(body).encode("utf-8")
+            environ = {
+                "REQUEST_METHOD": "POST",
+                "PATH_INFO": path,
+                "CONTENT_LENGTH": str(len(raw)),
+                "wsgi.input": io.BytesIO(raw),
+                "HTTP_X_WORKLOAD_SCOPE": scope,
+                "HTTP_IDEMPOTENCY_KEY": idem,
+            }
+            captured: dict = {}
+
+            def start_response(status, _headers):
+                captured["status"] = status
+
+            payload = b"".join(app(environ, start_response))
+            return int(captured["status"].split()[0]), (json.loads(payload) if payload else {})
+
+        keys = (
+            "profile_id",
+            "profile_version",
+            "profile_hash",
+            "declaration_id",
+            "declaration_version",
+            "declaration_hash",
+        )
+        for key in keys:
+            with self.subTest(malformed_binding_value=key):
+                fixture = self.fixture()
+                engine, intent, _grant = fixture.engine()
+                damaged = copy.deepcopy(intent)
+                damaged["binding"][key] = damaged["binding"][key] + "\n"
+                events_before = len(engine.ledger.events_copy())
+                # SDK ingress: form is refused, nothing is written, the key stays free.
+                with self.assertRaisesRegex(ContractViolation, r"^INTENT_BINDING(:|$)"):
+                    engine.evaluate_intent(damaged, fixture.evidence, actor_scope=ROLE_OPERATOR)
+                self.assertEqual(len(engine.ledger.events_copy()), events_before)
+                self.assertEqual(
+                    engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR)[
+                        "disposition"
+                    ],
+                    "ALLOW",
+                    "SDK_CORRECTED_RETRY_MUST_REUSE_THE_FREE_KEY",
+                )
+
+                # Wire ingress: the body schema lets the value through; the engine refuses it.
+                fixture = self.fixture()
+                engine, intent, _grant = fixture.engine()
+                app = wire.UniversalConnectionHttpAdapter(engine)
+                damaged = copy.deepcopy(intent)
+                damaged["binding"][key] = damaged["binding"][key] + "\n"
+                events_before = len(engine.ledger.events_copy())
+                status, body = wire_call(
+                    app,
+                    "/v1/operator/intents:evaluate",
+                    {"intent": damaged, "evidence_bundle": fixture.evidence},
+                    ROLE_OPERATOR,
+                    intent["idempotency_key"],
+                )
+                self.assertEqual((status, body.get("code")), (400, "INTENT_BINDING"), body)
+                self.assertEqual(len(engine.ledger.events_copy()), events_before)
+                status, body = wire_call(
+                    app,
+                    "/v1/operator/intents:evaluate",
+                    {"intent": intent, "evidence_bundle": fixture.evidence},
+                    ROLE_OPERATOR,
+                    intent["idempotency_key"],
+                )
+                self.assertEqual(status, 200, body)
+
+        # Control: a WELL-FORMED binding naming another profile is a recorded refusal that
+        # consumes the key, on both ingresses - the distinction the check above must not blur.
+        fixture = self.fixture()
+        engine, intent, _grant = fixture.engine()
+        mismatched = copy.deepcopy(intent)
+        mismatched["binding"]["profile_hash"] = mismatched["binding"]["profile_hash"][::-1]
+        events_before = len(engine.ledger.events_copy())
+        result = engine.evaluate_intent(mismatched, fixture.evidence, actor_scope=ROLE_OPERATOR)
+        self.assertEqual(result["disposition"], "REFUSAL")
+        self.assertGreater(len(engine.ledger.events_copy()), events_before)
+        with self.assertRaisesRegex(ContractViolation, r"^IDEMPOTENCY_CONFLICT(:|$)"):
+            engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR)
+
+        fixture = self.fixture()
+        engine, intent, _grant = fixture.engine()
+        app = wire.UniversalConnectionHttpAdapter(engine)
+        mismatched = copy.deepcopy(intent)
+        mismatched["binding"]["profile_hash"] = mismatched["binding"]["profile_hash"][::-1]
+        events_before = len(engine.ledger.events_copy())
+        status, body = wire_call(
+            app,
+            "/v1/operator/intents:evaluate",
+            {"intent": mismatched, "evidence_bundle": fixture.evidence},
+            ROLE_OPERATOR,
+            intent["idempotency_key"],
+        )
+        self.assertEqual(status, 200, body)
+        self.assertGreater(len(engine.ledger.events_copy()), events_before)
+        status, body = wire_call(
+            app,
+            "/v1/operator/intents:evaluate",
+            {"intent": intent, "evidence_bundle": fixture.evidence},
+            ROLE_OPERATOR,
+            intent["idempotency_key"],
+        )
+        self.assertEqual((status, body.get("code")), (409, "IDEMPOTENCY_CONFLICT"), body)
+
     def test_evidence_resolver_does_not_run_before_authority_or_binding_failures(self) -> None:
         for case in ("unknown_authority", "binding_mismatch"):
             with self.subTest(case=case):
@@ -4855,6 +5871,145 @@ class ContractRegressions(unittest.TestCase):
         self.assertEqual(replay, first)
         self.assertEqual(calls, [1])
 
+    def test_malformed_state_restore_is_atomic(self) -> None:
+        for late_field in ("idempotency", "execution_replays", "ledger_events"):
+            for surface in ("read", "write"):
+                with self.subTest(late_field=late_field, surface=surface):
+                    fixture = self.fixture()
+                    with tempfile.TemporaryDirectory() as td:
+                        engine, _, _, intent = self.persistent_engine(fixture, Path(td) / "state.sqlite")
+                        allowed = self.allow_permit(fixture, engine, intent)
+                        retired_key = engine._permit_signer.key_id
+                        try:
+                            engine.rotate_permit_signer(HmacDetachedSigner(b"synthetic-successor-key", "successor"), actor_scope=ROLE_GOVERNANCE)
+                        except ContractViolation as exc:
+                            self.fail("honest stored replay pair refused: " + exc.code)
+                        baseline = engine._snapshot_state()
+                        verifiers = dict(engine._permit_verifiers)
+                        changed = copy.deepcopy(baseline)
+                        changed["status"] = "DRAFT"
+                        changed["grants"] = {}
+                        changed["permits"] = {}
+                        changed["revoked_permit_keys"] = [retired_key]
+                        if late_field == "ledger_events":
+                            changed["ledger_events"][0]["payload"] = {"corrupt": True}
+                            expected = "LEDGER_CHAIN_FAILURE"
+                        else:
+                            changed[late_field] = {"broken": ["only-one"]}
+                            expected = "STATE_" + late_field.upper() + "_PAIR"
+
+                        def install(payload):
+                            connection = engine._state_store.begin_immediate()
+                            try:
+                                engine._state_store.save(connection, engine.declaration_hash, engine.profile_hash, b"synthetic-reference-signing-key", payload)
+                                connection.commit()
+                            finally:
+                                connection.close()
+
+                        self.assertEqual(engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR), allowed)
+                        install(changed)
+                        caught = None
+                        try:
+                            if surface == "read":
+                                engine.ledger_head(ROLE_ARCHITECT)
+                            else:
+                                engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR)
+                        except Exception as exc:
+                            caught = exc
+                        self.assertIsInstance(caught, IntegrityViolation, repr(caught))
+                        self.assertEqual(caught.code, expected)
+                        self.assertEqual(engine._snapshot_state(), baseline, "refused restore changed memory")
+                        self.assertEqual(engine._permit_verifiers, verifiers, "refused restore discarded a verifier")
+                        self.assertEqual(engine._state_store.read(engine.declaration_hash, engine.profile_hash, b"synthetic-reference-signing-key"), changed)
+                        install(baseline)
+                        self.assertEqual(engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR), allowed)
+                        self.assertEqual(engine._snapshot_state(), baseline)
+
+    def test_malformed_state_is_http_integrity_halt(self) -> None:
+        from nc25_universal_adapter import UniversalConnectionHttpAdapter
+        from test_contract_conformance import _http_call
+
+        fixture = self.fixture()
+        with tempfile.TemporaryDirectory() as td:
+            engine, _, _, _ = self.persistent_engine(fixture, Path(td) / "state.sqlite")
+            baseline = engine._snapshot_state()
+            adapter = UniversalConnectionHttpAdapter(engine)
+            control = _http_call(adapter, "GET", "/v1/architect/ledger/head", scope=ROLE_ARCHITECT)
+            self.assertEqual(control[0], 200, control)
+            changed = copy.deepcopy(baseline)
+            del changed["status"]
+            connection = engine._state_store.begin_immediate()
+            try:
+                engine._state_store.save(connection, engine.declaration_hash, engine.profile_hash, b"synthetic-reference-signing-key", changed)
+                connection.commit()
+            finally:
+                connection.close()
+            status, body = _http_call(adapter, "GET", "/v1/architect/ledger/head", scope=ROLE_ARCHITECT)
+            self.assertEqual(status, 503, body)
+            self.assertEqual(body["code"], "STATE_FIELDS")
+            self.assertEqual(engine._snapshot_state(), baseline)
+
+    def test_malformed_state_representation_on_reopen(self) -> None:
+        fixture = self.fixture()
+        with tempfile.TemporaryDirectory() as td:
+            engine, profile, declaration, intent = self.persistent_engine(fixture, Path(td) / "state.sqlite")
+            allowed = self.allow_permit(fixture, engine, intent)
+            engine.commit_execution(fixture.execution_request(engine, allowed, intent), actor_scope=ROLE_EXECUTOR, route_permit_hash=allowed["permit_hash"])
+            baseline = engine._snapshot_state()
+            expected_head = engine.ledger.head()
+            permit_hash = allowed["permit_hash"]
+            rows = (
+                ("STATE_SHAPE", (("ledger_events",), "set", {})),
+                ("STATE_SHAPE", (("ledger_events",), "set", [None])),
+                ("STATE_SHAPE", (("ledger_events",), "set", [[]])),
+                ("STATE_SHAPE", (("ledger_events",), "set", [0])),
+                ("STATE_SHAPE", (("ledger_events",), "set", ["not-an-event"])),
+                ("STATE_SHAPE", (("decisions",), "set", [])),
+                ("STATE_SHAPE", (("decisions",), "set", {"A" * 64: []})),
+                ("STATE_SHAPE", (("receipt_hashes",), "set", {})),
+                ("STATE_SHAPE", (("receipt_hashes",), "set", ["not-a-hash"])),
+                ("STATE_SHAPE", (("structural_remaining",), "set", -1)),
+                ("STATE_SHAPE", (("structural_remaining",), "set", declaration["structural_budget"]["capacity"] + 1)),
+                ("INVALID_TIMESTAMP", (("activated_at",), "set", "invalid-time")),
+                ("STATE_REVOKED_GRANTS", (("revoked_grants",), "set", [[]])),
+                ("STATE_SHAPE", (("grants",), "set", {"bad": []})),
+                ("STATE_PERMIT_FIELDS", (("permits", permit_hash), "set", [{}])),
+                ("STATE_SHAPE", (("permits", permit_hash, "body"), "set", [])),
+                ("STATE_SHAPE", (("permits", permit_hash, "consumed"), "set", 1)),
+                ("STATE_SHAPE", (("permits", permit_hash, "invalidated_reason"), "set", [])),
+                ("STATE_IDEMPOTENCY_PAIR", (("idempotency",), "set", {"broken": ["not-a-hash", {}]})),
+                ("STATE_EXECUTION_REPLAYS_PAIR", (("execution_replays",), "set", {"broken": ["A" * 64, []]})),
+                ("STATE_COMMITTED_RESOURCE_FIELDS", (("committed_resources", 0), "set", [{}])),
+                ("STATE_SHAPE", (("committed_resources", 0, "debits"), "set", [])),
+                ("STATE_SHAPE", (("committed_resources", 0, "debits"), "set", {"bad": -1})),
+            )
+            for code, operation in rows:
+                with self.subTest(state_field=operation[0][0], state_refusal=code):
+                    changed = self._corrupt(baseline, (operation,))
+                    connection = engine._state_store.begin_immediate()
+                    try:
+                        engine._state_store.save(connection, engine.declaration_hash, engine.profile_hash, b"synthetic-reference-signing-key", changed)
+                        connection.commit()
+                    finally:
+                        connection.close()
+                    caught = None
+                    try:
+                        UniversalConnectionLedger(profile, declaration, signing_key=b"synthetic-reference-signing-key", clock=fixture.clock, state_path=engine._state_store.path)
+                    except Exception as exc:
+                        caught = exc
+                    self.assertIsInstance(caught, IntegrityViolation, repr(caught))
+                    self.assertEqual(caught.code, code)
+                    self.assertEqual(engine._snapshot_state(), baseline)
+                    self.assertEqual(engine._state_store.read(engine.declaration_hash, engine.profile_hash, b"synthetic-reference-signing-key"), changed)
+                    connection = engine._state_store.begin_immediate()
+                    try:
+                        engine._state_store.save(connection, engine.declaration_hash, engine.profile_hash, b"synthetic-reference-signing-key", baseline)
+                        connection.commit()
+                    finally:
+                        connection.close()
+                    reopened = UniversalConnectionLedger(profile, declaration, signing_key=b"synthetic-reference-signing-key", clock=fixture.clock, state_path=engine._state_store.path)
+                    self.assertEqual(reopened.ledger_head(ROLE_ARCHITECT), expected_head)
+
     def test_sqlite_public_reads_reload_latest_snapshot(self) -> None:
         fixture = self.fixture()
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -4939,6 +6094,27 @@ class ContractRegressions(unittest.TestCase):
                 ("STATE_EXECUTION_REPLAYS_PAIR", (("execution_replays",), "set", {"broken": ["only-one"]})),
                 ("STATE_COMMITTED_RESOURCES", (("committed_resources",), "set", {})),
                 ("STATE_COMMITTED_RESOURCE_FIELDS", (("committed_resources", 0, "debits"), "delete", None)),
+                ("STATE_SHAPE", (("ledger_events",), "set", {})),
+                ("STATE_SHAPE", (("ledger_events",), "set", "")),
+                ("STATE_SHAPE", (("decisions",), "set", [])),
+                ("STATE_SHAPE", (("decisions",), "set", {"A" * 64: []})),
+                ("STATE_SHAPE", (("receipt_hashes",), "set", {})),
+                ("STATE_SHAPE", (("receipt_hashes",), "set", ["not-a-hash"])),
+                ("STATE_SHAPE", (("structural_remaining",), "set", -1)),
+                ("STATE_SHAPE", (("structural_remaining",), "set", True)),
+                ("STATE_SHAPE", (("structural_remaining",), "set", {})),
+                ("INVALID_TIMESTAMP", (("activated_at",), "set", {})),
+                ("INVALID_TIMESTAMP", (("activated_at",), "set", "invalid-time")),
+                ("STATE_REVOKED_GRANTS", (("revoked_grants",), "set", [[]])),
+                ("STATE_SHAPE", (("grants",), "set", {"bad": []})),
+                ("STATE_SHAPE", (("permits", permit_hash, "body"), "set", [])),
+                ("STATE_SHAPE", (("permits", permit_hash, "consumed"), "set", 1)),
+                ("STATE_SHAPE", (("permits", permit_hash, "invalidated_reason"), "set", [])),
+                ("STATE_SHAPE", (("committed_resources", 0, "debits"), "set", [])),
+                ("STATE_SHAPE", (("committed_resources", 0, "debits"), "set", {"bad": -1})),
+                ("STATE_SHAPE", (("structural_remaining",), "set", declaration["structural_budget"]["capacity"] + 1)),
+                ("STATE_IDEMPOTENCY_PAIR", (("idempotency",), "set", {"broken": ["not-a-hash", {}]})),
+                ("STATE_EXECUTION_REPLAYS_PAIR", (("execution_replays",), "set", {"broken": ["A" * 64, []]})),
             )
             reads = (
                 ("observer", lambda: reader.observer_projection(actor_scope=ROLE_ARCHITECT)),
@@ -4968,15 +6144,25 @@ class ContractRegressions(unittest.TestCase):
                 with closing(sqlite3.connect(state_path)) as connection:
                     return connection.execute("SELECT * FROM ledger_state").fetchall()
 
-            corruptions = [(code, self._corrupt(state, (operation,))) for code, operation in rows]
-            corruptions.append(("STATE_SHAPE", []))
-            for code, changed in corruptions:
+            corruptions = [(code, operation[0][0], self._corrupt(state, (operation,))) for code, operation in rows]
+            corruptions.append(("STATE_SHAPE", "$", []))
+            for code, state_field, changed in corruptions:
                 install(changed)
                 before = stored_row()
                 for surface, call in reads:
-                    with self.subTest(state_refusal=code, surface=surface):
-                        with self.assertRaisesRegex(ContractViolation, rf"^{code}(:|$)"):
-                            call()
+                    with self.subTest(state_refusal=code, state_field=state_field, surface=surface):
+                        # assertRaisesRegex is the form the failure-surface tracer credits: it counts
+                        # a code as asserted and witnessed through this context, and the recorded
+                        # baseline lists these rows' codes as asserted here. An exception of another
+                        # type leaves that context, and is turned into a failure naming it rather
+                        # than an error, as the caught form this replaces did.
+                        try:
+                            with self.assertRaisesRegex(IntegrityViolation, rf"^{code}(:|$)"):
+                                call()
+                        except AssertionError:
+                            raise
+                        except Exception as exc:  # noqa: BLE001 - reported as the failure
+                            self.fail(f"not an IntegrityViolation: {exc!r}")
                         self.assertEqual(stored_row(), before, "refusal changed durable state")
                 install(state)
                 with self.subTest(state_control=code):
@@ -4997,6 +6183,240 @@ class ContractRegressions(unittest.TestCase):
                 with self.subTest(state_control=code):
                     self.assertEqual(reader.ledger_head(ROLE_ARCHITECT), writer.ledger.head())
                     self.assertEqual(reader._snapshot_state(), state)
+
+    def test_restore_holds_every_stored_record_to_the_form_it_was_written_in(self) -> None:
+        # A MAC-valid snapshot comes from a holder of the keys or a faulty writer. Its records
+        # kept their containers and lost their content, and the operation that read a record
+        # next did with it what it would. Measured on 01.11 in 24 rows: a grant whose permitted
+        # actions were one string ALLOWED an action the same text as a list refuses, since `in`
+        # searched the string; a grant {} left the commit as a bare KeyError, 503
+        # INTERNAL_FAILURE on the wire; a valid_from that is not a time reached the client
+        # channel as 400 INVALID_TIMESTAMP; a decision {} was served as stored; an event
+        # without its type passed a re-signed chain; and a value nested 600 deep stopped the
+        # restore as a bare RecursionError. Each is refused at restore now, per call and on
+        # reopen, under a detail that names the record, so a row is met by its own check only.
+        import nc25_universal_ledger as engine_module
+
+        key = b"synthetic-reference-signing-key"
+        fixture = self.fixture()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            state_path = Path(temporary_directory) / "ledger-state.sqlite3"
+            writer, profile, declaration, intent = self.persistent_engine(fixture, state_path)
+
+            def reopen():
+                return UniversalConnectionLedger(
+                    profile, declaration, signing_key=key, clock=fixture.clock,
+                    state_path=state_path,
+                )
+
+            allowed = self.allow_permit(fixture, writer, intent)
+            writer.commit_execution(
+                fixture.execution_request(writer, allowed, intent),
+                actor_scope=ROLE_EXECUTOR,
+                route_permit_hash=allowed["permit_hash"],
+            )
+            refused_intent = copy.deepcopy(intent)
+            refused_intent["idempotency_key"] = intent["idempotency_key"] + "-refused"
+            refused_intent["target_system_id"] = "local-fallback"
+            refused = writer.evaluate_intent(
+                refused_intent, fixture.evidence, actor_scope=ROLE_OPERATOR
+            )
+            self.assertEqual(refused["disposition"], "REFUSAL")
+            state = writer._snapshot_state()
+            reader = reopen()
+
+            # The three wire records are held to the schemas' own field sets, so a schema that
+            # gains or loses a field and an engine that does not follow it disagree here. The
+            # sets without a schema - the event, the decisions, the receipt seed - need no row
+            # of their own: the writer reloads its own state on its next call, so a set that
+            # drifts from what the engine writes refuses the writer itself, measured, before
+            # this test reaches its first row. A set the engine does not declare reads as
+            # empty, so the tie fails as a failure and the rows below still run.
+            schemas = json.loads(
+                (ROOT / "core" / "schemas" / "runtime-contracts.schema.json").read_text(
+                    encoding="utf-8"
+                )
+            )["$defs"]
+            for name, constant in (
+                ("execution_permit", "PERMIT_BODY_FIELDS"),
+                ("operator_result", "OPERATOR_RESULT_FIELDS"),
+                ("execution_receipt", "RECEIPT_FIELDS"),
+            ):
+                fields = set(getattr(engine_module, constant, frozenset()))
+                with self.subTest(form=name):
+                    self.assertEqual(set(schemas[name]["required"]), fields)
+                    self.assertEqual(set(schemas[name]["properties"]), fields)
+            events = state["ledger_events"]
+            kinds = {event["event_type"]: index for index, event in enumerate(events)}
+            self.assertEqual(
+                set(kinds),
+                {"DECLARATION_ACTIVATED", "AUTHORITY_GRANTED", "PERMIT_ISSUED",
+                 "EXECUTION_RECORDED", "INTENT_NON_EXECUTABLE"},
+            )
+            # Control: the honest state - both decisions and both results, a permit, a
+            # receipt and every event kind above - restores per call and on reopen. A check
+            # that refused everything would meet every row below.
+            try:
+                self.assertEqual(reader.ledger_head(ROLE_ARCHITECT), writer.ledger.head())
+                self.assertEqual(reopen()._snapshot_state(), state)
+            except ContractViolation as exc:
+                self.fail(f"honest state refused on restore: {exc}")
+            self.assertEqual(reader._snapshot_state(), state)
+
+            reads = (
+                ("observer", lambda: reader.observer_projection(actor_scope=ROLE_ARCHITECT)),
+                ("permit", lambda: reader.architect_permit(
+                    allowed["permit_hash"], actor_scope=ROLE_ARCHITECT)),
+                ("decision", lambda: reader.architect_decision(
+                    allowed["request_hash"], actor_scope=ROLE_ARCHITECT)),
+                ("registry", lambda: reader.registry_record(
+                    declaration["connector"]["connector_id"], actor_scope=ROLE_ARCHITECT)),
+                ("head", lambda: reader.ledger_head(ROLE_ARCHITECT)),
+                ("evaluate", lambda: reader.evaluate_intent(
+                    intent, fixture.evidence, actor_scope=ROLE_OPERATOR)),
+                ("reopen", reopen),
+            )
+
+            def install(payload):
+                connection = writer._state_store.begin_immediate()
+                try:
+                    writer._state_store.save(
+                        connection, writer.declaration_hash, writer.profile_hash, key, payload
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+
+            def refused_as(code, detail_pattern, call):
+                try:
+                    with self.assertRaisesRegex(
+                        IntegrityViolation, rf"^{re.escape(code)}: {detail_pattern}"
+                    ):
+                        call()
+                except AssertionError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - reported as the failure
+                    self.fail(f"not an IntegrityViolation: {exc!r}")
+
+            grant_id = intent["authority_grant_id"]
+            permit_hash = allowed["permit_hash"]
+            body = state["permits"][permit_hash]["body"]
+            receipt = state["execution_replays"][permit_hash][1]
+            refusal = state["decisions"][refused["request_hash"]]
+            self.assertEqual(
+                (refusal["gate_engaged"], refusal["gate_bit"]), (False, None),
+                "fixture precondition: the refusal is recorded before the gate",
+            )
+            rows = (
+                # First the row that ALLOWED: the permitted actions stored as one string,
+                # which holds the identifier of an action the grant never listed.
+                ("STATE_SHAPE", "grant: AUTHORITY_ACTIONS",
+                 ("grants", grant_id, "permitted_action_ids"), "NOT_" + intent["action_id"]),
+                ("STATE_SHAPE", "grant: AUTHORITY_GRANT_FIELDS", ("grants", grant_id), {}),
+                ("STATE_SHAPE", "grant: INVALID_TIMESTAMP",
+                 ("grants", grant_id, "valid_from"), "not-a-time"),
+                ("STATE_SHAPE", "grant: key", ("grants", grant_id, "grant_id"), "another-grant"),
+                ("STATE_SHAPE", "decision: missing fields",
+                 ("decisions", allowed["request_hash"]), {}),
+                # Zero, not one: this refusal was recorded before the gate, with no gate
+                # bit, and a truthy 1 would be refused by the bit's pairing rather than by
+                # the type of the flag.
+                ("STATE_SHAPE", "decision: gates",
+                 ("decisions", refused["request_hash"], "gate_engaged"), 0),
+                # In an event, which is copied before the chain is verified: a grant or a
+                # decision this deep is refused by its own form first.
+                ("STATE_SHAPE", "nesting depth",
+                 ("ledger_events", 0, "payload", "deep"), _nested_list(600)),
+                ("STATE_SHAPE", "permit body: ttl_seconds",
+                 ("permits", permit_hash, "body", "ttl_seconds"), 0),
+                ("STATE_SHAPE", "permit body: hash",
+                 ("permits", permit_hash, "body", "structural_cost"), body["structural_cost"] + 1),
+                ("STATE_IDEMPOTENCY_PAIR", "result: missing fields",
+                 ("idempotency", intent["idempotency_key"], 1), {}),
+                ("STATE_IDEMPOTENCY_PAIR", "result: channel",
+                 ("idempotency", refused_intent["idempotency_key"], 1, "channel"), "OUTPUT"),
+                ("STATE_EXECUTION_REPLAYS_PAIR", "receipt: missing fields",
+                 ("execution_replays", permit_hash, 1), {}),
+                ("STATE_EXECUTION_REPLAYS_PAIR", "receipt: hash",
+                 ("execution_replays", permit_hash, 1, "structural_debit"),
+                 receipt["structural_debit"] + 1),
+            )
+            for code, detail, path, value in rows:
+                install(self._corrupt(state, ((path, "set", value),)))
+                for surface, call in reads:
+                    with self.subTest(row=detail, surface=surface):
+                        refused_as(code, re.escape(detail), call)
+                install(state)
+
+            # An event is held to its form only once the chain admits it, so these rows
+            # re-seal the chain under the writer's signer from the changed event on. The
+            # process that saw the honest head answers such a row as a rollback; a cold
+            # reopen has nothing to compare against, and this check is what refuses it.
+            signer = writer.ledger._event_signer
+
+            def resealed(chain, start):
+                previous = chain[start - 1]["event_hash"] if start else "0" * 64
+                for event in chain[start:]:
+                    event["previous_event_hash"] = previous
+                    event["event_hash"] = sha256_hex({
+                        name: item for name, item in event.items()
+                        if name not in {"event_hash", "signature"}
+                    })
+                    event["signature"] = dict(signer.sign(event["event_hash"].encode("ascii")))
+                    previous = event["event_hash"]
+                return chain
+
+            # Control: re-sealing an unchanged chain reproduces it byte for byte.
+            self.assertEqual(resealed(copy.deepcopy(events), 0), events)
+            event_rows = (
+                ("event: missing fields: ['event_type']", "INTENT_NON_EXECUTABLE",
+                 lambda event: event.pop("event_type")),
+                ("event: missing fields: ['disposition']", "INTENT_NON_EXECUTABLE",
+                 lambda event: event["payload"].pop("disposition")),
+                ("event: missing fields: ['outcome']", "EXECUTION_RECORDED",
+                 lambda event: event["payload"]["receipt_seed"].pop("outcome")),
+            )
+            for detail, kind, change in event_rows:
+                changed = copy.deepcopy(state)
+                change(changed["ledger_events"][kinds[kind]])
+                resealed(changed["ledger_events"], kinds[kind])
+                install(changed)
+                with self.subTest(row=detail, surface="reopen"):
+                    refused_as("STATE_SHAPE", re.escape(detail), reopen)
+                install(state)
+
+            # Authenticated text the parser cannot read the way the engine wrote it. Past the
+            # parser's own depth limit, 3.12 raises RecursionError and 3.14 returns the value,
+            # which the depth walk then refuses: one code, by the route each interpreter takes.
+            def install_text(text):
+                digest = hashlib.sha256(text.encode("ascii")).hexdigest().upper()
+                with closing(sqlite3.connect(state_path)) as connection:
+                    connection.execute(
+                        "UPDATE ledger_state SET state_json = ?, state_hash = ?, state_mac = ?",
+                        (text, digest, engine_module.hmac_hex(key, digest)),
+                    )
+                    connection.commit()
+
+            for label, text, detail_pattern in (
+                ("state_json: syntax", "{", "state_json"),
+                ("state_json: depth", '{"deep": ' + "[" * 50000 + "]" * 50000 + "}",
+                 "(state_json|nesting depth)"),
+            ):
+                install_text(text)
+                for surface, call in reads:
+                    with self.subTest(row=label, surface=surface):
+                        refused_as("STATE_SHAPE", detail_pattern, call)
+                install(state)
+
+            # A grant is held to its contract less the one check that belongs to the moment
+            # of issue: past its window the stored grant is history, and it restores.
+            fixture.clock.advance(seconds=1_000_000_000)
+            with self.subTest(row="historical grant past its window"):
+                try:
+                    restored = reopen()
+                except ContractViolation as exc:
+                    self.fail(f"historical grant past its window refused on restore: {exc}")
+                self.assertEqual(restored._snapshot_state(), state)
 
     def test_action_target_pair_is_bound_by_declaration(self) -> None:
         fixture = self.fixture()
@@ -5109,6 +6529,21 @@ class ContractRegressions(unittest.TestCase):
         # otherwise a failed execution is indistinguishable from a committed one
         # on the observer's monitoring surface.
         self.assertEqual(authorized_after, authorized_before)
+        # And the other direction: a COMMITTED execution adds exactly one.
+        committed, committed_intent, _ = fixture.engine()
+        allowed = committed.evaluate_intent(committed_intent, fixture.evidence, actor_scope=ROLE_OPERATOR)
+
+        def authorized(on) -> int:
+            return sum(1 for row in on.observer_projection(actor_scope=ROLE_ARCHITECT)
+                       if row["message_code"] == "EXECUTION_AUTHORIZED")
+
+        before = authorized(committed)
+        committed.commit_execution(
+            fixture.execution_request(committed, allowed, committed_intent),
+            actor_scope=ROLE_EXECUTOR,
+            route_permit_hash=allowed["permit_hash"],
+        )
+        self.assertEqual(authorized(committed), before + 1, "a COMMITTED execution was not projected as authorized")
 
     def test_review_bundle_is_deterministic_and_manifest_bound(self) -> None:
         manifest = json.loads(
@@ -5290,14 +6725,32 @@ class ContractRegressions(unittest.TestCase):
                 encoding="utf-8",
                 newline="\n",
             )
+            # The runner's guard too: a planted `run_acceptance` must carry `bound_bytes`,
+            # or the `from run_acceptance import bound_bytes` before the guard fails first.
+            planted_runner = Path(directory) / "planted_runner.py"
+            planted_runner.write_text(
+                preamble
+                + "import types\n"
+                "runner = types.ModuleType('run_acceptance')\n"
+                "runner.bound_bytes = lambda manifest: ('', '')\n"
+                "sys.modules['run_acceptance'] = runner\n"
+                "import tools.build_acceptance_report\n",
+                encoding="utf-8",
+                newline="\n",
+            )
             refused = subprocess.run(
                 [sys.executable, "-B", str(planted)],
+                cwd=str(ROOT), capture_output=True, text=True, check=False)
+            refused_runner = subprocess.run(
+                [sys.executable, "-B", str(planted_runner)],
                 cwd=str(ROOT), capture_output=True, text=True, check=False)
             admitted = subprocess.run(
                 [sys.executable, "-B", str(clean)],
                 cwd=str(ROOT), capture_output=True, text=True, check=False)
         self.assertNotEqual(refused.returncode, 0, refused.stdout)
         self.assertIn("ACCEPTANCE_VERIFIER_MODULE_FOREIGN", refused.stderr)
+        self.assertNotEqual(refused_runner.returncode, 0, "the runner's import guard is not driven")
+        self.assertIn("ACCEPTANCE_RUNNER_MODULE_FOREIGN", refused_runner.stderr, "the runner's import guard is not driven")
         self.assertEqual(admitted.returncode, 0, admitted.stderr)
         self.assertEqual(
             Path(admitted.stdout.strip()).resolve().parent, (ROOT / "tests").resolve())
@@ -5400,10 +6853,10 @@ class ContractRegressions(unittest.TestCase):
     def test_the_report_terminal_line_names_the_gate_rows(self) -> None:
         """The report's required terminal result is the count the gate rows make.
 
-        `ACCEPTANCE_STEPS=8/8 PASS` stands in the report as a literal the generator never
+        `ACCEPTANCE_STEPS=9/9 PASS` stands in the report as a literal the generator never
         rewrites - the table rows, the date, the status and the sections it owns are
-        rewritten, and this line is none of them - so a ninth gate row would have left it
-        naming eight while every row beside it moved. Held here against `GATE_ROWS`, the one
+        rewritten, and this line is none of them - so a tenth gate row would have left it
+        naming nine while every row beside it moved. Held here against `GATE_ROWS`, the one
         home of that count: the line stays hand-kept, and this is what keeps it honest.
         """
         report = (ROOT / "ACCEPTANCE-REPORT.md").read_text(encoding="utf-8")
@@ -5696,6 +7149,12 @@ class ContractRegressions(unittest.TestCase):
             # compares the file a rebind would rewrite, not a bystander.
             report = (work / "root" / "ACCEPTANCE-REPORT.md") if driver in ("rebind", "cli") else (work / "report.md")
             text = (ROOT / "ACCEPTANCE-REPORT.md").read_text(encoding="utf-8")
+            # The rows are written against the report as the generation half leaves it. A
+            # --rebind-only adds the marker and the package report keeps it until the next
+            # generation, so the copy starts without it wherever the suite runs.
+            text = text.replace("\n" + REBIND_MARKER, "", 1)
+            self.assertNotIn(" ".join(REBIND_MARKER.split()), " ".join(text.split()),
+                             "fixture text: the rebind marker")
             if target == "report":
                 for old, new, occurrences in operations:
                     # A reworded report fails here as a fixture fault, not as
@@ -5870,7 +7329,7 @@ class ContractRegressions(unittest.TestCase):
             ("ACCEPTANCE_STEP_ENTRY", "update", "acceptance", [(steps + (1, "id"), "set", "functional_behaviour")]),
             ("ACCEPTANCE_STEP_ENTRY", "update", "acceptance", [(steps + (0, "total"), "set", 94)]),
             # A gate that ran NO checks. `passed == total` admits zero on both sides, so
-            # eight of these beside the aggregate `8/8` published eight gates passed with
+            # nine of these beside the aggregate `9/9` published nine gates passed with
             # nothing run - and the runner reaches the shape from our own tree, since a
             # suite that ran no tests still prints `Ran 0 tests` and `OK`.
             ("ACCEPTANCE_STEP_ENTRY", "update", "acceptance", [(steps + (0, "passed"), "set", 0), (steps + (0, "total"), "set", 0)]),
@@ -5934,7 +7393,7 @@ class ContractRegressions(unittest.TestCase):
             ("REPORT_CANONICAL_COMMAND", "update", "source_manifest", [(core_input + ("file_name",), "set", "core.md`; py -3 tests/run_acceptance.py; `x")]),
             # A gate row nobody declares. Each declared row is rewritten exactly once,
             # which says nothing about an extra one: measured, without this refusal the
-            # written report carries nine rows under a terminal line reading `8/8`.
+            # written report carries ten rows under a terminal line reading `9/9`.
             ("REPORT_GATE_ROWS", "update", "report", [("| Package integrity checks |", "| Retired gate | `1/1 PASS` |\n| Package integrity checks |", 1)]),
             # A code name written twice in the baseline. `len` counts entries, so without
             # this refusal the figure the report calls a count of codes would be a count of lines.
@@ -6039,7 +7498,7 @@ class ContractRegressions(unittest.TestCase):
             # depths, not the constant: an expectation computed from it would move with its
             # mutation.
             ("EVIDENCE_JSON_INVALID: geometry.json", "update", "geometry_raw", "[" * 65 + "]" * 65),
-            ("EVIDENCE_JSON_OBJECT_REQUIRED", "update", "geometry_raw", "[" * 64 + "]" * 64),
+            ("EVIDENCE_JSON_OBJECT_REQUIRED: geometry.json", "update", "geometry_raw", "[" * 64 + "]" * 64),
             ("FAILURE_SURFACE_ALL", "update", "baseline", [(("emission_points_all",), "set", -1)]),
             # The eight figures were `len(...)` of whatever the key held, and `len` is true
             # of a string and of a mapping as well as of a list. A bare string
@@ -6063,11 +7522,12 @@ class ContractRegressions(unittest.TestCase):
             ("REPORT_FIGURES_SECTION:2", "update", "report", [("## Failure-surface figures", "## Failure-surface figures\n\nearlier\n\n## Failure-surface figures", 1)]),
             ("REPORT_DOCUMENT_SECTION:0", "update", "report", [("## Security and data boundary", "## Security", 1)]),
             ("REPORT_DOCUMENT_SECTION:2", "update", "report", [("## Document artifact", "## Document artifact\n\nearlier\n\n## Document artifact", 1)]),
-            ("EVIDENCE_JSON_OBJECT_REQUIRED", "update", "acceptance_raw", "[]"),
-            ("EVIDENCE_JSON_OBJECT_REQUIRED", "update", "geometry_raw", "[]"),
-            ("EVIDENCE_JSON_OBJECT_REQUIRED", "update", "source_manifest_raw", "[]"),
-            ("EVIDENCE_JSON_OBJECT_REQUIRED", "update", "baseline_raw", "[]"),
-            ("EVIDENCE_JSON_OBJECT_REQUIRED", "rebind", "manifest_raw", "[]"),
+            # Five call sites share the reader, so every one of its refusals names the file.
+            ("EVIDENCE_JSON_OBJECT_REQUIRED: acceptance.json", "update", "acceptance_raw", "[]"),
+            ("EVIDENCE_JSON_OBJECT_REQUIRED: geometry.json", "update", "geometry_raw", "[]"),
+            ("EVIDENCE_JSON_OBJECT_REQUIRED: SOURCE-MANIFEST.json", "update", "source_manifest_raw", "[]"),
+            ("EVIDENCE_JSON_OBJECT_REQUIRED: failure-surface-baseline.json", "update", "baseline_raw", "[]"),
+            ("EVIDENCE_JSON_OBJECT_REQUIRED: PACKAGE-MANIFEST.json", "rebind", "manifest_raw", "[]"),
             ("REBIND_MANIFEST_DIGEST:0", "rebind", "report", [("every entry except this report, digest to `", "every entry except this report, digests to `", 1)]),
             ("REBIND_MANIFEST_DIGEST:2", "rebind", "report", [("## Bound bytes", "every entry except this report, digest to `" + "A" * 64 + "`\n\n## Bound bytes", 1)]),
             # The same doubling wearing the disguise the count did not check for: a second
@@ -6082,6 +7542,7 @@ class ContractRegressions(unittest.TestCase):
             # pins the refusal `:0`. Refusing a duplicate must not buy a silent no-op.
             ("REBIND_MANIFEST_DIGEST:0", "rebind", "report", [("every entry except this report, digest to `", "every entry except this report, digest to `" + "a" * 64 + "`x`", 1)]),
             ("REBIND_DOCUMENT_DIGEST:0", "rebind", "report", [("the geometry below describes has SHA-256 `", "the geometry below describe has SHA-256 `", 1)]),
+            ("REBIND_MARKER_SITE:0", "rebind", "report", [("this report when either differs.", "this report when either differs", 1)]),
             # Unchecked, this value would go into the report through the substitution
             # template, its backslash read as a template escape.
             ("REBIND_DOCUMENT_DIGEST_SHAPE", "rebind", "manifest", [(("files", document_entry, "sha256"), "set", "A" * 63 + "\\")]),
@@ -6392,6 +7853,26 @@ class ContractRegressions(unittest.TestCase):
         self.assertIn(
             "Automated geometry evidence does not claim", rendered
         )
+        # The counts are the automated geometry audit's, and the scope stands beside them
+        # rather than in another section: two audits of one PDF reported one warning and
+        # none, and a zero printed bare read as a property of the document. Whitespace is
+        # joined as the package verifier joins it, so a rewrap is not a red.
+        scope = (
+            "Both counts come from the automated geometry audit, which runs outside the"
+            " package, and cover only the issue classes that audit checks. The package"
+            " does not define those classes or re-check the render, so a zero shows only"
+            " that the audit found nothing it looks for."
+        )
+        self.assertIn(f"7 non-blocking warnings. {scope}", " ".join(rendered.split()))
+        # And beside a zero: an edit that showed the scope only beside a non-zero count
+        # would leave the assertion above green while a published zero stood bare.
+        rendered_at_zero = self._render_acceptance_report(
+            {"source_mode": "strict", "external_source_checks": "PASS"},
+            geometry_overrides={"warning_count": 0},
+        )
+        self.assertIn(
+            f"0 non-blocking warnings. {scope}", " ".join(rendered_at_zero.split())
+        )
         self.assertNotIn("visually inspected", rendered)
         self.assertIn("headless LibreOffice PDF render", rendered)
         self.assertNotIn("Microsoft Word", rendered)
@@ -6639,10 +8120,17 @@ class ContractRegressions(unittest.TestCase):
                 self.assertEqual(caught.exception.__cause__.code, code)
                 self.assertEqual(engine._snapshot_state(), before)
         request = fixture.execution_request(engine, result, intent)
-        engine.commit_execution(request, actor_scope=ROLE_EXECUTOR,
-                                route_permit_hash=request["permit_hash"])
+        before_hashes = list(engine.receipt_hashes)
+        receipt = engine.commit_execution(request, actor_scope=ROLE_EXECUTOR,
+                                          route_permit_hash=request["permit_hash"])
         record = engine.registry_record(active_connector_id, actor_scope=ROLE_ARCHITECT)
-        self.assertEqual(record["latest_receipt_root"], sha256_hex(engine.receipt_hashes))
+        # The new element comes from the receipt the executor received, not from the
+        # engine's own list: the same expression on both sides could not fail.
+        self.assertEqual(
+            record["latest_receipt_root"],
+            sha256_hex(before_hashes + [receipt["receipt_hash"]]),
+            "the receipt root does not bind the issued receipt",
+        )
         self.assertEqual(record["revoked"], False)
 
     def test_detached_signer_configuration_and_event_integrity(self) -> None:
@@ -6841,6 +8329,77 @@ class ContractRegressions(unittest.TestCase):
             route_permit_hash=result["permit_hash"],
         )
         self.assertEqual(receipt["outcome"], "COMMITTED")
+
+    def test_permit_verification_report_refuses_with_the_codes_the_commit_would(self) -> None:
+        """`architect_permit_verification` says whether this engine can verify a permit's
+        seal, changes nothing, and refuses with the codes `commit_execution` refuses with.
+
+        The bridge asks it before the downstream call, so each refusal it makes is one the
+        commit would otherwise have made after the external effect. One case per corruption
+        the method documents, each paired with the commit's own answer on the SAME corrupted
+        record, and the untouched permit as the control: it verifies, and the record is put
+        back after every case so one corruption cannot stand in for the next.
+        """
+        fixture = self.fixture()
+        engine, intent, _ = fixture.engine()
+        result = self.allow_permit(fixture, engine, intent)
+        permit_hash = result["permit_hash"]
+        record = engine.permits[permit_hash]
+        request = fixture.execution_request(engine, result, intent)
+        original_body = copy.deepcopy(record.body)
+        original_signature = copy.deepcopy(record.signature)
+        head_before = engine.ledger.head()
+
+        def verification():
+            return engine.architect_permit_verification(permit_hash, actor_scope=ROLE_ARCHITECT)
+
+        self.assertEqual(verification(), {"permit_hash": permit_hash, "verified": True})
+        corruptions = (
+            ("body no longer matches its hash", "PERMIT_HASH_FAILURE",
+             lambda: setattr(record, "body", dict(original_body, tampered="yes"))),
+            ("signature bytes changed", "PERMIT_SIGNATURE_FAILURE",
+             lambda: setattr(record, "signature", dict(
+                 original_signature,
+                 signature=("a" if original_signature["signature"][0] != "a" else "b")
+                 + original_signature["signature"][1:]))),
+            ("envelope without a key id", "PERMIT_SIGNATURE_ENVELOPE",
+             lambda: setattr(record, "signature", {
+                 key: value for key, value in original_signature.items() if key != "key_id"})),
+            ("signer key the engine does not hold", "PERMIT_KEY_UNKNOWN",
+             lambda: setattr(record, "signature", dict(
+                 original_signature, key_id="unheld-permit-key"))),
+        )
+        for label, code, corrupt in corruptions:
+            with self.subTest(corruption=label):
+                corrupt()
+                pattern = r"^" + code + r"(:|$)"
+                with self.assertRaisesRegex(IntegrityViolation, pattern):
+                    verification()
+                with self.assertRaisesRegex(IntegrityViolation, pattern):
+                    engine.commit_execution(
+                        request,
+                        actor_scope=ROLE_EXECUTOR,
+                        route_permit_hash=permit_hash,
+                    )
+                record.body = copy.deepcopy(original_body)
+                record.signature = copy.deepcopy(original_signature)
+                self.assertEqual(verification()["verified"], True)
+
+        with self.subTest(corruption="a permit the engine does not hold"):
+            with self.assertRaisesRegex(ContractViolation, r"^PERMIT_UNKNOWN(:|$)"):
+                engine.architect_permit_verification("0" * 64, actor_scope=ROLE_ARCHITECT)
+        # Nothing above wrote a thing: the chain is where it was.
+        self.assertEqual(engine.ledger.head(), head_before)
+
+        # A revoked key is a policy refusal, not an integrity halt: ContractViolation.
+        with self.subTest(corruption="signer key revoked"):
+            engine.rotate_permit_signer(
+                HmacDetachedSigner(b"rotated-signer-key", "rotated-key-1"),
+                actor_scope=ROLE_GOVERNANCE,
+            )
+            engine.revoke_permit_key(original_signature["key_id"], actor_scope=ROLE_GOVERNANCE)
+            with self.assertRaisesRegex(ContractViolation, r"^PERMIT_KEY_REVOKED(:|$)"):
+                verification()
 
     def test_permit_signature_tamper_and_envelope_shape_fail_closed(self) -> None:
         fixture = self.fixture()
@@ -7056,6 +8615,25 @@ class ContractRegressions(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for token in ("- HOLD", "- ERROR", "EXECUTION_HELD", "SYSTEM_ERROR"):
             self.assertNotIn(token, openapi_text)
+        # And the enum itself: every OpenAPI enum carrying ALLOW is the three-value
+        # alphabet, so a new fourth value reddens, not only the four old tokens.
+        import yaml
+        dispositions = []
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "enum" and isinstance(value, list) and "ALLOW" in value:
+                        dispositions.append(value)
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(yaml.safe_load(openapi_text))
+        self.assertTrue(dispositions, "no disposition enum found in the OpenAPI")
+        for enum in dispositions:
+            self.assertEqual(enum, ["ALLOW", "REFUSAL", "MANUAL_REVIEW"], "the OpenAPI disposition enum widened")
 
     def test_downstream_receipt_hash_is_outcome_conditional(self) -> None:
         # COMMITTED requires a real 64-hex downstream receipt hash; FAILED and
@@ -7143,6 +8721,540 @@ class ContractRegressions(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("STDLIB_ONLY_OK", completed.stdout)
+
+    def test_a_stored_snapshot_with_less_history_than_this_process_has_seen_is_refused(
+        self,
+    ) -> None:
+        """A genuine, MAC-valid OLDER snapshot put back in the state file must not rewind a
+        running engine.
+
+        The snapshot MAC covers the snapshot's own hash and nothing about its place in time,
+        so anyone who can write the file (no key needed: they replay bytes the engine itself
+        wrote) could put an earlier row back. Every operation reloads the stored snapshot and
+        replaces the in-memory state with it, so a single-use permit that had been committed
+        was committed again: a second receipt for the same permit, with a chain that verified.
+
+        The process has seen the history up to its own head. A stored snapshot that holds
+        fewer events than that, or whose event at that position is not the head seen, is
+        refused with STATE_ROLLBACK before it replaces anything. The same for a row that has
+        disappeared while the process holds history.
+
+        What this does NOT cover is a cold start: a process with no history in memory has
+        nothing to compare against and accepts what the file holds. That needs an external
+        monotonic anchor (see the limit in README); the companion test pins the legitimate
+        cases that must keep working.
+        """
+        fixture = self.fixture()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.sqlite"
+            engine, _, _, intent = self.persistent_engine(fixture, state_path)
+            result = self.allow_permit(fixture, engine, intent)
+            request = fixture.execution_request(engine, result, intent)
+
+            def stored_row(path=state_path):
+                with closing(sqlite3.connect(path)) as connection:
+                    return connection.execute(
+                        "SELECT declaration_hash, profile_hash, state_json, state_hash, "
+                        "state_mac FROM ledger_state"
+                    ).fetchone()
+
+            def put_back(row) -> None:
+                with closing(sqlite3.connect(state_path)) as connection:
+                    connection.execute(
+                        "UPDATE ledger_state SET profile_hash = ?, state_json = ?, "
+                        "state_hash = ?, state_mac = ? WHERE declaration_hash = ?",
+                        (row[1], row[2], row[3], row[4], row[0]),
+                    )
+                    connection.commit()
+
+            older = stored_row()
+            first = engine.commit_execution(
+                request, actor_scope=ROLE_EXECUTOR, route_permit_hash=result["permit_hash"]
+            )
+            head = engine.ledger.head()
+            put_back(older)
+
+            for label, operation in (
+                ("a mutating call",
+                 lambda: engine.commit_execution(
+                     request, actor_scope=ROLE_EXECUTOR,
+                     route_permit_hash=result["permit_hash"])),
+                ("a public read",
+                 lambda: engine.architect_permit(
+                     result["permit_hash"], actor_scope=ROLE_ARCHITECT)),
+            ):
+                with self.subTest(rewound_store=label):
+                    with self.assertRaisesRegex(IntegrityViolation, r"^STATE_ROLLBACK(:|$)"):
+                        operation()
+                    # Nothing replaced the in-memory history, so nothing was committed twice.
+                    self.assertEqual(engine.ledger.head(), head)
+                    self.assertEqual(
+                        sum(event["event_type"] == "EXECUTION_RECORDED"
+                            for event in engine.ledger.events_copy()),
+                        1,
+                    )
+
+            # A snapshot that does not EXTEND what this process holds is refused whatever its
+            # length: a different history of the same length, or a longer one, is a fork and
+            # not a continuation. The check is the event at the seen position, not the count.
+            fork_path = Path(temp_dir) / "fork.sqlite"
+            other, _, _, other_intent = self.persistent_engine(fixture, fork_path)
+            fork_intent, fork_evidence = universal_tests.unique_intent(
+                other_intent, fixture.evidence, "fork"
+            )
+            forked = other.evaluate_intent(fork_intent, fork_evidence, actor_scope=ROLE_OPERATOR)
+            other.commit_execution(
+                fixture.execution_request(other, forked, fork_intent),
+                actor_scope=ROLE_EXECUTOR,
+                route_permit_hash=forked["permit_hash"],
+            )
+            longer_intent, longer_evidence = universal_tests.unique_intent(
+                other_intent, fixture.evidence, "fork-longer"
+            )
+            for label, extend in (("a fork of the same length", False), ("a longer fork", True)):
+                if extend:
+                    other.evaluate_intent(
+                        longer_intent, longer_evidence, actor_scope=ROLE_OPERATOR
+                    )
+                fork_row = stored_row(fork_path)
+                fork_events = json.loads(fork_row[2])["ledger_events"]
+                # Fixture preconditions: the fork is as long as the history this process has
+                # seen or longer, and differs from it AT the seen position. Without them the
+                # length check would refuse first and this subtest would prove nothing.
+                self.assertGreaterEqual(len(fork_events), head["event_count"])
+                self.assertEqual(len(fork_events) > head["event_count"], extend)
+                self.assertNotEqual(
+                    fork_events[head["event_count"] - 1]["event_hash"], head["head_hash"]
+                )
+                put_back(fork_row)
+                with self.subTest(rewound_store=label):
+                    with self.assertRaisesRegex(IntegrityViolation, r"^STATE_ROLLBACK(:|$)"):
+                        engine.architect_permit(
+                            result["permit_hash"], actor_scope=ROLE_ARCHITECT
+                        )
+                    self.assertEqual(engine.ledger.head(), head)
+
+            # The row itself disappearing while the process holds history is the same loss.
+            with closing(sqlite3.connect(state_path)) as connection:
+                connection.execute("DELETE FROM ledger_state")
+                connection.commit()
+            with self.subTest(rewound_store="a deleted row"):
+                with self.assertRaisesRegex(IntegrityViolation, r"^STATE_ROLLBACK(:|$)"):
+                    engine.architect_permit(result["permit_hash"], actor_scope=ROLE_ARCHITECT)
+                self.assertEqual(engine.ledger.head(), head)
+            self.assertEqual(first["outcome"], "COMMITTED")
+
+    def test_operator_replays_hide_policy_invalidation_reasons(self) -> None:
+        from nc25_universal_adapter import UniversalConnectionHttpAdapter
+        from test_contract_conformance import _http_call
+        from nc25_universal_ledger import parse_utc, utc_text
+
+        def evaluate(engine, intent, evidence):
+            return _http_call(
+                UniversalConnectionHttpAdapter(engine), "POST", "/v1/operator/intents:evaluate",
+                {"intent": intent, "evidence_bundle": evidence},
+                scope=ROLE_OPERATOR, idem=intent["idempotency_key"],
+            )
+
+        for cause in ("grant revoked", "key revoked", "resource window", "authority not yet valid"):
+            with self.subTest(policy=cause):
+                fixture = self.fixture()
+                if cause == "resource window":
+                    profile = copy.deepcopy(fixture.profile)
+                    declaration = copy.deepcopy(fixture.declaration)
+                    for resource in profile["resource_catalog"]:
+                        if resource["resource_id"] == fixture.fx.resource_id:
+                            resource["reservation_required"] = False
+                    for limit in declaration["resource_limits"]:
+                        if limit["resource_id"] == fixture.fx.resource_id:
+                            limit["max_per_intent"] = fixture.fx.claim
+                            limit["max_committed_per_window"] = 2 * fixture.fx.claim - 1
+                    engine, intent, grant = fixture.engine(profile=profile, declaration=declaration)
+                elif cause == "authority not yet valid":
+                    grant = copy.deepcopy(fixture.grant)
+                    grant["valid_from"] = utc_text(fixture.clock.now())
+                    engine, intent, grant = fixture.engine(grant=grant)
+                else:
+                    engine, intent, grant = fixture.engine()
+                evidence = fixture.evidence
+                status, first = evaluate(engine, intent, evidence)
+                self.assertEqual((status, first.get("disposition")), (200, "ALLOW"), first)
+                head = engine.ledger.head()
+                self.assertEqual(evaluate(engine, intent, evidence), (200, first))
+                self.assertEqual(engine.ledger.head(), head)
+                target = first
+                if cause == "grant revoked":
+                    engine.revoke_grant({
+                        "message_type": "authority_revocation", "grant_id": grant["grant_id"],
+                        "declaration_hash": engine.declaration_hash,
+                        "revoked_at": "2026-08-01T10:00:00Z", "revoked_by": fixture.fx.authority_issuer,
+                        "reason_code": "SYNTHETIC_REVOCATION", "evidence_ref": "evidence://synthetic/revocation",
+                    }, actor_scope=ROLE_GOVERNANCE)
+                    reason = "AUTHORITY_REVOKED"
+                elif cause == "key revoked":
+                    key_id = engine._permit_signer.key_id
+                    engine.rotate_permit_signer(HmacDetachedSigner(b"synthetic-successor-key", "successor"), actor_scope=ROLE_GOVERNANCE)
+                    engine.revoke_permit_key(key_id, actor_scope=ROLE_GOVERNANCE)
+                    reason = "PERMIT_KEY_REVOKED"
+                elif cause == "resource window":
+                    later_intent, later_evidence = universal_tests.unique_intent(intent, evidence, "late-window")
+                    status, target = evaluate(engine, later_intent, later_evidence)
+                    self.assertEqual((status, target.get("disposition")), (200, "ALLOW"), target)
+                    engine.commit_execution(fixture.execution_request(engine, first, intent), actor_scope=ROLE_EXECUTOR, route_permit_hash=first["permit_hash"])
+                    with self.assertRaisesRegex(ContractViolation, "^RESOURCE_WINDOW_LIMIT(:|$)"):
+                        engine.commit_execution(fixture.execution_request(engine, target, later_intent), actor_scope=ROLE_EXECUTOR, route_permit_hash=target["permit_hash"])
+                    intent, evidence = later_intent, later_evidence
+                    reason = "RESOURCE_WINDOW_LIMIT"
+                else:
+                    # A one-second trusted-clock correction is inside the five-second
+                    # input tolerance, but the grant now starts one second in the future.
+                    fixture.clock.advance(seconds=-1)
+                    reason = "AUTHORITY_NOT_YET_VALID"
+                head = engine.ledger.head()
+                status, replay = evaluate(engine, intent, evidence)
+                self.assertEqual(status, 200, replay)
+                self.assertEqual(replay["disposition"], "REFUSAL")
+                self.assertEqual(replay["message_code"], "EXECUTION_DENIED")
+                self.assertEqual(replay["request_hash"], target["request_hash"])
+                self.assertIsNone(replay["permit_hash"])
+                self.assertIsNone(replay["expires_at"])
+                self.assertNotIn(reason.encode("ascii"), canonical_json(replay))
+                self.assertEqual(engine.ledger.head(), head)
+                self.assertEqual(engine.architect_permit(target["permit_hash"], actor_scope=ROLE_ARCHITECT)["invalidated_reason"], reason)
+
+        # A revoked key does not erase a permit's lifecycle. A consumed or an expired
+        # permit answers its documented error on an exact replay after its key is
+        # revoked: a REFUSAL there would invite an operator to submit a committed
+        # action again. The expired permit is revoked with no read in between, so its
+        # reservation is still unpurged when the revocation runs.
+        for lifecycle, code in (("consumed", "PERMIT_ALREADY_CONSUMED"), ("expired", "PERMIT_EXPIRED")):
+            with self.subTest(lifecycle_then_key_revoked=lifecycle):
+                fixture = self.fixture()
+                engine, intent, _ = fixture.engine()
+                status, first = evaluate(engine, intent, fixture.evidence)
+                self.assertEqual((status, first.get("disposition")), (200, "ALLOW"), first)
+                if lifecycle == "consumed":
+                    engine.commit_execution(
+                        fixture.execution_request(engine, first, intent),
+                        actor_scope=ROLE_EXECUTOR, route_permit_hash=first["permit_hash"],
+                    )
+                else:
+                    lifetime = parse_utc(first["expires_at"]) - fixture.clock.now()
+                    fixture.clock.advance(seconds=int(lifetime.total_seconds()) + 1)
+                key_id = engine._permit_signer.key_id
+                engine.rotate_permit_signer(
+                    HmacDetachedSigner(b"synthetic-successor-key", "successor"),
+                    actor_scope=ROLE_GOVERNANCE,
+                )
+                engine.revoke_permit_key(key_id, actor_scope=ROLE_GOVERNANCE)
+                head = engine.ledger.head()
+                status, replay = evaluate(engine, intent, fixture.evidence)
+                self.assertEqual((status, replay.get("code")), (400, code), replay)
+                self.assertEqual(engine.ledger.head(), head)
+
+        # Integrity faults remain transport halts; they are not policy refusals.
+        for corruption, expected in (("signature", "PERMIT_SIGNATURE_FAILURE"), ("unknown key", "PERMIT_KEY_UNKNOWN")):
+            with self.subTest(integrity=corruption):
+                fixture = self.fixture()
+                engine, intent, _ = fixture.engine()
+                result = self.allow_permit(fixture, engine, intent)
+                envelope = engine.permits[result["permit_hash"]].signature
+                if corruption == "signature":
+                    self.assertNotEqual(envelope["signature"], "0" * 64)
+                    envelope["signature"] = "0" * 64
+                else:
+                    envelope["key_id"] = "unknown-verifier"
+                status, body = evaluate(engine, intent, fixture.evidence)
+                self.assertEqual(status, 503, body)
+                self.assertEqual(body["code"], expected)
+
+    def test_failure_surface_observation_keeps_each_verdict(self) -> None:
+        # The recorded run must not change what it records. The observed code once
+        # reached production readers: the key-revoked replay above handed it to an
+        # identifier check that accepts exactly str, and under observation that case
+        # answered 400 where the package answers 200. The case runs observed in a
+        # child interpreter, because this module is itself inside the recorded run
+        # and a nested observation would end the outer one.
+        import failure_surface
+
+        case = (
+            "test_contract_regressions.ContractRegressions."
+            "test_operator_replays_hide_policy_invalidation_reasons"
+        )
+        # The child imports with this process's path: the pinned wheels may sit only
+        # there, and without the date-time checker every POST answers 503 in both
+        # runs, which compares two failures and reads as "no verdict changed".
+        child = "\n".join((
+            "import contextlib, importlib, io, json, sys, unittest",
+            "sys.path[:0] = json.loads(sys.argv[1])",
+            "import failure_surface as fs",
+            "modules = [importlib.import_module(name) for name in",
+            "           ('nc25_universal_ledger', 'nc25_universal_adapter', 'nc25_otcs_bridge')]",
+            "def observing(planted):",
+            "    @contextlib.contextmanager",
+            "    def observe():",
+            "        original = fs._entered_from_tests",
+            "        if planted:",
+            "            fs._entered_from_tests = lambda: True",
+            "        try:",
+            "            with fs._observing(modules, fs._Observation(set(), set(), set())):",
+            "                yield",
+            "        finally:",
+            "            fs._entered_from_tests = original",
+            "    return observe",
+            "def observed(planted):",
+            "    observe = observing(planted)",
+            "    with observe():",
+            "        result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(",
+            "            unittest.defaultTestLoader.loadTestsFromName(sys.argv[2]))",
+            "    return {'passed': result.wasSuccessful(),",
+            "            'changed': fs._observation_changed_verdicts(result, observe, ())}",
+            "print(json.dumps({'clean': observed(False), 'planted': observed(True)}))",
+        ))
+        completed = subprocess.run(
+            [sys.executable, "-B", "-X", "utf8", "-c", child, json.dumps(sys.path), case],
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=600,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+        verdicts = json.loads(completed.stdout.strip().splitlines()[-1])
+        self.assertEqual(verdicts["clean"]["changed"], [], "the observation changed a verdict")
+        self.assertTrue(
+            verdicts["clean"]["passed"],
+            "the guarded case fails under observation, so no verdict was compared",
+        )
+        # Planted: every reader handed the observed code again, as before the fix.
+        # The tool must name exactly the case that interference changes.
+        self.assertEqual(
+            verdicts["planted"],
+            {"passed": False, "changed": ["FAILURE_RUNTIME_OBSERVATION_CHANGED_VERDICT "
+                                          + repr([case + " (policy='key revoked')"])]},
+            "a planted observation fault was not named",
+        )
+
+        # Both directions: a subtest that fails only observed, and one that fails
+        # only plain, inside one rerun method. The tool takes both lone runs
+        # itself, through the context it is given for observing.
+        observing = {"on": True}
+
+        @contextmanager
+        def observe():
+            observing["on"] = True
+            try:
+                yield
+            finally:
+                observing["on"] = False
+
+        class Flipping(unittest.TestCase):
+            def test_flip(self) -> None:
+                with self.subTest(side="observed only"):
+                    self.assertFalse(observing["on"])
+                with self.subTest(side="plain only"):
+                    self.assertTrue(observing["on"])
+
+        observed_result = unittest.TestResult()
+        Flipping("test_flip").run(observed_result)
+        observing["on"] = False
+        flipping = Flipping("test_flip").id()
+        self.assertEqual(
+            failure_surface._observation_changed_verdicts(observed_result, observe, ()),
+            ["FAILURE_RUNTIME_OBSERVATION_CHANGED_VERDICT "
+             + repr(sorted(f"{flipping} (side='{side}')" for side in ("observed only", "plain only")))],
+            "a verdict changed in one direction was not named",
+        )
+
+        # A verdict the recorded run's order changed is not the observation's:
+        # both lone runs agree, so the tool must not point at itself.
+        shared = {"dirty": True}
+
+        class OrderDependent(unittest.TestCase):
+            def test_order(self) -> None:
+                self.assertFalse(shared["dirty"])
+
+        recorded_result = unittest.TestResult()
+        OrderDependent("test_order").run(recorded_result)
+        shared["dirty"] = False
+        self.assertEqual(
+            failure_surface._observation_changed_verdicts(recorded_result, observe, ()),
+            ["FAILURE_RUNTIME_ISOLATION_CHANGED_VERDICT " + repr([OrderDependent("test_order").id()])],
+            "ORDER_BLAMED_ON_OBSERVATION",
+        )
+
+        # A suite no acceptance step runs has no unobserved verdict anywhere
+        # else, so its methods are rerun even when they passed.
+        class PassesOnlyObserved(unittest.TestCase):
+            def test_masked(self) -> None:
+                self.assertTrue(observing["on"])
+
+        observing["on"] = True
+        masked_result = unittest.TestResult()
+        PassesOnlyObserved("test_masked").run(masked_result)
+        observing["on"] = False
+        self.assertTrue(masked_result.wasSuccessful())
+        self.assertEqual(
+            failure_surface._observation_changed_verdicts(
+                masked_result, observe, [PassesOnlyObserved("test_masked")]
+            ),
+            ["FAILURE_RUNTIME_OBSERVATION_CHANGED_VERDICT "
+             + repr([PassesOnlyObserved("test_masked").id()])],
+            "RECORDED_ONLY_PASS_UNCHECKED",
+        )
+
+        # And the recorded run reports what the comparison finds.
+        tree = ast.parse((ROOT / "tools" / "failure_surface.py").read_text(encoding="utf-8"))
+        snapshot = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "runtime_snapshot"
+        )
+        reported = [
+            node for node in ast.walk(snapshot)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "extend"
+            and isinstance(node.func.value, ast.Name) and node.func.value.id == "problems"
+            and len(node.args) == 1 and isinstance(node.args[0], ast.Call)
+            and isinstance(node.args[0].func, ast.Name)
+            and node.args[0].func.id == "_observation_changed_verdicts"
+        ]
+        self.assertEqual(len(reported), 1, "runtime_snapshot does not report the verdicts its observation changed")
+
+    def test_state_restore_keeps_non_event_terminal_facts(self) -> None:
+        # A genuine older row may have the SAME event chain. Exercise key
+        # revocation without permits, so permit-state checks cannot mask it.
+        for fact in ("key revocation", "permit expiry"):
+            for entry in ("read", "write"):
+                with self.subTest(terminal_fact=fact, entry=entry):
+                    fixture = self.fixture()
+                    with tempfile.TemporaryDirectory() as temporary_directory:
+                        state_path = Path(temporary_directory) / "state.sqlite"
+                        engine, _, _, intent = self.persistent_engine(fixture, state_path)
+                        key_one = HmacDetachedSigner(b"synthetic-first-key-material", "k-one")
+                        if fact == "key revocation":
+                            engine.rotate_permit_signer(key_one, actor_scope=ROLE_GOVERNANCE)
+                            engine.rotate_permit_signer(
+                                HmacDetachedSigner(b"synthetic-second-key-material", "k-two"),
+                                actor_scope=ROLE_GOVERNANCE,
+                            )
+                            self.assertFalse(engine.permits, "isolate revocation from permit invalidation")
+                        else:
+                            result = self.allow_permit(fixture, engine, intent)
+                            request = fixture.execution_request(engine, result, intent)
+
+                        def stored_row():
+                            with closing(sqlite3.connect(state_path)) as connection:
+                                return connection.execute(
+                                    "SELECT declaration_hash, profile_hash, state_json, "
+                                    "state_hash, state_mac FROM ledger_state"
+                                ).fetchone()
+
+                        older = stored_row()
+                        self.assertIsNotNone(older, "fixture requires a stored row")
+                        if fact == "key revocation":
+                            engine.revoke_permit_key("k-one", actor_scope=ROLE_GOVERNANCE)
+                        else:
+                            fixture.clock.advance(seconds=engine.permit_ttl_seconds + 1)
+                            with self.assertRaisesRegex(ContractViolation, "^PERMIT_EXPIRED(:|$)"):
+                                engine.commit_execution(
+                                    request, actor_scope=ROLE_EXECUTOR,
+                                    route_permit_hash=result["permit_hash"],
+                                )
+                        terminal = engine._snapshot_state()
+                        current = stored_row()
+                        self.assertEqual(
+                            json.loads(older[2])["ledger_events"],
+                            json.loads(current[2])["ledger_events"],
+                            "fixture must isolate a change without a new event",
+                        )
+                        # Identical current state remains a valid read.
+                        engine.ledger_head(actor_scope=ROLE_ARCHITECT)
+                        self.assertEqual(engine._snapshot_state(), terminal)
+                        with closing(sqlite3.connect(state_path)) as connection:
+                            connection.execute(
+                                "UPDATE ledger_state SET profile_hash=?,state_json=?,"
+                                "state_hash=?,state_mac=? WHERE declaration_hash=?",
+                                (older[1], older[2], older[3], older[4], older[0]),
+                            )
+                            connection.commit()
+                        with self.assertRaisesRegex(ContractViolation, "^STATE_ROLLBACK(:|$)") as refused:
+                            if entry == "read":
+                                engine.ledger_head(actor_scope=ROLE_ARCHITECT)
+                            elif fact == "key revocation":
+                                engine.rotate_permit_signer(key_one, actor_scope=ROLE_GOVERNANCE)
+                            else:
+                                engine.commit_execution(
+                                    request, actor_scope=ROLE_EXECUTOR,
+                                    route_permit_hash=result["permit_hash"],
+                                )
+                        self.assertIsInstance(refused.exception, IntegrityViolation)
+                        self.assertEqual(engine._snapshot_state(), terminal)
+
+        # Another instance may add a revocation without adding an event.
+        # Its honest newer set must be accepted, not treated as a rollback.
+        fixture = self.fixture()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            state_path = Path(temporary_directory) / "shared.sqlite"
+            first, _, _, intent = self.persistent_engine(fixture, state_path)
+            key_one = HmacDetachedSigner(b"synthetic-first-key-material", "k-one")
+            key_two = HmacDetachedSigner(b"synthetic-second-key-material", "k-two")
+            first.rotate_permit_signer(key_one, actor_scope=ROLE_GOVERNANCE)
+            first.rotate_permit_signer(key_two, actor_scope=ROLE_GOVERNANCE)
+            second, _, _, _ = self.persistent_engine(fixture, state_path, permit_signer=key_two)
+            self.assertFalse(second._revoked_permit_keys)
+            first.revoke_permit_key("k-one", actor_scope=ROLE_GOVERNANCE)
+            try:
+                second.ledger_head(actor_scope=ROLE_ARCHITECT)
+            except ContractViolation as exc:
+                self.fail("honest newer revocation was refused: " + exc.code)
+            self.assertEqual(second._revoked_permit_keys, {"k-one"})
+
+    def test_longer_history_from_another_instance_and_a_restart_are_not_a_rollback(
+        self,
+    ) -> None:
+        """The legitimate cases the rollback check must keep accepting.
+
+        Another engine object on the same file may extend the history; an engine holding the
+        shorter history that reads it afterwards has the longer one as its own prefix and
+        proceeds. A fresh process opens what the file holds and an exact retry of a committed
+        execution replays the stored receipt without a second event. If the check were
+        'the stored snapshot must equal what I hold', both would be refused.
+        """
+        fixture = self.fixture()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.sqlite"
+            first, _, _, intent = self.persistent_engine(fixture, state_path)
+            result = self.allow_permit(fixture, first, intent)
+            request = fixture.execution_request(first, result, intent)
+            receipt = first.commit_execution(
+                request, actor_scope=ROLE_EXECUTOR, route_permit_hash=result["permit_hash"]
+            )
+
+            # Another instance extends the history; the first, with fewer events in memory, reads on.
+            second, _, _, second_intent = self.persistent_engine(fixture, state_path)
+            fresh_intent, fresh_evidence = universal_tests.unique_intent(
+                second_intent, fixture.evidence, "extension"
+            )
+            allowed = second.evaluate_intent(
+                fresh_intent, fresh_evidence, actor_scope=ROLE_OPERATOR
+            )
+            self.assertEqual(allowed["disposition"], "ALLOW")
+            self.assertLess(
+                first.ledger.head()["event_count"], second.ledger.head()["event_count"]
+            )
+            view = first.architect_permit(allowed["permit_hash"], actor_scope=ROLE_ARCHITECT)
+            self.assertEqual(view["permit_hash"], allowed["permit_hash"])
+            self.assertEqual(
+                first.ledger.head()["event_count"], second.ledger.head()["event_count"]
+            )
+
+            # A restart: a fresh process replays the committed execution without a second event.
+            restarted, _, _, restarted_intent = self.persistent_engine(fixture, state_path)
+            events_before = len(restarted.ledger.events_copy())
+            replay = restarted.commit_execution(
+                fixture.execution_request(restarted, result, restarted_intent),
+                actor_scope=ROLE_EXECUTOR,
+                route_permit_hash=result["permit_hash"],
+            )
+            self.assertEqual(replay, receipt)
+            self.assertEqual(len(restarted.ledger.events_copy()), events_before)
 
     def test_permit_rotation_without_revocation_across_restore(self) -> None:
         # Documented ceremony-replay semantics: the verifier registry is
@@ -7311,6 +9423,50 @@ class ContractRegressions(unittest.TestCase):
                 self.assertEqual(result["message_code"], message_code)
                 self.assertIsNone(result["permit_hash"])
 
+    def test_ambiguity_then_refusal_controls_then_manual_review(self) -> None:
+        # Precedence stated under the failure matrix: ambiguity is checked
+        # before prerequisites and hard blocks, and those before
+        # manual-review flags. Every boolean control fails here; one case adds
+        # an ambiguity flag and one does not, so only the order decides the
+        # disposition.
+        fixture = self.fixture()
+
+        def every_control_fails(ambiguity):
+            def resolver(intent, _resolved_at):
+                return {
+                    "prerequisite_results": {
+                        flag: False for flag in intent["prerequisite_results"]
+                    },
+                    "hard_block_flags": {
+                        flag: True for flag in intent["hard_block_flags"]
+                    },
+                    "manual_review_flags": {
+                        flag: True for flag in intent["manual_review_flags"]
+                    },
+                    "ambiguity_flags": list(ambiguity),
+                }
+
+            return resolver
+
+        for ambiguity, disposition, decision_codes in (
+            (["derived-ambiguity"], "MANUAL_REVIEW", {"AMBIGUOUS_INTENT"}),
+            ([], "REFUSAL", {"PREREQUISITE_FALSE", "HARD_BLOCK"}),
+        ):
+            with self.subTest(precedence=disposition):
+                engine, intent, _ = fixture.engine(
+                    control_resolver=every_control_fails(ambiguity)
+                )
+                result = engine.evaluate_intent(
+                    intent,
+                    fixture.evidence,
+                    actor_scope=ROLE_OPERATOR,
+                )
+                self.assertEqual(result["disposition"], disposition)
+                self.assertIn(
+                    engine.decisions[result["request_hash"]]["message_code"],
+                    decision_codes,
+                )
+
     def test_control_resolver_failure_is_fail_closed(self) -> None:
         # A broken or lying resolver never falls back to connector claims.
         fixture = self.fixture()
@@ -7352,11 +9508,18 @@ class ContractRegressions(unittest.TestCase):
             with self.subTest(name=name):
                 engine, intent, _ = fixture.engine(control_resolver=resolver)
                 with self.assertRaisesRegex(ContractViolation, rf"^{code}(:|$)"):
-                    engine.evaluate_intent(
-                        intent,
-                        fixture.evidence,
-                        actor_scope=ROLE_OPERATOR,
-                    )
+                    engine._resolve_controls(intent, fixture.clock.now())
+                before = engine.ledger.head()["event_count"]
+                result = engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR)
+                self.assertEqual(result["disposition"], "REFUSAL")
+                self.assertEqual(result["message_code"], "EXECUTION_DENIED")
+                self.assertIsNone(result["permit_hash"])
+                self.assertEqual(engine.decisions[result["request_hash"]]["message_code"],
+                                 "AUTHORITATIVE_RESOLUTION_FAILED")
+                self.assertEqual(engine.ledger.head()["event_count"], before + 1)
+                self.assertEqual(engine.evaluate_intent(intent, fixture.evidence,
+                                 actor_scope=ROLE_OPERATOR), result)
+                self.assertEqual(engine.ledger.head()["event_count"], before + 1)
 
     def test_event_identifiers_and_default_signature_envelope(self) -> None:
         # One signature contract for the whole package: the default event
@@ -7437,12 +9600,162 @@ class ContractRegressions(unittest.TestCase):
                 engine, intent, _ = fixture.engine(evidence_resolver=resolver)
                 event_count = engine.ledger.head()["event_count"]
                 with self.assertRaisesRegex(ContractViolation, rf"^{code}(:|$)"):
-                    engine.evaluate_intent(
-                        intent,
-                        fixture.evidence,
-                        actor_scope=ROLE_OPERATOR,
-                    )
-                self.assertEqual(engine.ledger.head()["event_count"], event_count)
+                    engine._resolve_evidence_bundle(intent, fixture.evidence, fixture.clock.now())
+                result = engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR)
+                self.assertEqual(result["disposition"], "REFUSAL")
+                self.assertEqual(result["message_code"], "EXECUTION_DENIED")
+                self.assertIsNone(result["permit_hash"])
+                self.assertEqual(engine.decisions[result["request_hash"]]["message_code"],
+                                 "AUTHORITATIVE_RESOLUTION_FAILED")
+                self.assertEqual(engine.ledger.head()["event_count"], event_count + 1)
+                self.assertEqual(engine.evaluate_intent(intent, fixture.evidence,
+                                 actor_scope=ROLE_OPERATOR), result)
+                self.assertEqual(engine.ledger.head()["event_count"], event_count + 1)
+
+    def test_resolver_output_that_cannot_be_copied_or_read_is_a_recorded_refusal(self) -> None:
+        # Copying and reading resolver output sat outside the refusal guard: a
+        # generator in the output, nesting past the recursion limit, or a mapping
+        # that raises when read escaped as a raw exception after authorization,
+        # with no decision recorded, the idempotency key not consumed, and an
+        # exact retry calling the resolver again. And a subclass could answer the
+        # gate VALID for an item whose bound bytes say INVALID. Evidence output is
+        # now plain JSON read as the permit hash reads it: each case is a recorded
+        # refusal with the code its bytes earn, answered again without a second
+        # resolver call. The permit hash also sits inside the guard; after this
+        # normalization no known output reaches it unhashable, so no case does.
+        class AgreeingId(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+            __hash__ = str.__hash__
+
+        class LyingStatus(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+            def __hash__(self):
+                return hash("VALID")
+
+        class Unreadable(dict):
+            def __iter__(self):
+                raise RuntimeError("unreadable control output")
+
+        class UnreadableMapping(collections.abc.Mapping):
+            def __init__(self, data):
+                self._data = dict(data)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __len__(self):
+                return len(self._data)
+
+            def __iter__(self):
+                raise RuntimeError("unreadable evidence item")
+
+        class LyingItem(dict):
+            def __getitem__(self, key):
+                return "VALID" if key == "status" else dict.__getitem__(self, key)
+
+        calls = []
+
+        def evidence_resolver(change):
+            def resolver(intent, submitted, resolved_at):
+                calls.append(1)
+                resolved = copy.deepcopy(dict(submitted))
+                change(resolved)
+                return resolved
+            return resolver
+
+        def nested(depth):
+            top = node = {}
+            for _ in range(depth):
+                node["next"] = {}
+                node = node["next"]
+            return top
+
+        def unreadable_controls(intent, resolved_at):
+            calls.append(1)
+            return Unreadable()
+
+        failed, invalid = "AUTHORITATIVE_RESOLUTION_FAILED", "EVIDENCE_INVALID"
+        cases = (
+            ("generator", "evidence_resolver",
+             evidence_resolver(lambda r: r["items"][0].__setitem__("note", (x for x in ()))), failed),
+            ("nesting", "evidence_resolver",
+             evidence_resolver(lambda r: r["items"][0].__setitem__("note", nested(4 * sys.getrecursionlimit()))),
+             failed),
+            ("agreeing_intent_id", "evidence_resolver",
+             evidence_resolver(lambda r: r.__setitem__("intent_id", AgreeingId("another-intent"))), failed),
+            ("lying_status", "evidence_resolver",
+             evidence_resolver(lambda r: r["items"][0].__setitem__("status", LyingStatus("INVALID"))), invalid),
+            ("unreadable_evidence_item", "evidence_resolver",
+             evidence_resolver(lambda r: r["items"].__setitem__(0, UnreadableMapping(r["items"][0]))), failed),
+            ("lying_status_mapping", "evidence_resolver",
+             evidence_resolver(lambda r: r["items"].__setitem__(0, LyingItem({**r["items"][0], "status": "INVALID"}))),
+             invalid),
+            ("unreadable_controls", "control_resolver", unreadable_controls, failed),
+        )
+        for name, kind, resolver, code in cases:
+            with self.subTest(name=name):
+                calls.clear()
+                fixture = self.fixture()
+                engine, intent, _ = fixture.engine(**{kind: resolver})
+                event_count = engine.ledger.head()["event_count"]
+                try:
+                    result = engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR)
+                except Exception as exc:
+                    self.fail(f"RESOLUTION_ESCAPED {name}: {type(exc).__name__}: {exc}")
+                self.assertEqual(result["disposition"], "REFUSAL", f"RESOLUTION_ACCEPTED {name}")
+                self.assertEqual(result["message_code"], "EXECUTION_DENIED")
+                self.assertIsNone(result["permit_hash"])
+                self.assertEqual(engine.decisions[result["request_hash"]]["message_code"],
+                                 code, f"DECISION_CODE {name}")
+                self.assertEqual(engine.ledger.head()["event_count"], event_count + 1)
+                self.assertEqual(engine.evaluate_intent(intent, fixture.evidence,
+                                 actor_scope=ROLE_OPERATOR), result)
+                self.assertEqual(len(calls), 1, "IDEMPOTENCY_KEY_NOT_CONSUMED")
+
+    def test_submitted_evidence_compares_native_strings(self) -> None:
+        # Resolver output is normalized to plain JSON, but evidence submitted
+        # with the intent is checked as given, before authorization. A str
+        # subclass there could override equality and pass the comparisons while
+        # its bytes say otherwise; the checks take native strings only.
+        class Agreeing(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+            def __hash__(self):
+                return hash("VALID")
+
+        for name, change, code in (
+            ("status", lambda e: e["items"][0].__setitem__("status", Agreeing("INVALID")), "EVIDENCE_STATUS"),
+            ("intent_id", lambda e: e.__setitem__("intent_id", Agreeing("another-intent")),
+             "EVIDENCE_INTENT_MISMATCH"),
+            ("message_type", lambda e: e.__setitem__("message_type", Agreeing("other")), "EVIDENCE_MESSAGE_TYPE"),
+        ):
+            with self.subTest(name=name):
+                fixture = self.fixture()
+                engine, intent, _ = fixture.engine()
+                evidence = copy.deepcopy(dict(fixture.evidence))
+                change(evidence)
+                try:
+                    engine.evaluate_intent(intent, evidence, actor_scope=ROLE_OPERATOR)
+                except ContractViolation as exc:
+                    self.assertEqual(exc.code, code, f"NATIVE_STRING_UNCHECKED {name}")
+                except Exception as exc:
+                    self.fail(f"NATIVE_STRING_UNCHECKED {name}: {type(exc).__name__}: {exc}")
+                else:
+                    self.fail(f"NATIVE_STRING_UNCHECKED {name}")
 
     def test_docx_extended_properties_omit_false_statistics(self) -> None:
         docx_path = ROOT / spec_docx_name(ROOT)
@@ -7457,6 +9770,83 @@ class ContractRegressions(unittest.TestCase):
             "Paragraphs",
         ):
             self.assertNotIn(f"<{tag}>", app_xml)
+
+    def test_docx_normaliser_bytes_do_not_depend_on_the_build_host(self) -> None:
+        # zipfile stamps the building host into each entry it creates: 0 on
+        # Windows, 3 elsewhere. Each simulated host writes a document the way
+        # python-docx does and normalises it there, as one build would, and the
+        # two builds must give the same bytes.
+        from build_universal_specification import _normalize_docx_archive
+
+        members = {
+            "docProps/app.xml": (
+                b"<Properties><Application>python-docx</Application>"
+                b"<AppVersion>1.0</AppVersion><Pages>1</Pages></Properties>"
+            ),
+            "word/document.xml": b"<document/>",
+        }
+        stamped, built = set(), {}
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            for host in ("win32", "linux"):
+                path = Path(temporary_directory) / f"{host}.docx"
+                with patch.object(sys, "platform", host):
+                    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                        for name, data in members.items():
+                            archive.writestr(name, data)
+                    with zipfile.ZipFile(path) as archive:
+                        stamped.update(info.create_system for info in archive.infolist())
+                    _normalize_docx_archive(path)
+                built[host] = path.read_bytes()
+        # Two different stamps, or the comparison would hold for any normaliser.
+        self.assertEqual(len(stamped), 2)
+        self.assertEqual(built["win32"], built["linux"])
+
+    def test_specification_core_anchor_comes_from_the_source_manifest(self) -> None:
+        # The builder printed the core file name, hash and sizes as typed copies,
+        # so a changed core entry in SOURCE-MANIFEST.json left the normative
+        # document on the old values with acceptance green. Every value of the
+        # core input must reach the document through CORE_ANCHOR, and none may
+        # sit in the builder as a literal.
+        import build_universal_specification as builder
+
+        manifest = json.loads((ROOT / "SOURCE-MANIFEST.json").read_text(encoding="utf-8"))
+        cores = [entry for entry in manifest["inputs"] if entry["role"] == "immutable_nc25_core"]
+        self.assertEqual(len(cores), 1)
+        core = cores[0]
+        for field in ("file_name", "core_version", "doi", "sha256", "byte_length", "line_count"):
+            self.assertEqual(builder.CORE_ANCHOR[field], core[field], field)
+        typed = {
+            core["file_name"],
+            core["doi"],
+            core["sha256"],
+            f"{core['byte_length']:,}",
+            f"{core['line_count']:,}",
+            f"NC2.5 v{core['core_version']}",
+        }
+        source = (ROOT / "tools" / "build_universal_specification.py").read_text(encoding="utf-8")
+        literals = [
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+        leaked = sorted({value for value in typed for literal in literals if value in literal})
+        self.assertEqual(leaked, [], "CORE_ANCHOR_TYPED_COPY")
+
+    def test_specification_acceptance_table_names_every_acceptance_step(self) -> None:
+        # The document listed eight check sets while the runner and the report
+        # certified nine: the declaration field census had no row. The table is
+        # built from the runner's steps; it is compared here with the runner's
+        # independent step manifest, not with the STEPS literal the builder reads.
+        import build_universal_specification as builder
+        from run_acceptance import EXPECTED_STEP_PATHS
+
+        try:
+            rows = builder.acceptance_rows()
+        except RuntimeError as exc:
+            self.fail(f"ACCEPTANCE_TABLE_ROWS {exc}")
+        self.assertEqual(len(rows), len(EXPECTED_STEP_PATHS), "ACCEPTANCE_TABLE_SHORT")
+        self.assertEqual(builder.acceptance_step_ids(), tuple(EXPECTED_STEP_PATHS))
+        self.assertIn("Declaration field census", [row[0] for row in rows])
 
     def test_public_acceptance_report_has_release_only_state(self) -> None:
         report = (ROOT / "ACCEPTANCE-REPORT.md").read_text(encoding="utf-8").lower()
@@ -7502,7 +9892,579 @@ class ContractRegressions(unittest.TestCase):
         self.assertIn("## Relationships", projection_text)
         self.assertIn("## Visible text", projection_text)
 
+
+    def test_authoritative_future_evidence_is_non_disclosing_refusal(self) -> None:
+        fixture = self.fixture()
+        def resolver(intent, submitted, now):
+            resolved = copy.deepcopy(submitted)
+            resolved["collected_at"] = (now + timedelta(seconds=6)).isoformat().replace("+00:00", "Z")
+            return resolved
+        for authorized in (False, True):
+            with self.subTest(authorized=authorized):
+                engine, intent, _ = fixture.engine(evidence_resolver=resolver)
+                if not authorized:
+                    intent["authority_grant_id"] = "unknown-authority"
+                before = engine.ledger.head()["event_count"]
+                try:
+                    result = engine.evaluate_intent(intent, fixture.evidence, actor_scope=ROLE_OPERATOR)
+                except ContractViolation as exc:
+                    self.fail(f"resolution stage escaped as {exc.code}")
+                self.assertEqual(result["disposition"], "REFUSAL")
+                self.assertEqual(result["message_code"], "EXECUTION_DENIED")
+                self.assertIsNone(result["permit_hash"])
+                self.assertEqual(result["request_hash"], sha256_hex(_normalize_declared_hash_case(
+                    {"intent": intent, "evidence_bundle": fixture.evidence})))
+                self.assertEqual(engine.ledger.head()["event_count"], before + 1)
+                self.assertEqual(engine.evaluate_intent(intent, fixture.evidence,
+                                 actor_scope=ROLE_OPERATOR), result)
+                self.assertEqual(engine.ledger.head()["event_count"], before + 1)
+                self.assertFalse(engine.permits)
+
+    def test_native_actor_values_cannot_override_identity(self) -> None:
+        def liar(wanted):
+            class Liar(str):
+                def __eq__(self, other): return True
+                def __ne__(self, other): return False
+                def __hash__(self): return hash(wanted)
+            return Liar("not-the-declared-actor")
+        for surface in ("activation", "issuer", "revoker", "scope"):
+            with self.subTest(surface=surface):
+                fixture = self.fixture()
+                profile, declaration, grant, _ = bind_fixture(
+                    fixture.profile, fixture.declaration, fixture.grant, fixture.intent)
+                engine = UniversalConnectionLedger(profile, declaration,
+                    b"synthetic-reference-signing-key", clock=fixture.clock)
+                before = engine.ledger.head()["event_count"]
+                if surface == "activation":
+                    with self.assertRaisesRegex(ContractViolation, "^ACTIVATION_ACTOR(:|$)"):
+                        engine.activate(liar(fixture.fx.approval_owner), "evidence://synthetic/activation",
+                                        actor_scope=ROLE_GOVERNANCE)
+                else:
+                    engine.activate(fixture.fx.approval_owner, "evidence://synthetic/activation",
+                                    actor_scope=ROLE_GOVERNANCE)
+                    before = engine.ledger.head()["event_count"]
+                    if surface == "issuer":
+                        grant["issued_by"] = liar(fixture.fx.authority_issuer)
+                        with self.assertRaisesRegex(ContractViolation, "^AUTHORITY_IDENTIFIER(:|$)"):
+                            engine.issue_grant(grant, actor_scope=ROLE_GOVERNANCE)
+                    elif surface == "scope":
+                        with self.assertRaisesRegex(ContractViolation, "^ROLE_SCOPE_MISMATCH(:|$)"):
+                            engine.ledger_head(actor_scope=liar(ROLE_ARCHITECT))
+                    else:
+                        engine.issue_grant(grant, actor_scope=ROLE_GOVERNANCE)
+                        before = engine.ledger.head()["event_count"]
+                        revocation = {"message_type": "authority_revocation", "grant_id": grant["grant_id"],
+                            "declaration_hash": engine.declaration_hash, "revoked_by": liar(fixture.fx.authority_issuer),
+                            "revoked_at": fixture.clock.now().isoformat().replace("+00:00", "Z"),
+                            "reason_code": "synthetic-check", "evidence_ref": "evidence://synthetic/revocation"}
+                        with self.assertRaisesRegex(ContractViolation, "^REVOCATION_ACTOR(:|$)"):
+                            engine.revoke_grant(revocation, actor_scope=ROLE_GOVERNANCE)
+                self.assertEqual(engine.ledger.head()["event_count"], before)
+
+    def test_native_version_and_hash_values_do_not_keep_string_overrides(self) -> None:
+        import nc25_universal_ledger as ledger
+        class StringSubclass(str):
+            def upper(self): return "F" * 64
+        for helper, value, code in ((ledger._require_version, "1.0.0", "PROFILE_VERSION"),
+                                    (ledger._require_sha256, "a" * 64, "PROFILE_HASH")):
+            with self.subTest(helper=helper.__name__):
+                with self.assertRaisesRegex(ContractViolation, rf"^{code}(:|$)"):
+                    helper(StringSubclass(value), code)
+                self.assertIs(type(helper(value, code)), str)
+
+    def test_recursive_visitors_use_actual_container_types(self) -> None:
+        import nc25_universal_ledger as ledger
+        class FakeList:
+            @property
+            def __class__(self): return list
+        with self.assertRaisesRegex(ContractViolation, "^JSON_VALUE_TYPE(:|$)"):
+            canonical_json(FakeList())
+        try:
+            ledger._deep_secret_scan(FakeList())
+            found = ledger._find_forbidden_key(FakeList(), {"blocked"})
+        except Exception as exc:
+            self.fail(f"fake nominal list escaped as {type(exc).__name__}")
+        self.assertIsNone(found)
+        self.assertEqual(canonical_json([{"field": "value"}]), b'[{"field":"value"}]')
+        with self.assertRaisesRegex(ContractViolation, "^SECRET_FIELD_FORBIDDEN(:|$)"):
+            ledger._deep_secret_scan([{"password": "synthetic"}])
+        self.assertEqual(ledger._find_forbidden_key([{"blocked": True}], {"blocked"}), "$[0].blocked")
+
+    def test_declared_identifier_keys_are_not_secret_field_names(self) -> None:
+        # A profile names its controls, resources and actions; COMPROMISED_PASSWORD,
+        # API_TOKEN or ROTATE_SIGNING_KEY is an identifier there, not a field. The
+        # maps keyed by those ids (the intent's control maps and resource claims,
+        # the declaration's action-target bindings) carry booleans, counts and id
+        # lists. Reading their keys as field names refused a valid connection with
+        # a false SECRET_FIELD_FORBIDDEN. Free-form fields keep the guard.
+        import nc25_universal_ledger as ledger
+        fixture = self.fixture()
+        renames = {
+            fixture.fx.manual_review_flag: "COMPROMISED_PASSWORD",
+            fixture.fx.hard_block_flag: "LEAKED_CLIENT_SECRET",
+            fixture.fx.prerequisite_id: "ROTATED_ACCESS_TOKEN",
+            fixture.fx.resource_id: "API_TOKEN",
+            fixture.intent["action_id"]: "ROTATE_SIGNING_KEY",
+        }
+        for name in renames.values():
+            self.assertTrue(ledger._is_secret_key_name(name), f"fixture name {name} is not one the guard watches")
+
+        def renamed(document: dict) -> dict:
+            text = json.dumps(document)
+            for old, new in renames.items():
+                text = text.replace(json.dumps(old), json.dumps(new))
+            return json.loads(text)
+
+        documents = [renamed(item) for item in (fixture.profile, fixture.declaration, fixture.grant, fixture.intent, fixture.evidence)]
+        joined = json.dumps(documents)
+        for old, new in renames.items():
+            self.assertNotIn(json.dumps(old), joined, f"identifier {old} was not renamed everywhere")
+            self.assertIn(json.dumps(new), joined)
+        profile, declaration, grant, intent, evidence = documents
+        witness = profile["mapping_witness"]
+        witness["witness_hash"] = sha256_hex({key: value for key, value in witness.items() if key != "witness_hash"})
+        declaration["mapping_witness_binding"]["witness_hash"] = witness["witness_hash"]
+        baseline_engine, baseline_intent, _ = fixture.engine()
+        baseline = baseline_engine.evaluate_intent(baseline_intent, fixture.evidence, actor_scope=ROLE_OPERATOR)
+        try:
+            engine, bound_intent, _ = fixture.engine(profile=profile, declaration=declaration, grant=grant, intent=intent)
+        except ContractViolation as exc:
+            self.fail(f"declared action id refused as a secret field: {exc.code} {exc.detail}")
+        try:
+            result = engine.evaluate_intent(bound_intent, evidence, actor_scope=ROLE_OPERATOR)
+        except ContractViolation as exc:
+            self.fail(f"declared intent key refused as a secret field: {exc.code} {exc.detail}")
+        self.assertEqual(result["disposition"], baseline["disposition"])
+        self.assertEqual(result["disposition"], "ALLOW")
+        try:
+            engine.commit_execution(fixture.execution_request(engine, result, bound_intent), actor_scope=ROLE_EXECUTOR, route_permit_hash=result["permit_hash"])
+        except ContractViolation as exc:
+            self.fail(f"declared resource id refused as a secret field at execution: {exc.code} {exc.detail}")
+        probe = copy.deepcopy(bound_intent)
+        probe["scope"]["authorization"] = "Bearer synthetic"
+        with self.assertRaises(ContractViolation, msg="free-form scope lost the secret-name guard") as caught:
+            engine._validate_intent(probe)
+        self.assertEqual(caught.exception.code, "SECRET_FIELD_FORBIDDEN")
+        self.assertIn(".scope.authorization", caught.exception.detail)
+        probe = copy.deepcopy(bound_intent)
+        probe["resource_claims"]["token"] = 1
+        with self.assertRaises(ContractViolation, msg="undeclared resource key lost the secret-name guard") as caught:
+            engine._validate_intent(probe)
+        self.assertEqual(caught.exception.code, "SECRET_FIELD_FORBIDDEN")
+        self.assertIn(".resource_claims.token", caught.exception.detail)
+
+    def test_conformance_pytest_wrapper_keeps_real_failures(self) -> None:
+        # Under pytest a run whose only gap is a missing library is a skip. A
+        # run with a real failure stays a failure even when a library is also
+        # missing; translating it would report a failed check as skipped.
+        import test_contract_conformance as conformance
+        saved = (list(conformance.failures), list(conformance.skipped), set(conformance.passed_ids))
+
+        def outcome(failed: bool) -> tuple:
+            def fake_main() -> None:
+                conformance.failures[:] = ["SYNTHETIC: a real failure"] if failed else []
+                conformance.skipped[:] = ["SCHEMA_CONFORMANCE=NOT_RUN (synthetic missing library)"]
+                raise SystemExit(1)
+
+            try:
+                with patch.object(conformance, "main", fake_main):
+                    conformance.test_contract_conformance_suite()
+            except SystemExit as exc:
+                return ("exit", exc.code)
+            except KeyboardInterrupt:
+                raise
+            except BaseException as exc:  # pytest.skip raises a BaseException; without pytest the import fails
+                return ("not a failure", type(exc).__name__)
+            finally:
+                conformance.failures[:] = saved[0]
+                conformance.skipped[:] = saved[1]
+                conformance.passed_ids.clear()
+                conformance.passed_ids.update(saved[2])
+            return ("returned", None)
+
+        self.assertEqual(outcome(failed=True), ("exit", 1), "a real failure was translated into a skip")
+        self.assertNotEqual(outcome(failed=False)[0], "exit", "a missing library alone must stay a skip")
+
+    def test_schema_conformance_covers_every_shipped_profile(self) -> None:
+        # The conformance docstring promises every shipped profile directory:
+        # its profile, declaration, grant, intent and evidence validate, and a
+        # directory without its own checks fails the population check.
+        import test_contract_conformance as conformance
+        expected = {
+            "banking": {"schema_banking_profile", "schema_declaration", "schema_authority_grant", "schema_intent", "schema_evidence_bundle"},
+            "document-release": {"schema_second_profile", "schema_second_declaration", "schema_second_authority_grant", "schema_second_intent", "schema_second_evidence_bundle"},
+            "otcs": {"schema_otcs_profile", "schema_otcs_declaration", "schema_otcs_authority_grant", "schema_otcs_intent", "schema_otcs_evidence_bundle"},
+        }
+        root = conformance.ROOT
+        shipped = sorted(path.name for path in (root / "profiles").iterdir() if path.is_dir())
+        self.assertEqual(shipped, sorted(expected), "a shipped profile directory has no schema checks named here")
+        saved = (list(conformance.failures), list(conformance.skipped), set(conformance.passed_ids))
+
+        def run_schema(at: Path) -> tuple:
+            conformance.failures.clear()
+            conformance.skipped.clear()
+            conformance.passed_ids.clear()
+            try:
+                with patch.object(conformance, "ROOT", at):
+                    conformance.schema_conformance()
+                return set(conformance.passed_ids), list(conformance.failures), list(conformance.skipped)
+            finally:
+                conformance.failures[:] = saved[0]
+                conformance.skipped[:] = saved[1]
+                conformance.passed_ids.clear()
+                conformance.passed_ids.update(saved[2])
+
+        ran, failed, skipped = run_schema(root)
+        self.assertEqual(skipped, [])
+        self.assertEqual(failed, [])
+        for name, ids in expected.items():
+            self.assertLessEqual(ids, ran, f"profile {name} not validated")
+        self.assertIn("schema_profile_population", ran)
+        with tempfile.TemporaryDirectory() as td:
+            copy_root = Path(td) / "candidate"
+            shutil.copytree(root, copy_root, ignore=shutil.ignore_patterns("proof", "__pycache__"))
+            (copy_root / "profiles" / "unchecked").mkdir()
+            _, failed, _ = run_schema(copy_root)
+        self.assertTrue(
+            any(item.startswith("schema_profile_population") for item in failed),
+            "population check passed an unchecked profile directory",
+        )
+
+    def test_http_conformance_without_date_time_checker_is_not_run(self) -> None:
+        # Without its date-time checker the adapter fails closed on every POST,
+        # so the HTTP part cannot exercise the wire MUSTs. The profile checklist
+        # promises NOT_RUN for a missing schema library, not a run of 503
+        # failures that stops with an exception.
+        import jsonschema
+        import test_contract_conformance as conformance
+        real = jsonschema.FormatChecker
+
+        def missing_date_time(*args, **kwargs):
+            if "date-time" in (kwargs.get("formats") or ()):
+                raise KeyError("date-time")
+            return real(*args, **kwargs)
+
+        saved = (list(conformance.failures), list(conformance.skipped), set(conformance.passed_ids))
+
+        def run_http(patched: bool) -> tuple:
+            conformance.failures.clear()
+            conformance.skipped.clear()
+            conformance.passed_ids.clear()
+            crashed = None
+            try:
+                if patched:
+                    with patch.object(jsonschema, "FormatChecker", missing_date_time):
+                        conformance.http_adapter_conformance()
+                else:
+                    conformance.http_adapter_conformance()
+            except Exception as exc:
+                crashed = f"{type(exc).__name__}: {exc}"
+            result = (list(conformance.failures), list(conformance.skipped), set(conformance.passed_ids), crashed)
+            conformance.failures[:] = saved[0]
+            conformance.skipped[:] = saved[1]
+            conformance.passed_ids.clear()
+            conformance.passed_ids.update(saved[2])
+            return result
+
+        failed, skipped, _, crashed = run_http(patched=True)
+        self.assertEqual(failed, [], "a missing date-time checker was reported as failures, not NOT_RUN")
+        self.assertIsNone(crashed)
+        self.assertTrue(any(item.startswith("HTTP_ADAPTER_CONFORMANCE=NOT_RUN") for item in skipped))
+        failed, skipped, ran, crashed = run_http(patched=False)
+        self.assertEqual((failed, skipped, crashed), ([], [], None), "the HTTP part did not run with its checker available")
+        self.assertIn("http_activate_seal_binding", ran)
+
+    def test_failure_surface_wrapper_keeps_the_crash_output(self) -> None:
+        # A failure_surface crash before its receipt line leaves the traceback
+        # only in the child's output; the wrapper must print it too.
+        from contextlib import redirect_stdout
+        import check_failure_surface as wrapper
+        crashed = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="Traceback (most recent call last):\nPLANTED_SURFACE_CRASH\n"
+        )
+        out = io.StringIO()
+        with patch.object(wrapper.subprocess, "run", return_value=crashed), redirect_stdout(out):
+            with self.assertRaises(SystemExit):
+                wrapper.main()
+        self.assertIn("FAILURE_ASSERTED_PAIR_MISSING", out.getvalue())
+        self.assertIn("PLANTED_SURFACE_CRASH", out.getvalue(), "the crash output was dropped")
+
+    def test_malformed_source_manifest_inputs_leave_the_verifier_standalone(self) -> None:
+        # A malformed SOURCE-MANIFEST input list cannot name an external tree:
+        # standalone mode, where the manifest checks report it, not a crash
+        # before any verdict.
+        import verify_package
+        for inputs in (["not-an-object"], 7, [{"relative_path": "a\x00b"}]):
+            with self.subTest(inputs=repr(inputs)):
+                try:
+                    available = verify_package.external_source_tree_available(ROOT, inputs)
+                except Exception as exc:
+                    self.fail(f"malformed manifest inputs crashed the verifier: {type(exc).__name__}")
+                self.assertFalse(available)
+
+    def test_package_verifier_records_a_failed_semantic_check_and_goes_on(self) -> None:
+        # A failed profile or declaration check records FAIL and the next check
+        # still speaks; raising made it and every later check BLOCKED.
+        from contextlib import redirect_stdout
+        import nc25_universal_ledger as engine_module
+        import verify_package
+
+        def failing_once(real):
+            # The verifier imports the validators from the engine inside its run,
+            # and the engine calls them too; only the verifier's own first call
+            # is refused, every other call reaches the real validator.
+            state = {"refused": False}
+
+            def stub(*args, **kwargs):
+                if not state["refused"] and sys._getframe(1).f_globals.get("__name__") == "verify_package":
+                    state["refused"] = True
+                    raise ContractViolation("PLANTED_SEMANTIC_FAILURE")
+                return real(*args, **kwargs)
+
+            return stub
+
+        for broken, failed, sibling in (
+            ("validate_profile", "profile_semantics", "declaration_semantics"),
+            ("validate_declaration", "declaration_semantics", "profile_semantics"),
+        ):
+            with self.subTest(broken=broken):
+                checks = verify_package.Checks()
+                stub = failing_once(getattr(engine_module, broken))
+                with patch.object(engine_module, broken, stub), redirect_stdout(io.StringIO()):
+                    try:
+                        verify_package._run_checks(checks, None, "standalone")
+                    except Exception:
+                        pass
+                self.assertEqual(checks.verdicts.get(failed), "FAIL", f"{failed} was not recorded as FAIL")
+                self.assertEqual(checks.verdicts.get(sibling), "PASS", f"{sibling} did not speak")
+
+    def test_acceptance_unittest_total_is_the_declared_count(self) -> None:
+        # 'Ran N tests' carries no total; taking N for both halves made N/N one
+        # number twice. The total is the module's declared count, counted apart.
+        import run_acceptance
+        pattern = r"Ran (?P<passed>\d+) tests"
+        self.assertEqual(run_acceptance.extract_step_count("x", "Ran 5 tests\nOK", pattern, 5), (5, 5))
+        with self.assertRaises(SystemExit, msg="a suite that ran fewer tests than it declares was accepted") as caught:
+            run_acceptance.extract_step_count("x", "Ran 5 tests\nOK", pattern, 6)
+        self.assertIn("ACCEPTANCE_COUNT_NOT_PASS", str(caught.exception))
+        with self.assertRaises(SystemExit, msg="a unittest step without a declared total was accepted") as caught:
+            run_acceptance.extract_step_count("x", "Ran 5 tests\nOK", pattern)
+        self.assertIn("ACCEPTANCE_TOTAL_UNDECLARED", str(caught.exception))
+        environment = run_acceptance.acceptance_environment(dict(os.environ))
+        self.assertEqual(
+            run_acceptance.declared_test_count("tests/test_reader.py", environment),
+            unittest.defaultTestLoader.loadTestsFromName("test_reader").countTestCases(),
+        )
+
+    def test_acceptance_steps_never_inherit_a_mutant_override(self) -> None:
+        # The reader and adapter suites take their subject from a *_MUTANT variable;
+        # a step that inherited one would let acceptance count a swapped subject.
+        import run_acceptance
+        environment = run_acceptance.acceptance_environment({
+            "NC25_READER_MUTANT": "mutant.py", "NC25_ADAPTER_MUTANT": "adapter.py",
+            "NC25_SOURCES_ROOT": "sources", "PATH": "bin",
+        })
+        for key in ("NC25_READER_MUTANT", "NC25_ADAPTER_MUTANT"):
+            self.assertNotIn(key, environment, "a mutant override reached an acceptance step")
+        self.assertEqual(environment.get("NC25_SOURCES_ROOT"), "sources", "a legitimate setting was stripped")
+        self.assertEqual(environment.get("PYTHONDONTWRITEBYTECODE"), "1")
+
+    def test_bytecode_guard_check_reads_the_parsed_runner(self) -> None:
+        # The check searched the runner's text, so a commented-out guard, or an
+        # environment never handed to the step, still passed.
+        import verify_package
+        source = (ROOT / "tests" / "run_acceptance.py").read_text(encoding="utf-8")
+        self.assertTrue(verify_package.acceptance_runner_bytecode_guarded(source))
+        line = '    environment["PYTHONDONTWRITEBYTECODE"] = "1"\n'
+        handed = "            env=environment,\n"
+        self.assertEqual((source.count(line), source.count(handed)), (1, 1))
+        for label, variant in (
+            ("commented out", source.replace(line, '    # environment["PYTHONDONTWRITEBYTECODE"] = "1"\n')),
+            ("not handed to the step", source.replace(handed, "")),
+        ):
+            with self.subTest(variant=label):
+                self.assertFalse(
+                    verify_package.acceptance_runner_bytecode_guarded(variant),
+                    f"the guard check passed with the guard {label}",
+                )
+
+    def test_openapi_route_check_refuses_an_engine_method_without_a_role(self) -> None:
+        # A route's engine method that declares no required scope was skipped by
+        # the scope comparison; nothing on the engine side then confirmed the role.
+        import test_contract_conformance as conformance
+        saved = (list(conformance.failures), list(conformance.skipped), set(conformance.passed_ids))
+
+        def run_openapi() -> tuple:
+            conformance.failures.clear()
+            conformance.skipped.clear()
+            conformance.passed_ids.clear()
+            try:
+                conformance.openapi_conformance()
+                return list(conformance.failures), list(conformance.skipped)
+            finally:
+                conformance.failures[:] = saved[0]
+                conformance.skipped[:] = saved[1]
+                conformance.passed_ids.clear()
+                conformance.passed_ids.update(saved[2])
+
+        self.assertEqual(run_openapi(), ([], []))
+
+        def unscoped(self, *args, **kwargs):
+            return None
+
+        with patch.object(UniversalConnectionLedger, "ledger_head", unscoped):
+            failed, _ = run_openapi()
+        self.assertTrue(
+            any("declares no required scope" in item for item in failed),
+            "a route whose engine method declares no role passed",
+        )
+
+    def test_root_document_licence_check_bites_missing_entries_and_substrings(self) -> None:
+        from verify_package import documentation_licence_mismatches
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            (folder / "READING.md").write_text("synthetic document", encoding="utf-8")
+            (folder / "LICENSE").write_text("1. DOCUMENTATION\nApplies to: READING.md.\n2. CODE, SCHEMAS, AND MACHINE-READABLE ARTEFACTS\n", encoding="utf-8")
+            self.assertEqual(documentation_licence_mismatches(folder), [])
+            (folder / "LICENSE").write_text("1. DOCUMENTATION\nApplies to: PREFIX-READING.md.\n2. CODE, SCHEMAS, AND MACHINE-READABLE ARTEFACTS\nREADING.md\n", encoding="utf-8")
+            self.assertEqual(documentation_licence_mismatches(folder), ["READING.md"])
+            (folder / "LICENSE").write_text("1. DOCUMENTATION\nApplies to: READING.md.bak.\n2. CODE, SCHEMAS, AND MACHINE-READABLE ARTEFACTS\n", encoding="utf-8")
+            self.assertEqual(documentation_licence_mismatches(folder), ["READING.md"])
+            (folder / "NEW.md").write_text("another synthetic document", encoding="utf-8")
+            self.assertEqual(documentation_licence_mismatches(folder), ["NEW.md", "READING.md"])
+        self.assertEqual(documentation_licence_mismatches(ROOT), [])
+
+    def test_sole_assignment_counts_every_binding_of_the_name(self) -> None:
+        # The reader counted top-level assignment statements only, an annotation
+        # without a value among them, so a correct definition above an augmented
+        # one, or above an assignment inside an if block, satisfied every check
+        # while the program ran on the other. Each rebinding row adds a second
+        # binding of X to the module namespace (`del` and a star import may remove
+        # or replace it) and must be refused. Each non-binding row adds code that
+        # binds no X there - a binding in another scope, a load, an attribute or
+        # item store, a keyword name, a global of another name - and must leave the
+        # reader alone. A single binding is read only when it assigns X itself at
+        # the top level, plainly or with an annotation; any other is refused
+        # rather than read as absent. X annotated without a value binds nothing,
+        # so alone it leaves X absent and before an assignment it does not count.
+        # The test-class counter takes the same count.
+        from spec_counts import test_method_count
+
+        base = 'X = frozenset({"A"})\n'
+        expected = ast.dump(ast.parse(base).body[0].value)
+        rebindings = {
+            "second assignment": 'X = frozenset({"B"})\n',
+            "augmented": 'X |= {"B"}\n',
+            "if block": 'if True:\n    X = frozenset({"B"})\n',
+            "else block": 'if False:\n    pass\nelse:\n    X = frozenset({"B"})\n',
+            "for block": 'for _ in ():\n    X = frozenset({"B"})\n',
+            "while block": 'while False:\n    X = frozenset({"B"})\n',
+            "try block": 'try:\n    X = frozenset({"B"})\nexcept ValueError:\n    pass\n',
+            "except block": 'try:\n    pass\nexcept ValueError:\n    X = frozenset({"B"})\n',
+            "finally block": 'try:\n    pass\nfinally:\n    X = frozenset({"B"})\n',
+            "with block": 'with open(__file__) as handle:\n    X = frozenset({"B"})\n',
+            "match block": 'match 1:\n    case 1:\n        X = frozenset({"B"})\n',
+            "for target": "for X in ():\n    pass\n",
+            "with target": "with open(__file__) as X:\n    pass\n",
+            "except target": "try:\n    pass\nexcept ValueError as X:\n    pass\n",
+            "case capture": "match 1:\n    case X:\n        pass\n",
+            "case star": "match ():\n    case [*X]:\n        pass\n",
+            "case rest": "match {}:\n    case {**X}:\n        pass\n",
+            "unpacking": 'X, Y = frozenset({"B"}), 1\n',
+            "starred": "*X, Y = (1, 2)\n",
+            "walrus": '(X := frozenset({"B"}))\n',
+            "walrus in comprehension": "Z = [v for v in (1,) if (X := v)]\n",
+            "walrus in default": "def f(a=(X := 1)):\n    pass\n",
+            "walrus in decorator": "@(X := staticmethod)\ndef g():\n    pass\n",
+            "walrus in class base": "class C((X := object)):\n    pass\n",
+            "walrus in lambda default": "f = lambda a=(X := 1): a\n",
+            "walrus in annotated subscript": 'd = {}\nd[(X := frozenset({"B"}))]: int\n',
+            "import": "import X\n",
+            "dotted import": "import X.path\n",
+            "import as": "import os as X\n",
+            "from import": "from os import X\n",
+            "from import as": "from os import sep as X\n",
+            "star import": "from os import *\n",
+            "def": "def X():\n    pass\n",
+            "async def": "async def X():\n    pass\n",
+            "class": "class X:\n    pass\n",
+            "del": "del X\n",
+            "global in function": 'def poison():\n    global X\n    X = frozenset({"B"})\n',
+            "global in class": 'class Poison:\n    global X\n    X = frozenset({"B"})\n',
+        }
+        if sys.version_info >= (3, 12):
+            rebindings["type alias"] = "type X = int\n"
+        not_bindings = {
+            "function local": 'def f():\n    X = frozenset({"B"})\n',
+            "function parameter": "def f(X):\n    return X\n",
+            "class attribute": 'class C:\n    X = frozenset({"B"})\n',
+            "lambda parameter": "f = lambda X: X\n",
+            "walrus in lambda body": "f = lambda: (X := 1)\n",
+            "comprehension target": "Z = [X for X in (1,)]\n",
+            "attribute and item": 'import types\nns = types.SimpleNamespace()\nns.X = 1\nd = {}\nd["X"] = 1\n',
+            "keyword argument": "Z = dict(X=1)\n",
+            "global of another name": "def f():\n    global Y\n    Y = 1\n",
+            "local beside a global of another name": "def f():\n    global Y\n    X = 1\n",
+            "global without a binding": "def f():\n    global X\n    return X\n",
+            "nested local under global": "def f():\n    global X\n    def g():\n        X = 1\n",
+            "read": "print(X)\n",
+        }
+        single = {
+            "absent": ("Y = 1\n", None),
+            "plain": (base, expected),
+            "annotated": ('X: frozenset = frozenset({"A"})\n', expected),
+            "bare annotation": ("X: frozenset\n", None),
+            "annotation before assignment": ('X: frozenset\nX = frozenset({"A"})\n', expected),
+            "assignment in a block": ('if True:\n    X = frozenset({"A"})\n', RuntimeError),
+            "annotated assignment in a block": ('if True:\n    X: frozenset = frozenset({"A"})\n', RuntimeError),
+            "annotation of another name binding X": ('Y: int = (X := frozenset({"A"}))\n', RuntimeError),
+            "import alone": ("from os import X\n", RuntimeError),
+            "def alone": ("def X():\n    pass\n", RuntimeError),
+            "unpacking alone": ('X, Y = frozenset({"A"}), 1\n', RuntimeError),
+            "global alone": ('def f():\n    global X\n    X = frozenset({"A"})\n', RuntimeError),
+        }
+        method = "    def test_a(self):\n        pass\n"
+        classes = {
+            "one top-level class": ("class C:\n" + method + "    def test_b(self):\n        pass\n"
+                                    "    def helper(self):\n        pass\n", 2),
+            "class defined twice": ("class C:\n" + method + "class C:\n" + method, RuntimeError),
+            "class rebound by assignment": ("class C:\n" + method + "C = object\n", RuntimeError),
+            "class rebound by import": ("class C:\n" + method + "from os import C\n", RuntimeError),
+            "class rebound in a block": ("class C:\n" + method + "if True:\n    class C:\n        pass\n",
+                                         RuntimeError),
+            "class only inside a block": ("if True:\n    class C:\n        def test_a(self):\n            pass\n",
+                                          RuntimeError),
+            "duplicate test method": ("class C:\n" + method + method, RuntimeError),
+            "def instead of class": ("def C():\n    def test_a(self):\n        pass\n", RuntimeError),
+        }
+
+        def read(source: str) -> object:
+            try:
+                value = sole_assignment(ast.parse(source), "X")
+            except RuntimeError:
+                return RuntimeError
+            return None if value is None else ast.dump(value)
+
+        def count(source: str) -> object:
+            with tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "suite.py"
+                path.write_text(source, encoding="utf-8", newline="\n")
+                try:
+                    return test_method_count(path, "C")
+                except RuntimeError:
+                    return RuntimeError
+
+        missed = sorted(form for form, extra in rebindings.items() if read(base + extra) is not RuntimeError)
+        overfired = sorted(form for form, extra in not_bindings.items() if read(base + extra) != expected)
+        misread = sorted(form for form, (source, outcome) in single.items() if read(source) != outcome)
+        miscounted = sorted(form for form, (source, outcome) in classes.items() if count(source) != outcome)
+        self.assertEqual(
+            (missed, overfired, misread, miscounted), ([], [], [], []),
+            "rebinding forms not refused: " + (", ".join(missed) or "none")
+            + "; non-bindings misread: " + (", ".join(overfired) or "none")
+            + "; single bindings misread: " + (", ".join(misread) or "none")
+            + "; class counts misread: " + (", ".join(miscounted) or "none") + ".",
+        )
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
-

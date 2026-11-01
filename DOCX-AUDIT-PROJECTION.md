@@ -7,8 +7,8 @@ relationships, content types and core metadata. The package manifest identifies 
 
 - Format: `nc25-docx-audit-projection/v1`
 - Source: `NC25OL Specification v01.09.docx`
-- Source bytes: `68458`
-- Source SHA-256: `5F591F538F35A0B97C28D3C56DCB786265004560DB2A9A20C5E6AA38787C4BF6`
+- Source bytes: `70539`
+- Source SHA-256: `E0F56769F6C33855DCFFEB084F3FD2CC82F11ACEF6CE6826BEBBED215C488F76`
 - Generator: `tools/build_docx_audit_projection.py`
 
 ## ZIP member inventory
@@ -24,7 +24,7 @@ relationships, content types and core metadata. The package manifest identifies 
 | `docProps/core.xml` | 946 | `9937E898E47823EF9DDC97A8B81A0ABF6F560C4EFC27EE1E7BA3F12F2C04102C` |
 | `docProps/thumbnail.jpeg` | 8324 | `96367138DC44CE09BF2C8F0F8E49348A1478D2C5C0AF69BBC2BBC38B63CDCEAD` |
 | `word/_rels/document.xml.rels` | 1613 | `92BA0B0C1DCEF764CD7BA71FAA371AA1714446753442B3F3F2804A50A330FF41` |
-| `word/document.xml` | 401265 | `B1E04D4A60B19907CBAB3B21EBD5A13E81D3EC61B508A79ACED6F97946A86408` |
+| `word/document.xml` | 411267 | `F8E631B8257B716929FFF26E85D2D905F646D79DFBDCF55DD3D58CA883D3284B` |
 | `word/fontTable.xml` | 2811 | `79385FB7F60247507ECAFFC292E9EBD52EA0657B8634F629BA6FCCC54011D6BB` |
 | `word/footer1.xml` | 1690 | `5AE994C4D3889A1FC58D88009A7F8F63C216AAC94713254E567358CF3BB1EA20` |
 | `word/footer2.xml` | 1494 | `182E82C76996BFE2986520193E30C014C84D0FA4A666EBB74C01C59EFEDD9ACC` |
@@ -105,9 +105,9 @@ relationships, content types and core metadata. The package manifest identifies 
 5. Document
 6. Value
 7. Version
-8. 01.09.02
+8. 01.09.03
 9. Date
-10. 18 October 2026
+10. 22 October 2026
 11. Author
 12. Maksim Barziankou (MxBv)
 13. Affiliation
@@ -249,14 +249,14 @@ relationships, content types and core metadata. The package manifest identifies 
 149. Explicit profile mapping witness for each domain.
 150. L47-NON-WEAPONIZABILITY
 151. 13317-13341
-152. Hash-only registry, coarse operator codes, forbidden-key scans, and adapter-level anti-probing controls.
+152. Hash-only registry, coarse operator codes, forbidden-key scans, and an anti-probing obligation on a production adapter.
 153. NON-ACTIONABILITY  The operator receives only a normalized permit or non-executable result. Gate geometry, margins, thresholds, sub-verdicts, reason vectors, and retained statistics stay outside operation selection.
 154. 2.2 Accounting registers and their limits
-155. The hash-chained event ledger is an immutable append-only record of the declared event types: genealogy, not load. Permit-state changes that append no event (reservation expiry, window-limit invalidation) are visible in permit state only.
+155. The hash-chained event ledger is an immutable append-only record of the declared event types: genealogy, not load. Permit-state changes that append no event (reservation expiry; grant-validity invalidation at commit or evaluation replay; state-anchor and window-limit invalidation at commit; invalidation by permit signing-key revocation) are visible in permit state only. Key custody itself appends no event: the revoked key set is held in engine state, and signer rotation is process-local runtime configuration reflected only in the key_id of later permit signatures.
 156. The structural budget is a monotone committed-action counter read by the gate. It debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so it is narrower than the core's structural-pressure accounting.
 157. Resource limits are sliding windows; committed amounts age out, so they are rate boundaries, not burden.
 158. A new declaration version starts a new accounting instance. No burden crosses versions, and a cross-version continuation claim requires an external ledger.
-159. The declared capacity carries a provenance coding (fully stipulated, empirically calibrated, derived from a load model, or mixed). The coding is sealed by the declaration hash and never read by the gate.
+159. The declaration enforces a non-negative capacity but does not encode its empirical origin. Any calibration or load-model evidence belongs to an external governance record; this package does not bind it.
 160. 3. Architecture
 161. 3.1 Seven contract layers
 162. Layer
@@ -301,7 +301,7 @@ relationships, content types and core metadata. The package manifest identifies 
 201. ALL EVENTS            ────────────────►  SIGNED LOCAL CHAIN
 202. HASHES + STATUS ONLY  ────────────────►  OPTIONAL SHARED REGISTRY
 203. 3.3 Trust boundaries
-204. Connector-supplied evidence status and control booleans are untrusted claims; the production evaluator resolves and derives them from authoritative systems.
+204. Connector-supplied evidence status, control flags and ambiguity flags are untrusted claims; the production evaluator resolves and derives them from authoritative systems.
 205. Resolved evidence and derived controls are bound to the exact request and current-state anchor before gate evaluation.
 206. The connector cannot activate, revise, or write the profile or declaration.
 207. The evaluator does not expose its internal gate trace to the operator.
@@ -366,12 +366,12 @@ relationships, content types and core metadata. The package manifest identifies 
 266. Preserves interface separation
 267. 5.2 Connection declaration
 268. binds one profile identifier, version, and canonical hash;
-269. identifies one connector, identity issuer, and permitted environments;
+269. identifies one connector; runtime workload identity and permitted environments require external identity and transport enforcement;
 270. narrows actions, effects, targets, explicit action-target bindings, and scope values;
-271. declares a structural selector, capacity, and capacity provenance coding independently from domain limits;
+271. declares a non-negative structural capacity independently from domain resource limits; capacity provenance is outside this schema;
 272. declares resource limits per intent and per time window;
-273. names owners, interfaces, off-limits systems, and change process;
-274. binds the mapping witness and immutable approval evidence.
+273. names approval and authority issuers, revision authorities, a no-live-override constraint, and off-limits systems; other ownership and service-separation facts require external governance;
+274. binds the mapping witness; declaration-level approval-evidence references are outside this schema.
 275. 5.3 Runtime objects
 276. Object
 277. Binding
@@ -413,7 +413,7 @@ relationships, content types and core metadata. The package manifest identifies 
 313. OUTSIDE VALIDITY (guard)
 314. Current time is before effective_from or at/after expires_at
 315. Execution is blocked; use a new approved version or a production governance transition
-316. The reference engine implements DRAFT to ACTIVE plus validity blocking. SUSPENDED, REVOKED, and EXPIRED are production registry projection states whose transitions must be defined and persisted by a production governance adapter.
+316. The reference engine and registry expose only DRAFT and ACTIVE plus validity blocking. Suspension, connector-wide revocation, and expiry transitions require an external governance adapter; they are not states of this registry interface.
 317. 6.2 Evaluation order
 318. Verify profile seal, declaration seal, and local ledger chain.
 319. Verify active validity, strict message shape, and forbidden operator inputs.
@@ -424,7 +424,7 @@ relationships, content types and core metadata. The package manifest identifies 
 324. Compute the domain-resource and window input without emitting a verdict.
 325. Engage the binary conjunction: the structural branch decides capacity and the effect branch decides resource admissibility.
 326. Issue a short-lived reservation and permit only for one-and-one.
-327. The SDK resolves exact submitted-request idempotency first, verifies binding, authority, action-target, and scope authorization, and only then calls the injected evidence and control resolvers. Connector claims are ignored on each wired surface, resolver output is validated and bound into the result and permit request hash, and resolver failure is closed. Without the resolvers, evaluate_intent gates on the declared intent flags and remains the explicit internal post-resolution boundary — a documented reference boundary that production closes by wiring both resolvers.
+327. The SDK resolves exact submitted-request idempotency first, verifies binding, authority, action-target, and scope authorization, and only then calls the injected evidence and control resolvers. Connector claims are ignored on each wired surface, resolver output is validated and bound into the permit's own request hash, and resolver failure is closed. The operator result and the architect decision carry the submitted request hash, which does not cover resolver output. Without the resolvers, evaluate_intent gates on the declared intent flags and remains the explicit internal post-resolution boundary — a documented reference boundary that production closes by wiring both resolvers.
 328. 6.3 Gate semantics
 329. structural_gate ∈ {0,1}
 330. effect_gate     ∈ {0,1}
@@ -463,7 +463,7 @@ relationships, content types and core metadata. The package manifest identifies 
 363. 7. Integrity, reservation, and revision
 364. 7.1 Reservation and commit
 365. An ALLOW always reserves the structural cost, and reserves each domain resource claim whose resource declares reservation_required.
-366. The configured permit TTL is sealed into the permit, cannot exceed 900 seconds, and expires_at is capped by the authority-grant and declaration expiries.
+366. The permit seals its effective lifetime as ttl_seconds: the configured TTL, at most 900 seconds, capped by the authority-grant and declaration expiries, rounded up to whole seconds and never below one. expires_at is the exact cutoff.
 367. Trusted-time causality permits at most five seconds of forward skew for intent receipt, evidence collection, revocation, and execution commit; execution may not precede permit issuance by more than five seconds.
 368. A resource declared with reservation_required false holds nothing while a permit is outstanding; only committed amounts count against its window limit.
 369. Active reservations count against later evaluations and prevent over-issue.
@@ -472,15 +472,15 @@ relationships, content types and core metadata. The package manifest identifies 
 372. COMMITTED records the declared debits and consumes the permit.
 373. FAILED or ABORTED consumes the permit but releases the reservation without debit.
 374. The executor must present the same connector, profile hash, declaration hash, and state anchor.
-375. An expired, changed, revoked, or tampered permit blocks a new commit. After a successful commit, an exact canonical retry returns the stored receipt without another event or debit, including after permit, grant, or declaration expiry or revocation; a changed retry conflicts. This read-only replay cannot authorize new work.
+375. An expired, changed, revoked, or tampered permit blocks a new commit. A state-anchor mismatch invalidates the permit and releases its reservation; restoring the old anchor cannot revive it. After a successful commit, an exact canonical retry returns the stored receipt without another event or debit, including after permit, grant, or declaration expiry or revocation; a changed retry conflicts. This read-only replay cannot authorize new work.
 376. 7.2 Idempotency
-377. The idempotency key binds a canonical hash of the connector-submitted intent and evidence bundle before external resolution. An exact evaluation replay therefore returns an active permit or the original non-executable result without calling the resolver again; the separately computed result request hash binds the authoritative resolved bundle used by the gate. Replay of a consumed, expired, revoked, or otherwise invalidated permit fails closed and never reissues ALLOW. A different submitted request under the same key is a conflict and produces no second decision or permit. Executor replay is separate: an exact canonical retry after a successful commit returns the stored receipt without a second event or debit, including after permit, grant, or declaration expiry or revocation, while a changed retry conflicts. This read-only replay cannot authorize new work. In the HTTP adapter, the Idempotency-Key header must exactly equal intent.idempotency_key; a mismatch is rejected before evaluation.
+377. The idempotency key binds a canonical hash of the connector-submitted intent and evidence bundle before external resolution. An exact evaluation replay therefore returns an active permit or the original non-executable result without calling the resolver again; the separately computed permit request hash binds the authoritative resolved bundle used by the gate. Replay of a consumed, expired, revoked, or otherwise invalidated permit fails closed and never reissues ALLOW. Policy invalidations return the ordinary coarse REFUSAL/EXECUTION_DENIED operator result without a second decision or event; detailed reasons remain in architect permit state. Documented consumed and expired permit lifecycle errors remain distinct, while integrity faults remain transport-level halts. A different submitted request under the same key is a conflict and produces no second decision or permit. Executor replay is separate: an exact canonical retry after a successful commit returns the stored receipt without a second event or debit, including after permit, grant, or declaration expiry or revocation, while a changed retry conflicts. This read-only replay cannot authorize new work. In the HTTP adapter, the Idempotency-Key header must exactly equal intent.idempotency_key; a mismatch is rejected before evaluation.
 378. 7.3 Revocation
-379. A grant revocation recorded before commit invalidates every outstanding permit and releases its reservation. A later grant cannot revive an old permit. Revocation evidence is appended to the local chain. A caller-supplied revoked_at may be at most five seconds ahead of the trusted processing clock.
+379. A grant revocation recorded before commit invalidates every outstanding permit and releases its reservation. A later grant cannot revive an old permit. Grant revocation evidence is appended to the local chain. A caller-supplied revoked_at may be at most five seconds ahead of the trusted processing clock. Permit signing-key revocation appends no event.
 380. 7.4 Append-only local evidence
 381. Every event carries an index, UTC time, event type, role, subject reference, payload, previous-event hash, event hash, and signature.
 382. A profile, declaration, permit, signature, or chain mismatch halts execution.
-383. Raw secrets and reusable credentials are forbidden even in the local reference ledger.
+383. Raw secrets and reusable credentials must not enter even the local reference ledger, and keeping them out is the integrator's obligation: the engine refuses a mapping key that reads as a credential field name but does not inspect values, and three free-text references reach signed events after only a non-empty and length check: approval_evidence_ref on declaration activation and on an authority grant, and evidence_ref on a revocation.
 384. Production storage must provide transactional append-only or WORM behavior and independent restore evidence.
 385. 7.5 Material revision
 386. Changed item
@@ -489,8 +489,8 @@ relationships, content types and core metadata. The package manifest identifies 
 389. New profile version, witness hash, profile hash, and approval
 390. Control flag or evidence requirement
 391. New profile version and affected declarations
-392. Connector, target, scope, limit, owner, or interface
-393. New declaration version and approval
+392. Connector, target, scope, limit, approval authority, or off-limits set
+393. New declaration version and approval; external service and lineage records require separate governance
 394. Grant scope or validity
 395. New grant; old permit remains bound to old grant
 396. Runtime observation only
@@ -525,21 +525,21 @@ relationships, content types and core metadata. The package manifest identifies 
 425. Creates the action, effect, and domain resource boundaries. Financial limits remain domain controls and are not the structural budget.
 426. 3. Access and System Boundaries
 427. declaration.connector; declaration.interfaces; declaration.instance_scope.target_system_ids
-428. Separates governance, acting connector, executor, observer projection, architect store, downstream targets, and off-limits systems.
+428. Identifies the acting connector and narrows downstream targets; an off-limits system can never be a declared target. Other service separation requires external governance.
 429. 4. Decision Rules and Logic
 430. profile.controls.required_prerequisite_ids; profile.controls.hard_block_flag_ids; profile.controls.manual_review_flag_ids; profile.failure_posture
 431. Separates binary gate logic from non-executable workflow routing.
 432. 5. Audit, Evidence, and Compliance
-433. profile.evidence_requirements; declaration.evidence_refs; declaration.interfaces.architect_store_id; profile.registry_policy
+433. profile.evidence_requirements; profile.mapping_witness.evidence_refs; profile.registry_policy
 434. Defines immutable local evidence and a minimal hash-only shared projection.
 435. 6. Ownership and Change Control
-436. declaration.governance; profile.change_control; declaration.predecessor_declaration_hash
+436. declaration.governance; profile.change_control
 437. A material edit creates a new declaration or profile hash. No owner may flip a refusal inside the live version.
 438. 7. Exception and Failure Handling
 439. profile.failure_posture
 440. The profile mirrors protocol-fixed routing: missing required data is REFUSAL and ambiguity is MANUAL_REVIEW. Integrity failures remain hard errors; downstream and rule-conflict handling require explicit runtime branches rather than decorative configuration.
 441. 8. Supporting Documents
-442. profile.mapping_witness.evidence_refs; declaration.evidence_refs
+442. profile.mapping_witness.evidence_refs
 443. Stores immutable references and hashes without placing raw documents or secrets in the runtime ledger or shared registry.
 444. 9.2 Reference banking actions
 445. Action
@@ -643,355 +643,367 @@ relationships, content types and core metadata. The package manifest identifies 
 543. nc25.architect
 544. Read the exact connector hash-only projection or return 404
 545. Every route requires mTLS and a workload identity carrying the exact route scope.
-546. Every public SDK operation requires an explicit actor_scope; omission fails closed, no method supplies its required role as a default, and production derives the scope from verified workload identity.
-547. The runtime intent and evidence schemas are internal evaluator inputs; a production adapter ignores connector-asserted truth values and overwrites them with authoritative evidence resolution and independently derived controls.
-548. Resolved evidence and derived controls are bound to the request and current-state anchor before evaluation.
-549. The operator route requires an Idempotency-Key header exactly equal to intent.idempotency_key; mismatch is rejected before evaluation.
-550. Wire SHA-256 inputs use exactly 64 hexadecimal characters in either case; the engine normalizes comparisons and emits canonical uppercase values.
-551. The executor consume route requires the path permit_hash to equal execution_request.permit_hash. The adapter passes the path value as route_permit_hash to commit_execution; mismatch fails with EXECUTION_PERMIT_MISMATCH before lookup, replay, consumption, or debit.
-552. The registry route passes its connector_id path selector to registry_record. A different or unknown selector fails with CONNECTOR_NOT_FOUND and maps to HTTP 404; the active connector record is never substituted.
-553. If an in-process exception interrupts reference commit, the engine restores its pre-call state before re-raising. With state_path configured, SQLite serializes writers with BEGIN IMMEDIATE, commits permit consumption, debit, receipt, replay state, reservations, and the local event chain atomically for one node, and reloads one verified snapshot under the local lock for every public read.
-554. Signer configuration is external runtime configuration. Reopening a state_path whose event chain contains Ed25519 envelopes requires a verifier-compatible event_signer with the same key_id; SQLite deliberately persists neither signer configuration nor private keys. Omitting the verifier, or supplying one that declares both an algorithm and a key_id and differs from the persisted envelope in either, fails closed with EVENT_SIGNER_REQUIRED. The EventSigner protocol requires only sign and verify, so a signer that does not declare both cannot be compared against the envelope at all; for such a signer the mismatch is not distinguished and reaches the caller as a chain verdict. A signer declaring the same key_id with different key material likewise cannot be told apart from a forged chain and so fails full-chain integrity verification.
-555. External JSON Schema references define profile, declaration, and runtime payloads.
-556. The HTTP adapter wraps the reference engine's primitive declaration and grant hashes into the response objects defined by OpenAPI.
-557. A standard-library reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and enforces these wire rules end-to-end: it derives the route scope from the transport identity and never the body, binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.
-558. A contract error is distinct from a normalized non-executable business result.
-559. Integrity failure returns no permit and requires an operational halt.
-560. 11. Failure matrix
-561. Condition
-562. Disposition / error
-563. Gate engaged
-564. Permit
-565. Missing required evidence
-566. REFUSAL
-567. No
-568. None
-569. Structurally valid evidence with INVALID, REVOKED, or EXPIRED status
-570. REFUSAL
-571. No
-572. None
-573. Malformed evidence object, hash, reference, or unknown status
-574. Contract error / halt
-575. No decision
-576. None
-577. Ambiguous request
-578. MANUAL_REVIEW
-579. No
-580. None
-581. Manual-review flag true
-582. MANUAL_REVIEW
-583. No
-584. None
-585. Hard-block flag true
-586. REFUSAL
-587. No
-588. None
-589. Binding, authority, action-target pairing, or scope mismatch
-590. REFUSAL
-591. No
-592. None
-593. Structural capacity unavailable
-594. REFUSAL
-595. Yes; structural=0
-596. None
-597. Domain resource rule or window unavailable
-598. REFUSAL
-599. Yes; effect=0
-600. None
-601. Idempotency key reused with changed request
-602. Conflict
-603. No new evaluation
-604. None
-605. Grant revoked before commit
-606. Commit rejected
-607. Prior result invalidated
-608. None usable
-609. State anchor changed
-610. Commit rejected
-611. Prior result invalidated
-612. None usable
-613. Permit expired, tampered, or consumed
-614. Commit rejected
-615. No new evaluation
-616. None usable
-617. Profile, declaration, or ledger integrity failure
-618. Transport-level halt; no operator result
-619. No
-620. None
-621. 12. Production substitutions and security
-622. Reference element
-623. Production requirement
-624. Acceptance evidence
-625. Reference HMAC permit signer and state HMAC
-626. Asymmetric KMS/HSM key, rotation, revocation, custody
-627. Key policy and independent verification
-628. Optional Ed25519 permit/event envelope
-629. KMS/HSM-backed detached signature with managed key policy
-630. Tamper, wrong-key, rotation, and independent-verification evidence
-631. Versioned permit signature envelope (shipped; key_id-routed verification, rotation, revocation)
-632. Managed key custody source behind the same envelope; key ceremonies and revocation evidence
-633. Wire-contract conformance and independent signature verification
-634. Connector-supplied evidence claims
-635. Inject an authoritative evidence resolver; exceptions, malformed output, and intent mismatch fail closed
-636. Override, malformed-output, and request/state binding tests
-637. Connector-supplied control booleans
-638. Inject an authoritative control resolver (shipped injection point); derived results replace the intent flags and bind into the request hash; failures fail closed
-639. Independent control-derivation and spoofed-control-rejection tests
-640. In-memory event list
-641. Transactional append-only or WORM storage
-642. Retention configuration and restore test
-643. Optional single-node SQLite idempotency
-644. Managed or replicated unique constraint and replay-safe result store where multi-node availability is required
-645. Concurrency, restart, and failover tests
-646. In-memory execution replay
-647. Store execution request hash and receipt atomically with permit consumption
-648. Lost-response retry and changed-retry conflict tests
-649. Required local OTCS SQLite outbox
-650. Transactional replicated outbox or workflow store preserving exact requests, receipts, and reconciliation state
-651. Crash-before-call, ambiguous-response, and failover tests
-652. Project-idempotent OTCS append port
-653. Authenticated expected-head compare-and-swap client with signature and inclusion-proof verification
-654. Duplicate suppression, stale-head, signature, proof, and replay tests
-655. Optional SQLite committed_resources history
-656. Managed windowed aggregate with pruning or compaction, replication where required, and trusted time
-657. Window-boundary, restart, retention, and failover tests
-658. In-process RLock
-659. Database or distributed serialization across reservation, debit, and receipt creation
-660. Concurrent oversubscription and multi-process tests
-661. Full-chain verification per operation
-662. Indexed or checkpointed hot-path verification plus independent full-chain audits
-663. Scale benchmark and historical tamper tests
-664. Process clock
-665. Trusted UTC source with drift monitoring
-666. Clock source, thresholds, and alert evidence
-667. Process reservation
-668. Durable reservation coordinated with downstream commit
-669. Failure-injection and double-spend tests
-670. Function-call role
-671. mTLS and enterprise workload identity with scoped OAuth
-672. Trust chain and access matrix
-673. Synthetic evidence URI
-674. Immutable access-controlled evidence reference
-675. Evidence registry and hash verification
-676. In-process commit
-677. Atomic or compensatable downstream transaction boundary
-678. Commit/rollback design and reconciliation test
-679. 12.1 Security invariants
-680. Connector-supplied evidence status and prerequisite, hard-block, or manual-review booleans are never authority in production: the engine ships an evidence resolver and a control resolver whose derived results replace the connector claims as gate inputs, and production MUST wire both to authoritative systems. Without the resolvers the reference engine gates on the declared intent flags — a documented reference boundary, not a production posture.
-681. The production evaluator resolves authoritative evidence and derives controls before the reference gate boundary.
-682. No raw secret, token, password, private key, or reusable credential enters an intent, event, receipt, or registry record.
-683. The connector has no write path to profile, declaration, gate, or architect store.
-684. Operator and observer surfaces never expose gate internals.
-685. Revocation and expiry are checked again at commit, not only at evaluation.
-686. A local integrity failure blocks every later operation until investigated.
-687. Logs and evidence use enterprise data-classification, retention, and access controls.
-688. 12.2 Contract validation and bounded failure policy
-689. failure_posture is a required profile mirror of protocol-fixed outcomes: missing_required_data is REFUSAL and ambiguity is MANUAL_REVIEW. Neither the profile nor the declaration can select an alternative disposition.
-690. Both posture values are required, non-executable, and fixed: missing_required_data is REFUSAL and ambiguity is MANUAL_REVIEW.
-691. Integrity failures remain raised hard errors because a compromised seal or ledger cannot safely author a new disposition.
-692. This reference has no downstream caller or independent rule-conflict detector, so integrity_failure, downstream_unavailable, and rule_conflict are not decorative configuration fields.
-693. A production extension adds a reviewed runtime branch and a new schema version before adding another configurable failure condition.
-694. Every inbound profile, declaration, and runtime message has a normative JSON Schema, exercised by the shipped conformance suite. The reference engine enforces its semantic contract itself; wire-ingress schema validation is an integrator obligation (README step 5), because the standard-library reference adapter deliberately carries no third-party schema dependency.
-695. The conformance suite activates date-time format checking and carries negative probes for malformed formats and overlong strings.
-696. 13. Acceptance
-697. 13.1 Reference package checks
-698. Check set
-699. Coverage
-700. Expected result
-701. Functional behavior
-702. 34 positive and negative state-machine tests, each run against all three shipped profiles
-703. All pass on all three profiles
-704. Semantic contradictions
-705. 15 profile, declaration, role, and input tests
-706. All rejected as designed
-707. Deliberate-break sensitivity
-708. 51 named safety facts
-709. Each mutation produces its own expected refusal or error
-710. Contract conformance
-711. 55 checks covering shipped artefacts, active format and length bounds, live outputs, wire references, route table, per-route security, and engine operations
-712. All validate and resolve; reported NOT_RUN, never as a pass, when the optional libraries are absent
-713. Contract regressions
-714. 89 focused tests derived from the executable suite
-715. Each pins one contract fact: a defect the engine once had, or a refusal code that no other check witnessed
-716. OTCS bridge
-717. 68 tests over the permit-gated append seam, including every declared refusal code of its own vocabulary
-718. Each refusal answers with its own code, and the declared vocabulary equals the measured one
-719. Failure-surface ratchet
-720. Layered closed-world vocabularies, both emission-point counts with the dynamic gap enumerated, runtime-observed witnesses, and architect decisions
-721. No unclassified emission path, no silent runtime sink, no unacknowledged baseline delta
-722. Package integrity
-723. Sources, schemas, API routes, hashes, registry, document
-724. All package checks pass
-725. These checks exercise the named behaviours of the supplied reference package. They do not substitute for independent production review, domain approval, or infrastructure assurance.
-726. 13.2 Minimum go-live evidence
-727. approved profile bytes, profile hash, and complete mapping witness;
-728. approved declaration bytes, declaration hash, and exact enterprise identifiers;
-729. authoritative evidence resolvers and independently derived control results bound to request and state;
-730. workload identity, mTLS trust chain, and role access matrix;
-731. KMS/HSM custody, rotation, and revocation procedure;
-732. versioned signature envelope with algorithm, key identifier, and signature bytes;
-733. trusted time source and drift monitoring;
-734. multi-node idempotency, cross-system reservation, and downstream atomicity design;
-735. append-only or WORM retention configuration and restore test;
-736. positive connection test plus negative tests for every fail-closed condition;
-737. change process that creates a new version instead of altering a live gate;
-738. independent review of domain mappings, production code, and deployment controls.
-739. GO-LIVE BOUNDARY  Synthetic fixtures, optional single-node SQLite durability, or a passing local test set must never be promoted as production evidence.
-740. 14. Adding a new domain
-741. Name the domain and define a closed action alphabet.
-742. Define effect classes independently from action names.
-743. Declare every resource, unit, claim rule, and reservation requirement.
-744. Map every action to exactly one effect class and its required resources.
-745. Define prerequisites, hard blocks, review flags, and a zero-effect fallback.
-746. Define evidence requirements that cover every action.
-747. Create a mapping witness covering every action and effect class.
-748. Define role visibility, forbidden operator fields, failure posture, and hash-only registry policy.
-749. Seal the profile and create a narrower instance declaration with explicit action-target bindings.
-750. Run positive, contradiction, and deliberate-break checks before integration.
-751. If the domain cannot be represented without weakening this contract, stop and create a new reviewed schema version instead of force-fitting it.
-752. Invalid shortcut
-753. Required repair
-754. The new API looks like the banking API
-755. Provide a new domain mapping witness
-756. The old action name is reused
-757. Declare its effect class and resources in the new domain
-758. The adapter already has approvals
-759. Bind immutable evidence and exact authority to the new declaration
-760. A manual reviewer can override refusal
-761. Create a new approved version or proceed outside the automated path
-762. A central ledger can keep all details
-763. Keep full evidence local and publish only the hash-only projection
-764. 14.1 Profile validation command
-765. python -B -c "import sys; sys.path.insert(0, 'sdk/python'); from nc25_universal_ledger import load_json, validate_profile; validate_profile(load_json(sys.argv[1])); print('PROFILE_VALID')" profiles/banking/bank-profile.json
-766. Appendix A. Complete NC2.5 crosswalk
-767. ID
-768. Lines
-769. Universal use
-770. Constraint
-771. CORE-DECLARATION
-772. 313-326
-773. Complete, sealed, versioned profile and connection declaration.
-774. Missing required fields make the claim undefined; a material post-activation change creates a new version and hash.
-775. CORE-NON-ACTIONABILITY
-776. 337-351
-777. Exclusion-only gate and minimal operator projection.
-778. Boundary data, margins, sub-verdicts, statistics, and traces cannot be scores, features, objectives, or gradients.
-779. CORE-EFFECT-SPACE
-780. 389-404, 542-552
-781. Typed action, effect, and forbidden-effect declarations in every profile.
-782. Action, admissible subset, effect class, and forbidden effect remain distinct types.
-783. A28-HISTORY
-784. 1174-1184
-785. History and state anchors on every intent and permit.
-786. A restored operational state does not erase structural history.
-787. A29-A33-GATE
-788. 1186-1284
-789. Authority before evaluation, zero executability for refusal, declared safe fallback.
-790. An inadmissible candidate is not scored, ranked, optimized, or executed.
-791. A40-A43-MINIMALITY
-792. 1378-1404
-793. No blocked-branch learning, minimal operator result, prospective revision.
-794. Architect detail may be retained post-event but cannot become an operator signal.
-795. A48-A52-INTERFACE
-796. 1497-1618
-797. Binary read-only gate and normalized response surface.
-798. Admissibility is an exclusion relation, not a scalar or probability.
-799. A52-1-A52-2-ABSTENTION
-800. 1620-1685
-801. Non-executable ambiguity, hold, and manual-review paths.
-802. Architect-only ambiguity measures are not operator-readable.
-803. A53-A59-REVISION
-804. 1687-1837, 5686-6055
-805. Authorized version change and isolated evidence references.
-806. No unlimited micro-revision and no post-failure rule rescue.
-807. A60-A61-BUDGET
-808. 1839-1935
-809. Committed-action structural capacity channel, separate from domain resource limits, with a declared capacity provenance coding.
-810. Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package.
-811. A64-A66-SEPARATION
-812. 10334-10387
-813. Read-only profile and gate, validated debit, role-restricted trace.
-814. Architect trace is post-emission only and unavailable to operator or ordinary observer.
-815. T67-HALT
-816. 7057-7148
-817. Commit guard with halt authority and append-only local state.
-818. A detector without halt authority does not prevent propagation.
-819. T69-BIFURCATION
-820. 7374-7468
-821. Permit/refusal witness without direct gate geometry or reason-code exposure.
-822. The connector receives only a coarse disposition. Repeated probing of that unavoidable decision bit must be throttled and audited by the production adapter.
-823. T98-FRAMEWORK-CORE
-824. 12252-12458
-825. Independent determination and non-accumulating realization layers.
-826. Single-layer write-back or cross-invocation boundary reconstruction exits the declared class.
-827. T107-T108-TRANSFER
-828. 12995-13065
-829. Explicit profile mapping witness for each domain.
-830. Connection or API similarity does not license viability transfer.
-831. L47-NON-WEAPONIZABILITY
-832. 13317-13341
-833. Hash-only registry, coarse operator codes, forbidden-key scans, and adapter-level anti-probing controls.
-834. Boundary geometry and detailed reasons remain architect evidence only; the unavoidable disposition bit is rate-limited and auditable.
-835. Appendix B. Package files
-836. Path
-837. Purpose
-838. README.md
-839. Reader entry point and claim boundary
-840. SOURCE-MANIFEST.json
-841. Immutable external-input hashes
-842. PACKAGE-MANIFEST.json
-843. SHA-256 and byte-length coverage of shipped package files
-844. requirements-lock.txt
-845. Pinned schema, YAML, and DOCX tool dependencies, plus the optional cryptography runtime
-846. LICENSE
-847. Per-file documentation and code licensing
-848. core/nc25-core-crosswalk.json
-849. Exact core source anchors
-850. core/schemas/profile.schema.json
-851. Domain profile contract
-852. core/schemas/connection-declaration.schema.json
-853. Instance declaration contract
-854. core/schemas/runtime-contracts.schema.json
-855. Authority, intent, evidence, result, execution, and receipt contracts
-856. core/schemas/registry-record.schema.json
-857. Hash-only shared projection
-858. protocol/universal-connection.openapi.yaml
-859. Role-separated API
-860. sdk/python/nc25_universal_ledger.py
-861. Reference state machine
-862. sdk/python/nc25_universal_adapter.py
-863. Reference WSGI HTTP adapter enforcing the wire contract
-864. sdk/python/nc25_otcs_bridge.py
-865. Permit-gated OTCS append bridge with durable recovery outbox
-866. profiles/PROFILE-AUTHORING-CHECKLIST.md
-867. Required profile authoring gates
-868. profiles/banking/
-869. Bank profile and questionnaire crosswalk
-870. profiles/document-release/reference-connection.json
-871. Second executable reference profile
-872. profiles/otcs/reference-connection.json
-873. Third executable profile plus typed OTCS operation and receipt fixture
-874. examples/
-875. Synthetic executable fixtures
-876. tests/test_otcs_bridge.py
-877. OTCS authority-boundary and crash-seam regression cases
-878. tests/
-879. Behavior, contradiction, deliberate-break, conformance, and package checks
-880. tools/
-881. Deterministic builders for this document, its review projection, the package manifest, the acceptance report, the review bundle and the contract's error-code enum, plus the failure-surface ratchet
-882. UNIVERSAL-CONNECTION-RUNBOOK.md
-883. Integration sequence
-884. ACCEPTANCE-REPORT.md
-885. Verification status and production boundary
-886. Appendix C. Synthetic command sequence
-887. python -B tests/run_acceptance.py
-888. python -B -m pytest -p no:cacheprovider tests  # optional collection
-889. Expected reference outcome:
-890. functional tests .......... pass
-891. semantic contradictions ... rejected
-892. deliberate breaks ......... each detected by its named control
-893. package bindings .......... pass
-894. END OF SPECIFICATION
+546. Every public SDK operation requires an explicit actor_scope; omission fails closed, no method supplies its required role as a default, and production derives the scope from verified workload identity. Identifier, version, hash and role arguments require native Python str values so caller-defined equality cannot impersonate an actor.
+547. Post-authorization resolver failures produce recorded REFUSAL/EXECUTION_DENIED with the submitted request hash and a consumed idempotency key. The architect decision names AUTHORITATIVE_RESOLUTION_FAILED; an exact retry preserves that refusal.
+548. The runtime intent and evidence schemas are internal evaluator inputs; a production adapter ignores connector-asserted truth values and overwrites them with authoritative evidence resolution and independently derived controls.
+549. Resolved evidence and derived controls are bound to the request and current-state anchor before evaluation.
+550. The operator route requires an Idempotency-Key header exactly equal to intent.idempotency_key; mismatch is rejected before evaluation.
+551. Wire SHA-256 inputs use exactly 64 hexadecimal characters in either case; the engine normalizes comparisons and emits canonical uppercase values.
+552. The executor consume route requires the path permit_hash to equal execution_request.permit_hash. The adapter passes the path value as route_permit_hash to commit_execution; mismatch fails with EXECUTION_PERMIT_MISMATCH before lookup, replay, consumption, or debit.
+553. The registry route passes its connector_id path selector to registry_record. A different or unknown selector fails with CONNECTOR_NOT_FOUND and maps to HTTP 404; the active connector record is never substituted.
+554. If an in-process exception interrupts reference commit, the engine restores its pre-call ledger, debit, permit, receipt, and replay state before re-raising, except for the four commit refusals that invalidate the permit on purpose (an AUTHORITY_* grant failure, PERMIT_EXPIRED, STATE_ANCHOR_CHANGED, and RESOURCE_WINDOW_LIMIT): they keep the invalidation, and a later commit with that permit is refused with the same code. With state_path configured, SQLite serializes writers with BEGIN IMMEDIATE, commits permit consumption, debit, receipt, replay state, reservations, and the local event chain atomically for one node, and reloads one verified snapshot under the local lock for every public read.
+555. The reference SQLite snapshot MAC authenticates bytes, not their place in time. A running instance refuses a shorter or forked event history, a missing row, or loss of a signing-key revocation or terminal permit invalidation it has observed. Honest newer history and terminal facts from another instance remain acceptable. A genuine older snapshot restored before a cold start is not detected: production storage must provide an independent monotonic anchor and restore verification. A counter inside the same rewritable snapshot does not provide that protection.
+556. Signer configuration is external runtime configuration. Reopening a state_path whose event chain contains Ed25519 envelopes requires a verifier-compatible event_signer with the same key_id; SQLite deliberately persists neither signer configuration nor private keys. Omitting the verifier, or supplying one that declares both an algorithm and a key_id and differs from the persisted envelope in either, fails closed with EVENT_SIGNER_REQUIRED. The EventSigner protocol requires only sign and verify, so a signer that does not declare both cannot be compared against the envelope at all; for such a signer the mismatch is not distinguished and reaches the caller as a chain verdict. A signer declaring the same key_id with different key material likewise cannot be told apart from a forged chain and so fails full-chain integrity verification.
+557. External JSON Schema references define profile, declaration, and runtime payloads.
+558. The HTTP adapter wraps the reference engine's primitive declaration and grant hashes into the response objects defined by OpenAPI.
+559. A reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and validates each POST body against the packaged JSON Schemas with pinned jsonschema before calling the engine. It reads the reference X-Workload-Scope header rather than the body; that header does not authenticate a principal. Production derives role and requester from verified workload identity. It binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.
+560. A contract error is distinct from a normalized non-executable business result.
+561. Integrity failure returns no permit and requires an operational halt.
+562. 11. Failure matrix
+563. Condition
+564. Disposition / error
+565. Gate engaged
+566. Permit
+567. Missing required evidence
+568. REFUSAL
+569. No
+570. None
+571. Structurally valid evidence with INVALID, REVOKED, or EXPIRED status
+572. REFUSAL
+573. No
+574. None
+575. Malformed submitted evidence object, hash, reference, or unknown status
+576. Contract error / halt
+577. No decision
+578. None
+579. Resolver failure or malformed/future authoritative output
+580. REFUSAL
+581. No
+582. None
+583. Ambiguous request
+584. MANUAL_REVIEW
+585. No
+586. None
+587. Manual-review flag true
+588. MANUAL_REVIEW
+589. No
+590. None
+591. Hard-block flag true or prerequisite false, with no ambiguity flag
+592. REFUSAL
+593. No
+594. None
+595. Binding, authority, action-target pairing, or scope mismatch
+596. REFUSAL
+597. No
+598. None
+599. Structural capacity unavailable
+600. REFUSAL
+601. Yes; structural=0
+602. None
+603. Domain resource rule or window unavailable
+604. REFUSAL
+605. Yes; effect=0
+606. None
+607. Idempotency key reused with changed request
+608. Conflict
+609. No new evaluation
+610. None
+611. Grant revoked before commit
+612. Commit rejected
+613. Prior result invalidated
+614. None usable
+615. State anchor changed
+616. Commit rejected
+617. Prior result invalidated
+618. None usable
+619. Permit expired, tampered, or consumed
+620. Commit rejected
+621. No new evaluation
+622. None usable
+623. Profile, declaration, or ledger integrity failure
+624. Transport-level halt; no operator result
+625. No
+626. None
+627. Control results are checked only after the authorization, resolver, and evidence checks pass, and before the structural and effect gates. Within the control results, ambiguity is checked first, so an ambiguous request with a false prerequisite or a true hard-block flag returns MANUAL_REVIEW rather than REFUSAL, and its recorded decision names only AMBIGUOUS_INTENT. Otherwise a false prerequisite or a true hard-block flag returns REFUSAL before any manual-review flag is checked.
+628. 12. Production substitutions and security
+629. Reference element
+630. Production requirement
+631. Acceptance evidence
+632. Reference HMAC permit signer and state HMAC
+633. Asymmetric KMS/HSM key, rotation, revocation, custody
+634. Key policy and independent verification
+635. Optional Ed25519 permit/event envelope
+636. KMS/HSM-backed detached signature with managed key policy
+637. Tamper, wrong-key, rotation, and independent-verification evidence
+638. Versioned permit signature envelope (shipped; key_id-routed verification, rotation, revocation)
+639. Managed key custody source behind the same envelope; key ceremonies and revocation evidence
+640. Wire-contract conformance and independent signature verification
+641. Connector-supplied evidence claims
+642. Inject an authoritative evidence resolver; exceptions, malformed output, and intent mismatch fail closed
+643. Override, malformed-output, and request/state binding tests
+644. Connector-supplied control and ambiguity flags
+645. Inject an authoritative control resolver (shipped injection point); derived results replace the intent flags and bind into the permit request hash; failures fail closed
+646. Independent control-derivation and spoofed-control-rejection tests
+647. In-memory event list
+648. Transactional append-only or WORM storage
+649. Retention configuration and restore test
+650. Optional single-node SQLite idempotency
+651. Independent monotonic restore anchor, retained history, and a replay-safe result store; replication where multi-node availability is required
+652. Genuine older-snapshot restore refusal, concurrency, restart, and failover tests
+653. In-memory execution replay
+654. Store execution request hash and receipt atomically with permit consumption
+655. Lost-response retry and changed-retry conflict tests
+656. Required local OTCS SQLite outbox
+657. Transactional replicated outbox or workflow store preserving exact requests, receipts, and reconciliation state
+658. Crash-before-call, ambiguous-response, and failover tests
+659. Project-idempotent OTCS append port
+660. Authenticated expected-head compare-and-swap client with signature and inclusion-proof verification
+661. Duplicate suppression, stale-head, signature, proof, and replay tests
+662. Optional SQLite committed_resources history
+663. Managed windowed aggregate with pruning or compaction, replication where required, and trusted time
+664. Window-boundary, restart, retention, and failover tests
+665. In-process RLock
+666. Database or distributed serialization across reservation, debit, and receipt creation
+667. Concurrent oversubscription and multi-process tests
+668. Full-chain verification per operation
+669. Indexed or checkpointed hot-path verification plus independent full-chain audits
+670. Scale benchmark and historical tamper tests
+671. Process clock
+672. Trusted UTC source with drift monitoring
+673. Clock source, thresholds, and alert evidence
+674. Process reservation
+675. Durable reservation coordinated with downstream commit
+676. Failure-injection and double-spend tests
+677. Function-call role
+678. mTLS and enterprise workload identity with scoped OAuth
+679. Trust chain and access matrix
+680. Synthetic evidence URI
+681. Immutable access-controlled evidence reference
+682. Evidence registry and hash verification
+683. In-process commit
+684. Atomic or compensatable downstream transaction boundary
+685. Commit/rollback design and reconciliation test
+686. 12.1 Security invariants
+687. Connector-supplied evidence status and prerequisite, hard-block, manual-review or ambiguity flags are never authority in production: the engine ships an evidence resolver and a control resolver whose derived results replace the connector claims as gate inputs, and production MUST wire both to authoritative systems. Without the resolvers the reference engine gates on the declared intent flags — a documented reference boundary, not a production posture.
+688. The production evaluator resolves authoritative evidence and derives controls before the reference gate boundary.
+689. No raw secret, token, password, private key, or reusable credential may enter an intent, event, receipt, or registry record. The engine enforces this only for mapping keys that read as credential field names; a secret placed in the value of an ordinary field, such as approval_evidence_ref or evidence_ref, reaches the signed event, so keeping values clean is the integrator's obligation.
+690. The connector has no write path to profile, declaration, gate, or architect store.
+691. Operator and observer surfaces never expose gate internals.
+692. Grant revocation and expiry, permit expiry, permit signing-key revocation, and declaration validity are checked again at commit, not only at evaluation. Evidence status and derived controls are not re-resolved at commit, so a permit can be committed on the resolver state at its issuance for up to its sealed lifetime of at most 900 seconds; a shorter configured permit TTL narrows that window.
+693. A profile-seal, declaration-seal, or event-chain failure is detected again on every operation and blocks every later operation while the damage remains; any other integrity failure, such as a permit hash or signature failure, refuses only the calls that meet it. The reference keeps no halt latch and records no integrity refusal, so production must stop the instance on any integrity failure until it is investigated.
+694. Logs and evidence use enterprise data-classification, retention, and access controls.
+695. 12.2 Contract validation and bounded failure policy
+696. failure_posture is a required profile mirror of protocol-fixed outcomes: missing_required_data is REFUSAL and ambiguity is MANUAL_REVIEW. Neither the profile nor the declaration can select an alternative disposition.
+697. Both posture values are required, non-executable, and fixed: missing_required_data is REFUSAL and ambiguity is MANUAL_REVIEW.
+698. Integrity failures remain raised hard errors because a compromised seal or ledger cannot safely author a new disposition.
+699. This reference has no downstream caller or independent rule-conflict detector, so integrity_failure, downstream_unavailable, and rule_conflict are not decorative configuration fields.
+700. A production extension adds a reviewed runtime branch and a new schema version before adding another configurable failure condition.
+701. Every inbound profile, declaration, and runtime message has a normative JSON Schema, exercised by the shipped conformance suite. The reference adapter validates each POST body before the engine and refuses with SCHEMA_VALIDATION_UNAVAILABLE if jsonschema or the packaged schemas are absent or invalid. The engine enforces its semantic contract; integrators must enforce the same schema boundary on any other ingress path.
+702. The conformance suite activates date-time format checking and carries negative probes for malformed formats and overlong strings.
+703. 13. Acceptance
+704. 13.1 Reference package checks
+705. Check set
+706. Coverage
+707. Expected result
+708. Functional behavior
+709. 37 positive and negative state-machine tests, each run against all three shipped profiles
+710. All pass on all three profiles
+711. Semantic contradictions
+712. 15 profile, declaration, role, and input tests
+713. All rejected as designed
+714. Deliberate-break sensitivity
+715. 51 named safety facts
+716. Each mutation produces its own expected refusal or error
+717. Contract conformance
+718. 65 checks covering shipped artefacts, active format and length bounds, live outputs, wire references, route table, per-route security, and engine operations
+719. All validate and resolve; reported NOT_RUN, never as a pass, when the optional libraries are absent
+720. Declaration field census
+721. 11 tests holding each fixed declaration and registry field to its classification in DECLARATION-FIELDS.md and to the engine line that consumes it
+722. The inventory and the document agree; a new field or a removed engine consumer is the first failure
+723. Contract regressions
+724. 131 focused tests derived from the executable suite
+725. Each pins one contract fact: a defect the engine once had, or a refusal code that no other check witnessed
+726. OTCS bridge
+727. 71 tests over the permit-gated append seam, including every declared refusal code of its own vocabulary
+728. Each refusal answers with its own code, and the declared vocabulary equals the measured one
+729. Failure-surface ratchet
+730. Layered closed-world vocabularies, both emission-point counts with the dynamic gap enumerated, runtime-observed witnesses, and architect decisions
+731. No unclassified emission path, no silent runtime sink, no unacknowledged baseline delta
+732. Package integrity
+733. Sources, schemas, API routes, hashes, registry, document
+734. All package checks pass
+735. These checks exercise the named behaviours of the supplied reference package. They do not substitute for independent production review, domain approval, or infrastructure assurance.
+736. 13.2 Minimum go-live evidence
+737. approved profile bytes, profile hash, and complete mapping witness;
+738. approved declaration bytes, declaration hash, and exact enterprise identifiers;
+739. authoritative evidence resolvers and independently derived control results bound to request and state;
+740. workload identity, mTLS trust chain, and role access matrix;
+741. KMS/HSM custody, rotation, and revocation procedure;
+742. versioned signature envelope with algorithm, key identifier, and signature bytes;
+743. trusted time source and drift monitoring;
+744. multi-node idempotency, cross-system reservation, and downstream atomicity design;
+745. append-only or WORM retention configuration and restore test;
+746. positive connection test plus negative tests for every fail-closed condition;
+747. change process that creates a new version instead of altering a live gate;
+748. independent review of domain mappings, production code, and deployment controls.
+749. GO-LIVE BOUNDARY  Synthetic fixtures, optional single-node SQLite durability, or a passing local test set must never be promoted as production evidence.
+750. 14. Adding a new domain
+751. Name the domain and define a closed action alphabet.
+752. Define effect classes independently from action names.
+753. Declare every resource, unit, claim rule, and reservation requirement.
+754. Map every action to exactly one effect class and its required resources.
+755. Define prerequisites, hard blocks, review flags, and a zero-effect fallback.
+756. Define evidence requirements that cover every action.
+757. Create a mapping witness covering every action and effect class.
+758. Define role visibility, forbidden operator fields, failure posture, and hash-only registry policy.
+759. Seal the profile and create a narrower instance declaration with explicit action-target bindings.
+760. Run positive, contradiction, and deliberate-break checks before integration.
+761. If the domain cannot be represented without weakening this contract, stop and create a new reviewed schema version instead of force-fitting it.
+762. Invalid shortcut
+763. Required repair
+764. The new API looks like the banking API
+765. Provide a new domain mapping witness
+766. The old action name is reused
+767. Declare its effect class and resources in the new domain
+768. The adapter already has approvals
+769. Bind immutable evidence and exact authority to the new declaration
+770. A manual reviewer can override refusal
+771. Create a new approved version or proceed outside the automated path
+772. A central ledger can keep all details
+773. Keep full evidence local and publish only the hash-only projection
+774. 14.1 Profile validation command
+775. python -B -c "import sys; sys.path.insert(0, 'sdk/python'); from nc25_universal_ledger import load_json, validate_profile; validate_profile(load_json(sys.argv[1])); print('PROFILE_VALID')" profiles/banking/bank-profile.json
+776. Appendix A. Complete NC2.5 crosswalk
+777. ID
+778. Lines
+779. Universal use
+780. Constraint
+781. CORE-DECLARATION
+782. 313-326
+783. Complete, sealed, versioned profile and connection declaration.
+784. Missing required fields make the claim undefined; a material post-activation change creates a new version and hash.
+785. CORE-NON-ACTIONABILITY
+786. 337-351
+787. Exclusion-only gate and minimal operator projection.
+788. Boundary data, margins, sub-verdicts, statistics, and traces cannot be scores, features, objectives, or gradients.
+789. CORE-EFFECT-SPACE
+790. 389-404, 542-552
+791. Typed action, effect, and forbidden-effect declarations in every profile.
+792. Action, admissible subset, effect class, and forbidden effect remain distinct types.
+793. A28-HISTORY
+794. 1174-1184
+795. History and state anchors on every intent and permit.
+796. A restored operational state does not erase structural history. The reference SQLite guard protects history and terminal facts already observed by a running instance. It cannot detect a genuine older snapshot restored before a cold start; meeting the history requirement across restarts needs an independent monotonic anchor and restore verification in production storage.
+797. A29-A33-GATE
+798. 1186-1284
+799. Authority before evaluation, zero executability for refusal, declared safe fallback.
+800. An inadmissible candidate is not scored, ranked, optimized, or executed.
+801. A40-A43-MINIMALITY
+802. 1378-1404
+803. No blocked-branch learning, minimal operator result, prospective revision.
+804. Architect detail may be retained post-event but cannot become an operator signal.
+805. A48-A52-INTERFACE
+806. 1497-1618
+807. Binary read-only gate and normalized response surface.
+808. Admissibility is an exclusion relation, not a scalar or probability.
+809. A52-1-A52-2-ABSTENTION
+810. 1620-1685
+811. Non-executable ambiguity, hold, and manual-review paths.
+812. Architect-only ambiguity measures are not operator-readable.
+813. A53-A59-REVISION
+814. 1687-1837, 5686-6055
+815. Authorized version change and isolated evidence references.
+816. No unlimited micro-revision and no post-failure rule rescue.
+817. A60-A61-BUDGET
+818. 1839-1935
+819. Committed-action structural capacity channel, separate from domain resource limits.
+820. The package does not verify the provenance of structural capacity. Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package.
+821. A64-A66-SEPARATION
+822. 10334-10387
+823. Read-only profile and gate, validated debit, role-restricted trace.
+824. Architect trace is post-emission only and unavailable to operator or ordinary observer.
+825. T67-HALT
+826. 7057-7148
+827. Commit guard with halt authority and append-only local state.
+828. A detector without halt authority does not prevent propagation.
+829. T69-BIFURCATION
+830. 7374-7468
+831. Permit/refusal witness without direct gate geometry or reason-code exposure.
+832. The connector receives only a coarse disposition. A production adapter must rate-limit distinct probes of that unavoidable decision bit per connector and alert on systematic boundary-seeking sequences.
+833. T98-FRAMEWORK-CORE
+834. 12252-12458
+835. Independent determination and non-accumulating realization layers.
+836. Single-layer write-back or cross-invocation boundary reconstruction exits the declared class.
+837. T107-T108-TRANSFER
+838. 12995-13065
+839. Explicit profile mapping witness for each domain.
+840. Connection or API similarity does not license viability transfer.
+841. L47-NON-WEAPONIZABILITY
+842. 13317-13341
+843. Hash-only registry, coarse operator codes, forbidden-key scans, and an anti-probing obligation on a production adapter.
+844. Boundary geometry and detailed reasons remain architect evidence only; a production adapter must rate-limit distinct probes of the unavoidable disposition bit per connector and alert on systematic boundary-seeking sequences. The reference adapter has no rate limiter and no probe alerting.
+845. Appendix B. Package files
+846. Path
+847. Purpose
+848. README.md
+849. Reader entry point and claim boundary
+850. SOURCE-MANIFEST.json
+851. Immutable external-input hashes
+852. PACKAGE-MANIFEST.json
+853. SHA-256 and byte-length coverage of shipped package files
+854. requirements-lock.txt
+855. Pinned schema, YAML, and DOCX tool dependencies, plus the optional cryptography runtime
+856. LICENSE
+857. Per-file documentation and code licensing
+858. core/nc25-core-crosswalk.json
+859. Exact core source anchors
+860. core/schemas/profile.schema.json
+861. Domain profile contract
+862. core/schemas/connection-declaration.schema.json
+863. Instance declaration contract
+864. core/schemas/runtime-contracts.schema.json
+865. Authority, intent, evidence, result, execution, and receipt contracts
+866. core/schemas/registry-record.schema.json
+867. Hash-only shared projection
+868. protocol/universal-connection.openapi.yaml
+869. Role-separated API
+870. sdk/python/nc25_universal_ledger.py
+871. Reference state machine
+872. sdk/python/nc25_universal_adapter.py
+873. Reference WSGI HTTP adapter enforcing the wire contract
+874. sdk/python/nc25_otcs_bridge.py
+875. Permit-gated OTCS append bridge with durable recovery outbox
+876. sdk/python/nc25ol_reader.py
+877. Independent, fingerprint-pinned observer-export reader
+878. profiles/PROFILE-AUTHORING-CHECKLIST.md
+879. Required profile authoring gates
+880. profiles/banking/
+881. Bank profile and questionnaire crosswalk
+882. profiles/document-release/reference-connection.json
+883. Second executable reference profile
+884. profiles/otcs/reference-connection.json
+885. Third executable profile plus typed OTCS operation and receipt fixture
+886. examples/
+887. Synthetic executable fixtures
+888. tests/test_otcs_bridge.py
+889. OTCS authority-boundary and crash-seam regression cases
+890. tests/
+891. Behavior, contradiction, deliberate-break, conformance, and package checks
+892. tools/
+893. Deterministic builders for this document, its review projection, the package manifest, the acceptance report, the review bundle and the contract's error-code enum, plus the failure-surface ratchet
+894. UNIVERSAL-CONNECTION-RUNBOOK.md
+895. Integration sequence
+896. ACCEPTANCE-REPORT.md
+897. Verification status and production boundary
+898. Appendix C. Synthetic command sequence
+899. python -B tests/run_acceptance.py
+900. python -B -m pytest -p no:cacheprovider tests  # optional collection
+901. Expected reference outcome:
+902. functional tests .......... pass
+903. semantic contradictions ... rejected
+904. deliberate breaks ......... each detected by its named control
+905. package bindings .......... pass
+906. END OF SPECIFICATION
 
 ### `word/footer1.xml`
 

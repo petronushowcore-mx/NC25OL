@@ -169,7 +169,6 @@
     "schema_version": "1.0.0",
     "declaration_id": "synthetic.otcs.registry.connection",
     "declaration_version": "1.0.0",
-    "predecessor_declaration_hash": null,
     "created_at": "2026-07-31T00:00:00Z",
     "effective_from": "2026-07-31T00:00:00Z",
     "expires_at": "2027-07-27T00:00:00Z",
@@ -185,11 +184,7 @@
       "profile_hash": "523EC760A055D6E966B203AF6BAA899A5DC90B7AC51A7E663D69CE059FBD1871"
     },
     "connector": {
-      "connector_id": "synthetic-otcs-connector",
-      "workload_identity_issuer": "synthetic-otcs-identity-issuer",
-      "environment_ids": [
-        "sandbox"
-      ]
+      "connector_id": "synthetic-otcs-connector"
     },
     "instance_scope": {
       "action_ids": [
@@ -228,10 +223,7 @@
       }
     },
     "structural_budget": {
-      "selector_id": "synthetic-otcs-selector",
-      "capacity": 500,
-      "unit": "structural-cost-unit",
-      "provenance": "fully_stipulated"
+      "capacity": 500
     },
     "resource_limits": [
       {
@@ -242,22 +234,14 @@
       }
     ],
     "governance": {
-      "profile_owner_id": "synthetic-otcs-profile-owner",
-      "declaration_owner_id": "synthetic-otcs-declaration-owner",
       "approval_owner_id": "synthetic-otcs-approval-owner",
       "authority_issuer_id": "synthetic-otcs-authority-issuer",
       "revision_authority_ids": [
         "synthetic-otcs-revision-board"
       ],
-      "change_process_ref": "evidence://synthetic/otcs/change-process/v1",
       "no_live_gate_override": true
     },
     "interfaces": {
-      "governance_service_id": "synthetic-otcs-governance-service",
-      "operator_service_id": "synthetic-otcs-operator-service",
-      "executor_service_id": "synthetic-otcs-executor-service",
-      "architect_store_id": "synthetic-otcs-architect-store",
-      "observer_projection_id": "synthetic-otcs-observer-projection",
       "off_limits_system_ids": [
         "production-otcs-registry",
         "architect-private-store"
@@ -266,24 +250,7 @@
     "mapping_witness_binding": {
       "witness_id": "otcs-registry-reference-witness-v1",
       "witness_hash": "B06BC6E5E10E24E9E02EAD8125E47BAE0454A76855F636FE5A07B017D9ABD6F2"
-    },
-    "evidence_refs": [
-      {
-        "evidence_type": "DECLARATION_APPROVAL",
-        "ref": "evidence://synthetic/otcs/declaration-approval/v1",
-        "sha256": "F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0"
-      },
-      {
-        "evidence_type": "IDENTITY_BOUNDARY",
-        "ref": "evidence://synthetic/otcs/identity-boundary/v1",
-        "sha256": "F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1"
-      },
-      {
-        "evidence_type": "OUTBOX_DESIGN",
-        "ref": "evidence://synthetic/otcs/outbox-design/v1",
-        "sha256": "F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2"
-      }
-    ]
+    }
   },
   "grant": {
     "message_type": "authority_grant",
@@ -296,7 +263,7 @@
       "profile_hash": "523EC760A055D6E966B203AF6BAA899A5DC90B7AC51A7E663D69CE059FBD1871",
       "declaration_id": "synthetic.otcs.registry.connection",
       "declaration_version": "1.0.0",
-      "declaration_hash": "A2D8A2E092F5D28D527F75C8C5DDDA48146FEBD61A0804631E9F0EC5EED503AF"
+      "declaration_hash": "B814BC209F2283BFA349CFA99184BBE89DAD6878EF0260F8FA955BCDE2D436C6"
     },
     "permitted_action_ids": [
       "OTCS_APPEND_EVENT",
@@ -324,7 +291,7 @@
       "profile_hash": "523EC760A055D6E966B203AF6BAA899A5DC90B7AC51A7E663D69CE059FBD1871",
       "declaration_id": "synthetic.otcs.registry.connection",
       "declaration_version": "1.0.0",
-      "declaration_hash": "A2D8A2E092F5D28D527F75C8C5DDDA48146FEBD61A0804631E9F0EC5EED503AF"
+      "declaration_hash": "B814BC209F2283BFA349CFA99184BBE89DAD6878EF0260F8FA955BCDE2D436C6"
     },
     "action_id": "OTCS_APPEND_EVENT",
     "target_system_id": "synthetic-otcs-registry",

@@ -1,9 +1,9 @@
-# NC25OL - Navigational Cybernetics 2.5 Open Ledger v01.09.02
+# NC25OL - Navigational Cybernetics 2.5 Open Ledger v01.09.03
 
 **Explicit admission. Single-use permits. Recorded execution.**
 
 <p align="center">
-  <img src="assets/NC25OL-poster.gif" alt="NC25OL 01.09.02 poster" width="400">
+  <img src="assets/NC25OL-poster.gif" alt="NC25OL poster" width="400">
 </p>
 
 [![Acceptance](https://github.com/petronushowcore-mx/NC25OL/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/petronushowcore-mx/NC25OL/actions/workflows/ci.yml)
@@ -11,7 +11,7 @@
 [![Code licence MIT](https://img.shields.io/badge/Code-MIT-2563EB)](LICENSE)
 [![Document licence CC BY 4.0](https://img.shields.io/badge/Documents-CC%20BY%204.0-7257C8)](LICENSE)
 
-[Quickstart](#getting-started) · [Spectrum result](examples/spectrum_release/RESULT.md) · [Runbook](UNIVERSAL-CONNECTION-RUNBOOK.md) · [Specification](NC25OL%20Specification%20v01.09.docx) · [Scope and limits](#boundary-of-the-claim) · [Licences](LICENSE)
+[Quickstart](#start-here) · [Spectrum result](examples/spectrum_release/RESULT.md) · [Runbook](UNIVERSAL-CONNECTION-RUNBOOK.md) · [Specification](NC25OL%20Specification%20v01.09.docx) · [Scope and limits](#boundary-of-the-claim) · [Licences](LICENSE)
 
 NC25OL provides a domain-neutral connection contract for placing an execution
 boundary in front of an external adapter while preserving the declared NC2.5
@@ -49,6 +49,41 @@ controls, evidence obligations and mapping witness.
 > authority; production identity, key custody, trusted time and downstream
 > transaction boundaries remain deployment responsibilities. Read the
 > [scope and limits](#boundary-of-the-claim) before adapting it to a live system.
+
+## Start here
+
+From the package root, Python 3.11, 3.12 or 3.14 and the standard library are
+enough for this local demonstration:
+
+```text
+python -B examples/local_release/quickstart.py
+python -B -m unittest discover -s examples/local_release -p "test_quickstart.py" -v
+python -B examples/local_release/mutate_quickstart.py
+```
+
+The first command prints:
+
+```text
+ADMISSION=ALLOW EXECUTION_AUTHORIZED permit=issued
+RELEASE=COMMITTED bytes=exact target=1/1
+RECOVERY=EXACT_REPLAY events=unchanged target=1/1
+REUSE=PERMIT_ALREADY_CONSUMED
+UNKNOWN_AUTHORITY=REFUSAL AUTHORITY_UNKNOWN
+LEDGER_CHAIN=verified
+```
+
+`ADMISSION` is the engine's permit for the exact intent. `RELEASE` means the
+loopback document target stored the exact bytes and the Ledger recorded the
+execution. `RECOVERY` reopens an already committed row: it returns the same
+receipt, with the event list and target counts unchanged. `REUSE` is the
+engine's refusal to issue the consumed permit again. `UNKNOWN_AUTHORITY` is a
+separate engine decision for a new intent with no issued grant; it does not
+exercise the gateway's HTTP-denial path. `LEDGER_CHAIN` verifies the local event
+chain with this session's key. The commands use synthetic authority, an
+authenticated loopback target and a fixed clock; they do not grant live
+execution authority or test every crash-recovery state. For integration steps
+and the full suite, continue with [Getting started](#getting-started) and the
+[integration path](#integration-path).
 
 ---
 
@@ -169,8 +204,8 @@ Install into a virtual environment made outside the package directory, or as
 and ignored by git. An environment under any other name inside the package is
 read as package content and fails the package checks.
 
-The expected terminal result is `ACCEPTANCE_STEPS=8/8 PASS`, reported with
-`PACKAGE_CHECKS=61/61` and `EXTERNAL_SOURCE_CHECKS=NOT_RUN`: the NC2.5 core is a
+The expected terminal result is `ACCEPTANCE_STEPS=9/9 PASS`, reported with
+`PACKAGE_CHECKS=64/64` and `EXTERNAL_SOURCE_CHECKS=NOT_RUN`: the NC2.5 core is a
 separate work and is not shipped here, so its five external-source checks do not
 run. Those five checks compare a core file against the file name, SHA-256, byte
 length, and line count recorded in `SOURCE-MANIFEST.json`; they do not interpret its
@@ -178,7 +213,7 @@ contents. The bound revision is not part of the public deposit under DOI
 10.17605/OSF.IO/NHTC5, which carries an earlier revision of the core, so the
 strict run is open to a holder of the bound file rather than to a reader of the
 deposit. With that file in a directory named by `NC25_SOURCES_ROOT`, the run
-reports `SOURCE_MODE=strict` and `PACKAGE_CHECKS=66/66`, which is the
+reports `SOURCE_MODE=strict` and `PACKAGE_CHECKS=69/69`, which is the
 configuration the shipped acceptance report records.
 
 The failure-surface step publishes every figure under the name of the
@@ -200,8 +235,9 @@ It reports two quantities side by side: every raise statement outside the
 pinned validation helpers plus every pinned-helper call site, and the subset
 whose emitted code is a single static literal. The gap is enumerated site by
 site. These count raise sites rather than refusal sites — a few raise
-`TypeError` and carry no contract code, and they are counted and named
-precisely so that no raise goes unaccounted for.
+`TypeError` and carry no contract code, and a bare `raise` passes on whatever
+its handler caught, a database driver error included. Both are counted and
+named precisely so that no raise goes unaccounted for.
 
 Proof is recorded at runtime rather than parsed out of test source. A code
 counts as witnessed only when a production-raised engine refusal reached test
@@ -220,8 +256,10 @@ the run, which is not the same as having been raised.
 
 The committed baseline pins the unwitnessed set as a no-growth debt ratchet,
 and regenerating it cannot quietly give that up: a regeneration that loses a
-witness, drops a code from the closed world, or grows the debt is refused
-unless the reason is recorded in the baseline alongside what was given up. The
+witness, drops a code from the closed world, grows the debt, adds an emission
+point whose code only a run can tell, or meets a published list whose direction
+is not declared is refused unless the reason is recorded in the baseline
+alongside what was given up. The
 ratchet does not claim the remaining codes are complete, reachable, desirable,
 or adequately tested.
 
@@ -233,7 +271,9 @@ wire delivers, and the wire refuses a body nested past the limit before it parse
 and one carrying an integer longer than the parser's digit limit as it parses. Called
 in-process, the engine trusts the shape of what it is handed: a list nested past
 the limit in a resource claim, or an object whose own string conversion raises,
-can leave it as a raw exception. The bridge has no wire contract — it raises
+can leave it as a raw exception. It also takes no snapshot of what it is handed,
+so an in-process caller must not modify the objects it passes during the call.
+The bridge has no wire contract — it raises
 in-process to a Python caller that imported it — so it declares
 `OTCS_REFUSAL_CODES` in the module itself, beside the code that raises them,
 with `OTCS_INTERNAL_ONLY_CODES` naming the subset no public path reaches; and it
@@ -242,10 +282,15 @@ so the engine is called from it only with plain, bounded data. The
 committed baseline holds all three worlds and is what the ratchet compares
 against. A fourth copy would be a second writer with no reader.
 
-The engine and the HTTP adapter import and run on the standard library alone.
-The pinned dependencies are needed by the acceptance suite (`jsonschema`,
-`PyYAML`), by the specification builder (`python-docx`), and by the optional
-Ed25519 signers (`cryptography`), which fail closed when it is absent.
+The engine imports and runs on the standard library alone. The HTTP adapter
+requires pinned `jsonschema` and its date-time dependency to validate every POST body against the packaged
+schemas before calling the engine; if the validator or schemas are unavailable,
+it refuses the request with `SCHEMA_VALIDATION_UNAVAILABLE`. The acceptance
+suite also uses `jsonschema`, `PyYAML` and `python-docx`: the specification
+builder uses `python-docx`, and three regressions import the builder: the checks
+of its archive normalizer, of the core anchor it prints and of its acceptance
+table. Optional Ed25519 signers require `cryptography` and fail
+closed when it is absent.
 
 To read the whole package as a single hash-bound file rather than by navigating
 the tree, build the review bundle:
@@ -254,14 +299,14 @@ the tree, build the review bundle:
 python -B tools/build_review_bundle.py --output <path outside the package>
 ```
 
-## Start here
+## Integration path
 
 1. Read `NC25OL Specification v01.09.docx`.
 2. Read `UNIVERSAL-CONNECTION-RUNBOOK.md`.
 3. Select or create a profile under `profiles/`.
 4. Complete a declaration using
    `core/schemas/connection-declaration.schema.json`.
-5. Validate every inbound object against its JSON Schema, then run the engine's semantic validation. The reference adapter does not run the schema step itself: it relies on the engine's own form checks, which refuse a malformed object before anything is recorded, and leaves schema validation upstream to the integrator.
+5. Validate every inbound object against its JSON Schema, then run the engine's semantic validation. The reference adapter performs that schema check for each POST body, including the embedded profile and declaration on activation; other ingress paths must enforce the same boundary.
 6. Integrate against `protocol/universal-connection.openapi.yaml`.
 7. Run `python -B tests/run_acceptance.py` before considering production substitution.
 
@@ -270,17 +315,22 @@ The shipped JSON examples are deterministic fixtures anchored to
 those fixtures with the default `SystemClock`: the example grant's window
 closed on 2026-08-30, so a live-clock run activates the declaration and then
 refuses to issue the grant at all, with `AUTHORITY_EXPIRED` (HTTP 400 over the
-wire), before any intent is evaluated. Production declarations and grants must
-instead carry live validity intervals resolved against trusted time.
+wire), before any intent is evaluated. The example declaration expires at
+2027-07-27T00:00:00Z, as do the reference declarations of the document-release
+and OTCS profiles; from that date a live-clock run is refused earlier, at
+activation, with `DECLARATION_OUTSIDE_VALIDITY` (also HTTP 400). Production
+declarations and grants must instead carry live validity intervals resolved
+against trusted time.
 
 ## Package map
 
 - `LICENSE` — CC BY 4.0 for the specification, MIT for the code and schemas.
 - `SOURCE-MANIFEST.json` - byte-level anchor to the immutable NC2.5 core.
 - `PACKAGE-MANIFEST.json` - exact SHA-256 and byte-length coverage of every shipped file except the manifest itself.
-- `requirements-lock.txt` - pinned versions for schema, YAML, and DOCX
-  tooling, plus `cryptography`, the optional runtime dependency of the
-  Ed25519 signers (the default HMAC paths need only the standard library).
+- `requirements-lock.txt` - pinned `jsonschema` for the HTTP adapter and
+  acceptance suite, YAML and DOCX tooling, plus `cryptography`, the optional
+  runtime dependency of the Ed25519 signers (the default HMAC engine paths
+  need only the standard library).
 - `core/nc25-core-crosswalk.json` — exact NC2.5 passages used by the package.
 - `core/schemas/` — profile, declaration, runtime, and registry contracts.
 - `protocol/universal-connection.openapi.yaml` — role-separated wire contract.
@@ -288,8 +338,11 @@ instead carry live validity intervals resolved against trusted time.
   (imports and runs without third-party packages; the optional Ed25519
   signers require the pinned `cryptography` wheel and fail closed with
   `ED25519_UNAVAILABLE` when it is absent).
-- `sdk/python/nc25_universal_adapter.py` — standard-library reference WSGI HTTP adapter that enforces the wire contract (scope, activation seal binding, idempotency, permit path binding, error mapping) over the engine.
+- `sdk/python/nc25_universal_adapter.py` — reference WSGI HTTP adapter that enforces schema validation before the engine and the wire contract (scope, activation seal binding, idempotency, permit path binding, error mapping).
 - `sdk/python/nc25_otcs_bridge.py` — permit-gated OTCS append bridge with a durable SQLite recovery outbox.
+- `sdk/python/nc25ol_reader.py` — independent, fingerprint-pinned observer-export reader; [READING.md](READING.md) defines its format and limits.
+- `tools/declaration_field_census.py` — schema-leaf inventory and generator of [DECLARATION-FIELDS.md](DECLARATION-FIELDS.md).
+- `tools/spec_counts.py` — derives the declared suite counts used by the specification and report checks.
 - `profiles/banking/` — the banking use case expressed as one profile.
 - `profiles/document-release/` — a second executable reference profile.
 - `profiles/otcs/` — the OTCS registry profile, typed operation, evidence, and receipt fixture.
@@ -312,8 +365,9 @@ instead carry live validity intervals resolved against trusted time.
 - Only `ALLOW` is executable.
 - `REFUSAL` and `MANUAL_REVIEW` are non-executable. The disposition alphabet
   is exactly these three values, and every one is producible by the reference
-  engine; integrity failures and availability faults halt as transport-level
-  errors, never as operator results.
+  engine. Integrity failures and transport/schema availability faults halt as
+  transport-level errors. Post-authorization resolver failures produce a
+  recorded non-executable refusal without exposing that internal stage.
 - Missing, ambiguous, conflicting, expired, revoked, or unverifiable input
   fails closed.
 - The evaluator computes a binary conjunction:
@@ -331,23 +385,29 @@ disposition itself is an unavoidable one-bit decision channel; a production
 adapter MUST rate-limit distinct probes per connector and alert on systematic
 boundary-seeking sequences. The SDK exposes this closed set as the immutable
 `PUBLIC_MESSAGE_CODES`; observer projection fails closed on any code outside it.
-- The declaration names the origin of its structural capacity with the
-  published four-value coding — `fully_stipulated`, `empirically_calibrated`,
-  `derived_from_load_model`, or `mixed` (NC2.5 Probe II,
-  DOI 10.17605/OSF.IO/7SQMY, R2). The value is sealed by the declaration hash
-  and is never read by the gate.
+- The declaration retains `structural_budget.capacity`, the finite capacity
+  of the committed-action channel. It carries no capacity-provenance field
+  and does not attest how that capacity was established. The removed fields
+  and their limits are listed in `DECLARATION-FIELDS.md`.
 - A material profile or declaration change produces a new version and hash.
-- A permit is state-bound, reservation-bound, and debited at most once; its configured TTL cannot exceed 900 seconds, its expiry is capped by the authority grant and declaration, and the sealed `ttl_seconds` is that effective lifetime, so `issued_at + ttl_seconds` equals `expires_at` to the second. After a successful commit, an exact retry of the same execution request returns the stored receipt without another event or debit, including after permit, grant, or declaration expiry or revocation; a changed retry conflicts. This read-only replay cannot authorize new work. The reference engine restores its pre-call ledger, debit, permit, receipt, and replay state if an in-process exception interrupts commit.
+  The shipped profiles, declarations and crosswalk are synthetic reference
+  fixtures and are rebound in place when the package changes them: their hashes
+  change under the same version. The version rule binds approved production
+  profiles and declarations.
+- A permit is state-bound, reservation-bound, and debited at most once; its configured TTL cannot exceed 900 seconds, its expiry is capped by the authority grant and declaration, and the sealed `ttl_seconds` is that effective lifetime, so `issued_at + ttl_seconds` equals `expires_at` to the second. After a successful commit, an exact retry of the same execution request returns the stored receipt without another event or debit, including after permit, grant, or declaration expiry or revocation; a changed retry conflicts. This read-only replay cannot authorize new work. A state-anchor mismatch invalidates the permit and releases its reservation, so returning to the old anchor cannot revive it. The reference engine restores its pre-call ledger, debit, permit, receipt, and replay state if an in-process exception interrupts commit, except for the four commit refusals that invalidate the permit on purpose (an `AUTHORITY_*` grant failure, `PERMIT_EXPIRED`, `STATE_ANCHOR_CHANGED`, and `RESOURCE_WINDOW_LIMIT`): they keep the invalidation, and a later commit with that permit is refused with the same code.
 - Revocation before commit invalidates outstanding permits for the grant.
 - After binding, authority, action, declared action-target pairing, effect, target, and scope authorization,
   structurally valid negative evidence (INVALID, REVOKED, or EXPIRED)
-  yields a recorded pre-gate refusal; malformed evidence remains a contract
-  error with no business decision.
+  yields a recorded pre-gate refusal; malformed submitted evidence remains a
+  contract error with no business decision. Invalid authoritative resolver
+  output instead produces a recorded generic refusal.
 - Local evidence may be complete, but a shared registry stores hashes, status,
   revocation, and receipt roots only.
 - Observer output is an out-of-band, non-mutating projection, uses the same
   disposition-bound public message codes as the operator surface, and is not
-  an authority principal.
+  an authority principal. The draft observer export is the one exception to
+  the shared codes: it records a committed execution under the export-only
+  code `EXECUTION_COMMITTED` (see [READING.md](READING.md)).
 
 ## Three records of different type
 
@@ -355,8 +415,13 @@ The package keeps three accumulators, and they are not interchangeable:
 
 1. The hash-chained event ledger is an immutable append-only record of the
    declared event types, in order. Permit-state changes that append no event —
-   a reservation expiry, a window-limit invalidation — are visible in permit
-   state only, not in the chain. It is genealogy, not load.
+   a reservation expiry; a grant-validity invalidation at commit or evaluation
+   replay; a state-anchor or window-limit invalidation at commit; an
+   invalidation by permit signing-key revocation — are visible in permit state
+   only, not in the chain. Key custody itself appends no event: the revoked key
+   set is held in engine state, and signer rotation is process-local runtime
+   configuration reflected only in the `key_id` of later permit signatures.
+   The chain is genealogy, not load.
 2. The structural budget is a monotone committed-action counter read by the
    gate: capacity spent on one declared channel, never restored within a
    declaration.
@@ -386,10 +451,10 @@ remains. The exact limits of counters and of conformance records are stated in
 Not a History* (DOI 10.17605/OSF.IO/YZF8S).
 
 A new declaration version starts a new accounting instance with the full
-declared capacity. `predecessor_declaration_hash` preserves lineage, but no
-burden is carried across versions: the counter answers how much has been
-committed since this declaration was activated. Any cross-version continuation
-claim requires an external ledger and a separate argument.
+declared capacity. No burden is carried across versions: the counter answers
+how much has been committed since this declaration was activated. The
+reference contract does not encode predecessor lineage. Cross-version
+continuation or genealogy requires an external ledger and separate argument.
 
 The protocol mechanics are reusable only for domains that can be expressed by
 the declared contract: a closed action alphabet, declared effect classes,
@@ -416,13 +481,19 @@ permit handles must be protected as capabilities between co-tenant subjects.
 Both are the responsibility of the production identity and transport layer,
 which this reference engine does not provide.
 
-For the same reason, the declaration's `connector.environment_ids` is
-declarative metadata, not an enforced constraint. The engine has no runtime
-environment input and never checks the environment a capability is exercised
-in against that set; binding execution to a declared environment is part of
-the transport context the production layer supplies. Declaring
-`environment_ids` records intent; it does not by itself restrict the connector
-to those environments.
+The reference adapter reads `X-Workload-Scope` as its role convention; it is not
+authentication. Production ingress must derive that role and `requester_id`
+from verified workload identity and must not trust a caller-selected header.
+Identifier, version, hash and role arguments in the direct Python API must be
+native `str` values, so a string subclass cannot override actor comparison.
+Idempotency keys share one namespace per engine/connector, including across
+requesters: a different request using an existing key conflicts. Integrators
+must allocate keys uniquely across all subjects sharing that connector.
+
+The declaration does not encode permitted runtime environments. The reference
+engine has no trusted runtime environment input and cannot bind execution to
+one; production identity and transport layers must enforce that boundary
+outside this package.
 
 The Python engine defaults to in-memory state.
 Passing `state_path` enables a single-node SQLite store using WAL, FULL
@@ -431,6 +502,20 @@ Permit consumption, debit, receipt installation, replay state, reservations, and
 the local event chain then survive process restart in one SQLite transaction.
 Every public read takes the local state lock and reloads one verified SQLite
 snapshot before returning, so long-lived instances do not serve cached state.
+The snapshot MAC covers the snapshot's own bytes, not its place in time, so the
+store alone cannot tell a genuine older snapshot from the current one. A
+running engine therefore refuses with `STATE_ROLLBACK` a stored snapshot that
+holds less history than the engine has already seen (fewer events, a different
+event at the position of the head it holds, or a vanished row); a longer chain
+that extends what it holds, such as another instance appending to the same
+file, is accepted. It also rejects loss of a signing-key revocation or a
+terminal permit invalidation already observed by this process, even if the
+event chain is unchanged. Honest additions to those sets by another instance
+are accepted. This does not cover a restart: a process that holds no
+history has nothing to compare against and accepts what the file holds, so
+restoring an older file before a cold start is not detected. Protection across
+a restart needs an external monotonic anchor (WORM retention or a KMS-held
+counter); a counter inside the same rewritable snapshot is not one.
 Its re-entrant process lock serializes state changes only inside one engine
 instance. Its integrity guard deliberately verifies the full event chain on
 every public operation, which preserves tamper detection but makes a long
@@ -438,7 +523,12 @@ append history unsuitable for a production hot path. Production requires
 bank- or enterprise-managed identity, mTLS, asymmetric KMS/HSM signatures,
 durable transactional idempotency, receipt replay, and reservations,
 append-only or WORM retention with an indexed verification strategy, trusted
-time, and atomic downstream commit.
+time, and atomic downstream commit. A report of a downstream `COMMITTED` effect
+that fails current permit, grant, declaration or window checks creates no
+`EXECUTION_RECORDED` event and no debit. Its submitted `committed_at` does not
+restore expired authority. The integrator must retain the external receipt
+and reconcile such an effect outside this reference ledger; rejection does
+not establish that the external effect never happened.
 
 The reference engine validates contract shape, identifier coverage, hashes,
 and the declared `VALID` status. It does not authenticate the system behind an
@@ -453,9 +543,13 @@ authority, action-target, and scope checks pass, the resolver outputs are
 validated, bound into the permit's own request hash, and used by the gate;
 the operator result and the architect decision carry the submitted request
 hash instead, so the hash a caller receives reveals nothing about the gate
-stage. Resolver exceptions and malformed output fail closed on both
-surfaces — a connector cannot fall back to its own claims by breaking a
-resolver. Without the resolvers, `evaluate_intent` gates on the declared
+stage. Resolver exceptions, malformed authoritative output and future-dated resolved
+evidence produce a recorded `REFUSAL`/`EXECUTION_DENIED` on both surfaces,
+consume the submitted idempotency key and preserve the submitted request hash.
+The architect decision names `AUTHORITATIVE_RESOLUTION_FAILED`; the operator
+receives no resolver-stage code. A connector cannot fall back to its own
+claims by breaking a resolver. Fixing a resolver requires a new request key;
+an exact retry preserves the original refusal. Without the resolvers, `evaluate_intent` gates on the declared
 intent flags and remains the explicit internal post-resolution boundary.
 Production must wire both resolvers to approved authoritative systems inside
 an independent evaluator. Resolver wiring is, like the permit-signer verifier
@@ -474,7 +568,11 @@ signer through the same protocol (base64 signature bytes), and its envelope
 verifies independently from the published public key. Verification routes by
 `key_id`: `rotate_permit_signer` makes a new key active while permits signed
 under retired keys stay verifiable, and `revoke_permit_key` makes a revoked
-key's permits refuse with `PERMIT_KEY_REVOKED`. Both custody operations are
+key's permits fail executor and architect verification with
+`PERMIT_KEY_REVOKED`. An operator replay of a permit that was still live
+instead returns the coarse `REFUSAL`/`EXECUTION_DENIED` without exposing the
+policy reason; a consumed or expired permit keeps answering
+`PERMIT_ALREADY_CONSUMED` or `PERMIT_EXPIRED`. Both custody operations are
 governance-scoped: like every public operation they demand an explicit
 `actor_scope`, and refuse without `nc25.governance`. An envelope naming a key the
 engine never held, failing the cryptographic check, or carrying a wrong field
@@ -482,8 +580,10 @@ set fails closed as an integrity violation. Revocation is permanent and, with
 a `state_path`, durable: the revoked key set is part of the persisted
 snapshot, a revoked `key_id` can never be rotated back in, and restoring
 state whose revoked set names the active signer fails loudly with
-`STATE_REVOKED_ACTIVE_KEY` instead of silently resurrecting the key. The
-verifier registry itself is, like the event signer, process-local runtime
+`STATE_REVOKED_ACTIVE_KEY` instead of silently resurrecting the key. Normal
+restart retains revocations from the current authenticated snapshot; detecting
+a genuine older snapshot before a cold start requires the independent anchor
+described above. The verifier registry itself is, like the event signer, process-local runtime
 configuration (keys are not persisted in SQLite): a restored process must
 replay its `rotate_permit_signer` sequence before permits signed under
 retired non-revoked keys verify again; until then they fail closed with
@@ -492,7 +592,10 @@ shape by default (`HmacDetachedSigner` under key id `ledger-hmac`) and
 through any custom `event_signer`, so independent chain verifiers see one
 signature contract across permits and events. Production still requires
 reviewed KMS/HSM custody with rotation and revocation evidence and
-independent verification.
+independent verification. The reference HMAC default reuses the constructor
+signing key for permits, events and stored-state authentication; their key IDs
+and envelope metadata do not provide cryptographic key separation. It is not
+a production key-separation design.
 When reopening a `state_path` whose event chain contains Ed25519 envelopes, the
 caller must provide an `event_signer` capable of verifying the persisted
 algorithm and `key_id`; signer configuration and private keys are deliberately
@@ -525,13 +628,15 @@ an executable contract surface.
 
 The engine is a semantic validator, not a JSON Schema implementation. Every
 profile, declaration, and runtime message must pass its matching schema in
-`core/schemas/` at ingress before the engine is called. The schema gate enforces
-string bounds and format keywords; the engine then checks identifier coverage,
-hashes, ordering, state, and cross-object semantics. The shipped conformance
-suite uses `Draft202012Validator` with `FormatChecker` and carries negative
-probes proving that malformed `date-time` values and overlong strings are
-rejected. If its optional libraries are absent, it reports `NOT_RUN`, never a
-pass.
+`core/schemas/` at ingress before the engine is called. The reference adapter
+enforces this for POST bodies and fails closed when `jsonschema` or its date-time checker is absent.
+The schema gate enforces string bounds and format keywords; the engine then
+checks identifier coverage, hashes, ordering, state, and cross-object semantics.
+The shipped conformance suite uses `Draft202012Validator` with `FormatChecker`
+and carries negative probes proving that malformed `date-time` values and
+overlong strings are rejected. If its optional libraries are absent, the parts
+that need them report `NOT_RUN` and the run exits non-zero; it is never reported
+as a pass.
 
 ## Validate a profile
 
@@ -553,8 +658,10 @@ relative path and, finding it there, runs the same checks in source mode
 ## Repository
 
 - `.github/workflows/ci.yml` runs the acceptance suite and the review-bundle
-  build, plus the local example checks and source mutations, on pushes and
-  pull requests targeting `main`; the badge above reports
+  build, adapter schema-ingress checks and mutations, independent-reader
+  JSON-refusal mutations, plus local example checks and source mutations, on pushes to
+  `main` and `release/**`, and on pull requests targeting
+  `main` or `release/**`; the badge above reports
   its status. It runs the standalone configuration only: `NC25_SOURCES_ROOT` is
   not set there, so the external-source binding to the NC2.5 core reports
   `NOT_RUN` in CI and is exercised locally instead. The workflow file is
@@ -608,7 +715,7 @@ Committed usage is the sum of every committed debit timestamped at or after `now
 
 ## Registry revocation semantics
 
-Registry `status` is the declaration lifecycle state. Registry `revoked` is a connector-level alert that at least one grant revocation exists; it is neither a connector shutdown bit nor an authorization source. Exact grant validity remains local and is rechecked during evaluation and commit.
+Registry `status` is the declaration lifecycle state exposed here: `DRAFT` or `ACTIVE`. Registry `revoked` is a connector-level alert that at least one grant revocation exists; it is neither a connector shutdown bit nor an authorization source. Exact grant validity remains local and is rechecked during evaluation and commit.
 
 Registry lookup is selector-bound. `registry_record` requires the exact connector ID from `GET /v1/registry/connectors/{connector_id}`. A different or unknown selector fails with `CONNECTOR_NOT_FOUND` and maps to HTTP 404; it never returns the active connector under the requested route.
 
@@ -622,13 +729,15 @@ After any intentional package or specification change, rebuild the specification
 py -3 -B tools/build_universal_specification.py
 ```
 
+The builder fixes the ZIP member order, timestamps and host-system field, so the operating system that runs it does not change the document's bytes. A byte-identical rebuild still needs the locked dependencies and the same Python and zlib: the compressed streams are the interpreter's zlib output, and compressor identity across zlib implementations or versions is not promised. Under another zlib the DOCX bytes and SHA-256 can differ while every ZIP member keeps the size and SHA-256 listed in `DOCX-AUDIT-PROJECTION.md`.
+
 Then regenerate the review projection directly from the shipped DOCX:
 
 ```text
 py -3 -B tools/build_docx_audit_projection.py
 ```
 
-`DOCX-AUDIT-PROJECTION.md` binds the DOCX SHA-256 and exposes its visible text, ZIP member hashes, relationships, content types, and core metadata in readable text. `test_contract_regressions.py` fails if that projection is stale; `tests/verify_package.py` fails if the projected acceptance numbers or version drift from the executable suites and the declared package version.
+`DOCX-AUDIT-PROJECTION.md` binds the DOCX SHA-256 and exposes its visible text, ZIP member hashes, relationships, content types, and core metadata in readable text. `test_contract_regressions.py` fails if that projection is stale; `tests/verify_package.py` fails if the projected acceptance numbers or version drift from the executable suites and the declared package version, or if the core anchor the projection prints drifts from `SOURCE-MANIFEST.json`.
 
 If the change added, retired or newly witnessed a refusal code, regenerate the failure-surface baseline and the contract's `Error.code` enum, in that order; the baseline refuses to give up a witness or a code without an explicit reason, and the enum builder reads the same scan the package verifier holds the contract to:
 

@@ -11,7 +11,8 @@ BASELINE_FORMAT = "nc25-source-baseline/v1"
 ARTIFACT_TITLE = "# NC25OL source bundle"
 BINARY_DOCX_PLACEHOLDER = (
     "[BINARY DOCX OMITTED FROM TEXT BODY; SIZE AND SHA256 ABOVE ARE "
-    "AUTHORITATIVE. DETERMINISTIC SOURCE: /tools/build_universal_specification.py]"
+    "AUTHORITATIVE. DETERMINISTIC SOURCE: /tools/build_universal_specification.py; "
+    "BYTE-IDENTICAL WITH THE LOCKED DEPENDENCIES UNDER THE SAME PYTHON AND ZLIB]"
 )
 # The README poster is an image, so its bytes are not text either; the same
 # suffixes the Spectrum source-release example treats as images.

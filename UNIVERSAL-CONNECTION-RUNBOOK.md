@@ -62,14 +62,16 @@ The declaration binds:
 
 - the immutable NC2.5 core anchor;
 - one exact profile identifier, version, and hash;
-- one connector and workload identity issuer;
+- one connector;
 - allowed actions, effects, targets, explicit action-target bindings, and scope values;
-- a structural capacity, its declared provenance coding, and a selector
-  identifier;
-- domain resource limits;
-- governance owners and role-separated interfaces;
-- the profile mapping witness;
-- immutable evidence references.
+- a non-negative structural capacity and domain resource limits;
+- approval and authority issuers, revision authorities, no live override, and
+  off-limits systems;
+- the profile mapping witness.
+
+Workload identity, environment restrictions, capacity provenance, service
+separation, and declaration-level approval evidence require external governance
+and transport records; this schema does not encode or validate them.
 
 Failure outcomes are fixed by the profile and runtime contract. A declaration
 cannot add or override a disposition or error posture.
@@ -93,17 +95,16 @@ the same way grant issue and revocation pin their actors.
 
 The connector cannot activate or revise its own declaration.
 
-The reference engine implements `DRAFT` to `ACTIVE` and blocks runtime use
-outside the declaration validity interval. `SUSPENDED`, `REVOKED`, and
-`EXPIRED` are production registry projection states; a production governance
-adapter must define and persist their transitions. They are not implemented as
-reference-engine lifecycle commands.
+The reference engine and its registry schema expose only `DRAFT` and
+`ACTIVE`; runtime use is blocked outside the declaration validity interval.
+Suspension, connector-wide revocation, and expiry transitions require an
+external governance adapter and are not states of this registry interface.
 
 Activating a new declaration version starts a new accounting instance: the
 structural budget begins at the declared capacity, and no burden is carried
-over from the predecessor. `predecessor_declaration_hash` preserves lineage
-only. A deployment that claims continuation across declaration versions must
-keep that account outside this package and argue it separately.
+over. The declaration does not encode predecessor lineage. A deployment
+that claims continuation across versions must keep the genealogy and
+account outside this package and argue them separately.
 
 ## 5. Issue a workload authority grant
 
@@ -132,8 +133,11 @@ The operator submits an intent containing:
 - prerequisite, block, review, and ambiguity flags.
 
 The evidence bundle is a separate object bound to the intent identifier and
-contains typed references plus content hashes. It carries no reusable
-credential or raw secret.
+contains typed references plus content hashes. It must carry no reusable
+credential or raw secret, and keeping it so is the integrator's obligation: the
+engine refuses any mapping key in the bundle that reads as a credential field
+name, but it cannot detect a secret placed in the value of an ordinary field,
+such as an evidence reference.
 
 Every public SDK operation requires an explicit `actor_scope`; omission fails
 closed, and no method supplies its own required role as a default. The scope is
@@ -143,7 +147,10 @@ the verified workload identity.
 These control flags and evidence statuses are claims at the connector
 boundary, not authority. Supply `evidence_resolver` at untrusted ingress so the
 gate uses only the resolver's authoritative bundle; resolver exceptions,
-malformed output, and intent mismatch fail closed. Without a resolver, the SDK
+malformed output, intent mismatch and future-dated resolved evidence become
+a recorded generic `REFUSAL`/`EXECUTION_DENIED`, consume the submitted key and
+replay the same refusal. Only the architect decision names
+`AUTHORITATIVE_RESOLUTION_FAILED`. Without a resolver, the SDK
 contract remains an internal post-resolution object. Production must retrieve
 records from approved systems, verify provenance and hashes, derive controls
 inside the independent evaluator, and bind the results to request and state.
@@ -161,6 +168,8 @@ at issuance, with freshness bounded by the sealed permit TTL.
 
 For the HTTP adapter, the `Idempotency-Key` header must exactly equal
 `intent.idempotency_key`. Reject a mismatch as a conflict before evaluation.
+The key namespace is shared by every requester on the engine/connector;
+allocate distinct keys across those requesters.
 An exact replay may return an active permit or the original non-executable
 result, but replay of a consumed, expired, revoked, or otherwise invalidated
 permit fails closed and never reissues `ALLOW`.
@@ -171,8 +180,12 @@ event or debit, including after permit, grant, or declaration expiry or
 revocation. This read-only replay cannot authorize new work. A changed request
 for that consumed permit fails with `EXECUTION_REPLAY_CONFLICT`. If an in-process
 exception interrupts the reference commit, the engine restores the pre-call
-ledger, debit, permit, receipt, and replay state before re-raising. Production
-still requires one durable transaction.
+ledger, debit, permit, receipt, and replay state before re-raising. The four
+commit refusals that invalidate the permit on purpose are the exception: an
+`AUTHORITY_*` grant failure, `PERMIT_EXPIRED`, `STATE_ANCHOR_CHANGED`, and
+`RESOURCE_WINDOW_LIMIT` keep the invalidation, and a later commit with that
+permit is refused with the same code. Production still requires one durable
+transaction.
 
 Wire SHA-256 inputs use exactly 64 hexadecimal characters in either case; the engine normalizes comparisons and emits canonical uppercase values. The
 executor adapter MUST compare the path `permit_hash` with
@@ -230,8 +243,12 @@ reason vectors, retained gate statistics, or architect trace.
 The operator `message_code` is fixed by disposition:
 `ALLOW` -> `EXECUTION_AUTHORIZED`, `REFUSAL` -> `EXECUTION_DENIED`, and
 `MANUAL_REVIEW` -> `HUMAN_REVIEW_REQUIRED`. It never identifies a failed gate
-or limit. The
-disposition itself remains an unavoidable one-bit decision channel. A production
+or limit. Exact evaluation replays of policy-invalidated permits return this
+same coarse `REFUSAL`/`EXECUTION_DENIED`, without a second decision or event.
+The detailed invalidation reason remains in architect permit state. The
+documented `PERMIT_ALREADY_CONSUMED` and `PERMIT_EXPIRED` lifecycle errors
+remain distinct; signature, chain and key-availability integrity faults remain
+transport-level halts. The disposition itself remains an unavoidable one-bit decision channel. A production
 adapter MUST rate-limit distinct probes per connector and alert on systematic
 boundary-seeking sequences.
 
@@ -268,10 +285,18 @@ not affected by this field.
 - `FAILED` or `ABORTED` consumes the permit but releases the reservation without
   a debit.
 - expiry, revocation, integrity failure, or state-anchor mismatch blocks a new
-  commit.
+  commit. A state-anchor mismatch also invalidates the permit and releases its
+  reservation; restoring the old anchor does not revive that permit.
 - after a successful commit, an exact retry returns the stored receipt without a
   second debit even after permit, grant, or declaration expiry or revocation; a
   changed retry fails.
+
+A downstream effect reported as `COMMITTED` is recorded and debited only if
+this new report passes the current commit checks. A late or invalidated report
+can be refused without an `EXECUTION_RECORDED` event or a debit, even when its
+`committed_at` describes an earlier physical effect. Keep that external receipt
+and reconcile outside the reference engine. Rejection does not prove that no
+external effect occurred and does not grant a new authorization.
 
 If a safe fallback is needed, submit it as a new intent. A refusal is never
 converted into execution inside the current request.
@@ -388,7 +413,7 @@ Operational sequence:
 | Optional Ed25519 permit/event envelope | KMS/HSM-backed detached envelope with reviewed key policy and independent verification |
 | Versioned permit signature envelope (shipped and tested; key_id-routed verification, rotation, revocation) | Managed key custody source behind the same envelope; key ceremonies and revocation evidence |
 | Connector-supplied evidence status | Inject an authoritative evidence resolver; exceptions, malformed output, and intent mismatch fail closed |
-| Connector-supplied control booleans | Inject an authoritative control resolver (shipped injection point): derived prerequisite, hard-block, manual-review, and ambiguity results replace the intent flags and bind into the request hash; exceptions and malformed output fail closed |
+| Connector-supplied control and ambiguity flags | Inject an authoritative control resolver (shipped injection point): derived prerequisite, hard-block, manual-review, and ambiguity results replace the intent flags and bind into the permit's own request hash; exceptions and malformed output fail closed |
 | In-memory ledger | Transactional append-only or WORM evidence store |
 | In-memory idempotency | Durable unique constraint and replay-safe result store |
 | Optional SQLite execution receipt replay | Externally managed or replicated result store when multi-node availability is required |
@@ -482,7 +507,13 @@ non-revoked keys verify; until then they fail closed with
 `PERMIT_KEY_UNKNOWN`. The revoked key set is different: it is part of the
 persisted snapshot, revocation survives restart, a revoked `key_id` cannot be
 rotated back in, and state restore refuses an engine whose active signer is a
-revoked key (`STATE_REVOKED_ACTIVE_KEY`).
+revoked key (`STATE_REVOKED_ACTIVE_KEY`). A running instance also refuses
+loss of a signing-key revocation or terminal permit invalidation it has seen,
+even when the event chain has not changed; another instance may add such facts.
+Normal restart restores the current snapshot. Replacing it with a genuine
+older snapshot before a cold start is not detected by the reference SQLite
+store: protection across restarts requires an independent monotonic anchor
+and restore verification, supplied by production storage.
 
 ## Source-root resolution
 
@@ -499,4 +530,3 @@ Committed usage is the sum of every committed debit timestamped at or after `now
 ## Registry revocation semantics
 
 Registry `status` is the declaration lifecycle state. Registry `revoked` is a connector-level alert that at least one grant revocation exists; it is neither a connector shutdown bit nor an authorization source. Exact grant validity remains local and is rechecked during evaluation and commit.
-

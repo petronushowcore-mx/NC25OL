@@ -11,7 +11,10 @@ Permit signatures and ledger-event signatures are versioned detached envelopes
 (`{version, algorithm, key_id, signature}`) produced by a pluggable signer:
 the reference default is HMAC-SHA256, and detached Ed25519 is supported for
 both surfaces. Permit verification routes by `key_id`, so signing keys can be
-rotated (old permits stay verifiable) and revoked (their permits fail closed).
+rotated and revoked (their permits fail closed). A retired key's permits stay
+verifiable while the process holds its verifier; the verifier registry is
+process-local and not persisted, so after a restart they are refused with
+PERMIT_KEY_UNKNOWN until the rotation is repeated.
 Production substitutions are listed in the package runbook.
 """
 
@@ -216,7 +219,7 @@ def _plain_json(value: Any, path: str = "$", depth: int = 0) -> Any:
                 raise ContractViolation("JSON_OBJECT_KEY_TYPE", path)
             result[key] = _plain_json(item, f"{path}.{key}", depth + 1)
         return result
-    if isinstance(value, list):
+    if issubclass(type(value), list):
         return [
             _plain_json(item, f"{path}[{index}]", depth + 1)
             for index, item in enumerate(value)
@@ -276,8 +279,10 @@ EvidenceResolver = Callable[
 
 # Authoritative control derivation: receives the submitted intent and the
 # evaluation instant, returns the control results derived from enterprise
-# systems of record. They replace the connector-asserted flags as gate inputs
-# and are bound into the request hash.
+# systems of record. They replace the connector-asserted flags as gate inputs.
+# On an ALLOW they are bound into the permit body's request_hash; the
+# request_hash of the decision and of the operator result is the submitted
+# hash (intent and submitted evidence) and does not cover them.
 ControlResolver = Callable[
     [Mapping[str, Any], datetime],
     Mapping[str, Any],
@@ -293,19 +298,6 @@ CONTROL_BOOLEAN_FIELDS = (
 CONTROL_AMBIGUITY_FIELD = "ambiguity_flags"
 CONTROL_FIELDS = CONTROL_BOOLEAN_FIELDS + (CONTROL_AMBIGUITY_FIELD,)
 
-# Declared origin of the structural capacity, coded with the published
-# instrument of NC2.5 Probe II (DOI 10.17605/OSF.IO/7SQMY, R2): the origin of
-# a boundary is fully stipulated, empirically calibrated, derived from a load
-# model, or mixed. The value is a sealed declaration datum read by governance
-# and audit; the gate never reads it.
-STRUCTURAL_PROVENANCE_VALUES = frozenset(
-    {
-        "fully_stipulated",
-        "empirically_calibrated",
-        "derived_from_load_model",
-        "mixed",
-    }
-)
 
 
 def _require_ed25519() -> None:
@@ -475,7 +467,10 @@ def parse_utc(value: str) -> datetime:
         raise ContractViolation("INVALID_TIMESTAMP", _short_detail(value)) from exc
     if parsed.tzinfo is None:
         raise ContractViolation("TIMEZONE_REQUIRED", _short_detail(value))
-    return parsed.astimezone(timezone.utc)
+    try:
+        return parsed.astimezone(timezone.utc)
+    except OverflowError as exc:
+        raise ContractViolation("INVALID_TIMESTAMP", _short_detail(value)) from exc
 
 
 def load_json(path: str | Path) -> dict[str, Any]:
@@ -487,7 +482,7 @@ def load_json(path: str | Path) -> dict[str, Any]:
 
 
 def _require_scope(actual: str, expected: str) -> None:
-    if actual != expected:
+    if type(actual) is not str or actual != expected:
         raise ContractViolation("ROLE_SCOPE_MISMATCH", f"expected {expected}")
 
 
@@ -530,19 +525,20 @@ def _short_detail(value: Any) -> str:
 
 
 def _require_identifier(value: Any, code: str) -> str:
-    if not isinstance(value, str) or not IDENTIFIER_RE.fullmatch(value):
+    # Native protocol strings cannot override equality or hashing at actor checks.
+    if type(value) is not str or not IDENTIFIER_RE.fullmatch(value):
         raise ContractViolation(code, _short_detail(value))
     return value
 
 
 def _require_version(value: Any, code: str) -> str:
-    if not isinstance(value, str) or not VERSION_RE.fullmatch(value):
+    if type(value) is not str or not VERSION_RE.fullmatch(value):
         raise ContractViolation(code, _short_detail(value))
     return value
 
 
 def _require_sha256(value: Any, code: str) -> str:
-    if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+    if type(value) is not str or not SHA256_RE.fullmatch(value):
         raise ContractViolation(code, _short_detail(value))
     return value.upper()
 
@@ -562,7 +558,6 @@ DECLARED_HASH_FIELDS = frozenset(
         "ledger_head_hash",
         "payload_hash",
         "permit_hash",
-        "predecessor_declaration_hash",
         "profile_hash",
         "receipt_hash",
         "request_hash",
@@ -656,17 +651,29 @@ def _validate_evidence_ref(value: Any, code: str) -> None:
     _require_sha256(item["sha256"], code)
 
 
-def _deep_secret_scan(value: Any, path: str = "$", depth: int = 0) -> None:
+def _deep_secret_scan(
+    value: Any,
+    path: str = "$",
+    depth: int = 0,
+    declared_keys: dict[int, frozenset[str]] | None = None,
+) -> None:
+    # declared_keys maps the identity of a mapping to the identifiers the
+    # profile declares for its keys. Such a key names a condition, a resource
+    # or an action, not a field: a declared flag COMPROMISED_PASSWORD read as a
+    # field name refused every intent of a valid profile with a false
+    # SECRET_FIELD_FORBIDDEN. Any other key of that mapping, every free-form
+    # mapping and every value keep the guard.
     if depth > MAX_NESTING_DEPTH:
         raise ContractViolation("NESTING_DEPTH_EXCEEDED", path)
     if isinstance(value, Mapping):
+        declared = (declared_keys or {}).get(id(value), frozenset())
         for key, item in value.items():
-            if _is_secret_key_name(key):
+            if key not in declared and _is_secret_key_name(key):
                 raise ContractViolation("SECRET_FIELD_FORBIDDEN", f"{path}.{key}")
-            _deep_secret_scan(item, f"{path}.{key}", depth + 1)
-    elif isinstance(value, list):
+            _deep_secret_scan(item, f"{path}.{key}", depth + 1, declared_keys)
+    elif issubclass(type(value), list):
         for index, item in enumerate(value):
-            _deep_secret_scan(item, f"{path}[{index}]", depth + 1)
+            _deep_secret_scan(item, f"{path}[{index}]", depth + 1, declared_keys)
 
 
 def _find_forbidden_key(
@@ -685,7 +692,7 @@ def _find_forbidden_key(
             nested = _find_forbidden_key(item, forbidden, item_path, depth + 1)
             if nested is not None:
                 return nested
-    elif isinstance(value, list):
+    elif issubclass(type(value), list):
         for index, item in enumerate(value):
             nested = _find_forbidden_key(
                 item,
@@ -1050,7 +1057,6 @@ def validate_declaration(
         "schema_version",
         "declaration_id",
         "declaration_version",
-        "predecessor_declaration_hash",
         "created_at",
         "effective_from",
         "expires_at",
@@ -1063,16 +1069,12 @@ def validate_declaration(
         "governance",
         "interfaces",
         "mapping_witness_binding",
-        "evidence_refs",
     }
     _require_exact_keys(declaration, required, "DECLARATION_FIELDS")
     if declaration["schema_version"] != "1.0.0":
         raise ContractViolation("DECLARATION_SCHEMA_VERSION")
     _require_identifier(declaration["declaration_id"], "DECLARATION_ID")
     _require_version(declaration["declaration_version"], "DECLARATION_VERSION")
-    predecessor = declaration["predecessor_declaration_hash"]
-    if predecessor is not None:
-        _require_sha256(predecessor, "PREDECESSOR_HASH")
     created = parse_utc(declaration["created_at"])
     effective = parse_utc(declaration["effective_from"])
     expires = parse_utc(declaration["expires_at"])
@@ -1098,15 +1100,10 @@ def validate_declaration(
     connector = _require_mapping(declaration["connector"], "CONNECTOR")
     _require_exact_keys(
         connector,
-        {"connector_id", "workload_identity_issuer", "environment_ids"},
+        {"connector_id"},
         "CONNECTOR",
     )
     _require_identifier(connector["connector_id"], "CONNECTOR_ID")
-    _require_identifier(
-        connector["workload_identity_issuer"],
-        "WORKLOAD_IDENTITY_ISSUER",
-    )
-    _unique_ids(connector["environment_ids"], "ENVIRONMENT_IDS")
 
     action_map = {item["action_id"]: item for item in profile["action_alphabet"]}
     effect_ids = {item["effect_class_id"] for item in profile["effect_classes"]}
@@ -1166,15 +1163,10 @@ def validate_declaration(
     )
     _require_exact_keys(
         structural,
-        {"selector_id", "capacity", "unit", "provenance"},
+        {"capacity"},
         "STRUCTURAL_BUDGET",
     )
-    _require_identifier(structural["selector_id"], "SELECTOR_ID")
     _require_non_negative_int(structural["capacity"], "STRUCTURAL_CAPACITY")
-    if not isinstance(structural["unit"], str) or not structural["unit"]:
-        raise ContractViolation("STRUCTURAL_UNIT")
-    if not isinstance(structural["provenance"], str) or structural["provenance"] not in STRUCTURAL_PROVENANCE_VALUES:
-        raise ContractViolation("STRUCTURAL_PROVENANCE")
 
     if not isinstance(declaration["resource_limits"], list):
         raise ContractViolation("RESOURCE_LIMITS")
@@ -1224,55 +1216,30 @@ def validate_declaration(
     _require_exact_keys(
         governance,
         {
-            "profile_owner_id",
-            "declaration_owner_id",
             "approval_owner_id",
             "authority_issuer_id",
             "revision_authority_ids",
-            "change_process_ref",
             "no_live_gate_override",
         },
         "GOVERNANCE",
     )
     for key in {
-        "profile_owner_id",
-        "declaration_owner_id",
         "approval_owner_id",
         "authority_issuer_id",
     }:
         _require_identifier(governance[key], "GOVERNANCE_ID")
     _unique_ids(governance["revision_authority_ids"], "REVISION_AUTHORITIES")
-    if (
-        not isinstance(governance["change_process_ref"], str)
-        or not governance["change_process_ref"]
-        or governance["no_live_gate_override"] is not True
-    ):
+    if governance["no_live_gate_override"] is not True:
         raise ContractViolation("GOVERNANCE_CHANGE_CONTROL")
 
     interfaces = _require_mapping(declaration["interfaces"], "INTERFACES")
     _require_exact_keys(
         interfaces,
         {
-            "governance_service_id",
-            "operator_service_id",
-            "executor_service_id",
-            "architect_store_id",
-            "observer_projection_id",
             "off_limits_system_ids",
         },
         "INTERFACES",
     )
-    interface_ids = []
-    for key in {
-        "governance_service_id",
-        "operator_service_id",
-        "executor_service_id",
-        "architect_store_id",
-        "observer_projection_id",
-    }:
-        interface_ids.append(_require_identifier(interfaces[key], "INTERFACE_ID"))
-    if len(interface_ids) != len(set(interface_ids)):
-        raise ContractViolation("INTERFACE_ROLE_OVERLAP")
     off_limits = set(
         _unique_ids(
             interfaces["off_limits_system_ids"],
@@ -1303,14 +1270,13 @@ def validate_declaration(
     ):
         raise IntegrityViolation("WITNESS_BINDING_MISMATCH")
 
-    if not isinstance(declaration["evidence_refs"], list) or not declaration[
-        "evidence_refs"
-    ]:
-        raise ContractViolation("DECLARATION_EVIDENCE")
-    for item in declaration["evidence_refs"]:
-        _validate_evidence_ref(item, "DECLARATION_EVIDENCE")
 
-    _deep_secret_scan(declaration)
+    # Action-target bindings are keyed by the selected action ids the profile
+    # declares, with lists of declared target ids as values.
+    _deep_secret_scan(
+        declaration,
+        declared_keys={id(action_target_bindings): frozenset(selected_actions)},
+    )
 
 
 class SystemClock:
@@ -1348,6 +1314,7 @@ ARCHITECT_DECISION_CODES = frozenset(
         "ACTION_OUT_OF_SCOPE",
         "ACTION_TARGET_MISMATCH",
         "ALLOW_ISSUED",
+        "AUTHORITATIVE_RESOLUTION_FAILED",
         "AMBIGUOUS_INTENT",
         "AUTHORITY_EXPIRED",
         "AUTHORITY_NOT_YET_VALID",
@@ -1408,10 +1375,11 @@ class AppendOnlyLedger:
         actor_role: str,
         subject_ref: str,
         payload: Mapping[str, Any],
+        declared_keys: dict[int, frozenset[str]] | None = None,
     ) -> str:
         _require_identifier(event_type, "EVENT_TYPE")
         _require_identifier(subject_ref, "EVENT_SUBJECT")
-        _deep_secret_scan(payload)
+        _deep_secret_scan(payload, declared_keys=declared_keys)
         previous = self._events[-1]["event_hash"] if self._events else "0" * 64
         body = {
             "event_index": len(self._events),
@@ -2016,7 +1984,12 @@ class SQLiteStateStore:
             isinstance(state_mac, str) and state_mac.isascii()
         ) or not hmac.compare_digest(state_mac, expected_mac):
             raise IntegrityViolation("STATE_MAC_FAILURE")
-        value = json.loads(state_json)
+        # Authenticated is not well-formed: a holder of the key can store text the
+        # parser refuses, or nesting past the parser's own recursion limit.
+        try:
+            value = json.loads(state_json)
+        except (RecursionError, ValueError) as exc:
+            raise IntegrityViolation("STATE_SHAPE", "state_json") from exc
         if not isinstance(value, dict):
             raise IntegrityViolation("STATE_SHAPE")
         return value
@@ -2096,6 +2069,197 @@ SIGNATURE_ENVELOPE_FIELDS = frozenset(
     {"version", "algorithm", "key_id", "signature"}
 )
 
+# The fields of the records the engine writes into its state, as it writes them. A
+# restore holds every stored record to its set. The permit body, the operator result and
+# the receipt are the schemas' own sets, and a regression check compares them. The event,
+# the decision and the receipt seed have no schema; they are held by the restore itself,
+# since a persistent engine reloads its own state on its next call, and a set that drifts
+# from what the engine writes refuses the engine's own writes at once.
+LEDGER_EVENT_FIELDS = frozenset(
+    {
+        "event_index", "event_time", "event_type", "actor_role", "subject_ref",
+        "payload", "previous_event_hash", "event_hash", "signature",
+    }
+)
+DECISION_FIELDS = frozenset(
+    {
+        "intent_id", "request_hash", "disposition", "message_code", "gate_engaged",
+        "gate_bit", "structural_gate", "effect_gate", "recorded_at",
+    }
+)
+ALLOW_DECISION_FIELDS = DECISION_FIELDS | {"permit_hash"}
+OPERATOR_RESULT_FIELDS = frozenset(
+    {
+        "message_type", "intent_id", "request_hash", "disposition", "channel",
+        "message_code", "permit_hash", "expires_at",
+    }
+)
+PERMIT_BODY_FIELDS = frozenset(
+    {
+        "message_type", "permit_id", "intent_id", "request_hash", "binding",
+        "authority_grant_id", "connector_id", "action_id", "effect_class_id",
+        "target_system_id", "state_anchor_hash", "structural_cost", "resource_claims",
+        "reservation_id", "gate_engaged", "gate_bit", "structural_gate", "effect_gate",
+        "issued_at", "ttl_seconds", "expires_at",
+    }
+)
+RECEIPT_SEED_FIELDS = frozenset(
+    {
+        "message_type", "receipt_id", "permit_hash", "intent_id", "outcome",
+        "structural_debit", "resource_debits", "downstream_receipt_hash", "recorded_at",
+    }
+)
+RECEIPT_FIELDS = (RECEIPT_SEED_FIELDS - {"downstream_receipt_hash"}) | {
+    "ledger_event_hash",
+    "receipt_hash",
+}
+
+
+def _nesting_exceeds(value: Any, limit: int) -> bool:
+    """Whether any value inside `value` lies deeper than `limit`, found without recursion.
+
+    The depth of `value` itself is 0. A walk that recursed would fail on the very input it
+    exists to refuse.
+    """
+    pending = [(value, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > limit:
+            return True
+        if isinstance(item, Mapping):
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)
+    return False
+
+
+def _stored_time(value: Any, field: str) -> None:
+    """A stored instant must parse the way its readers parse it."""
+    try:
+        parse_utc(value)
+    except ContractViolation as exc:
+        raise ContractViolation("STATE_SHAPE", field) from exc
+
+
+def _stored_amounts(value: Any, field: str) -> None:
+    """A stored claim or debit map: identifiers to non-negative integers."""
+    if not isinstance(value, Mapping):
+        raise ContractViolation("STATE_SHAPE", field)
+    for resource_id, amount in value.items():
+        _require_identifier(resource_id, "STATE_SHAPE")
+        _require_non_negative_int(amount, "STATE_SHAPE")
+
+
+def _check_stored_decision(decision: Mapping[str, Any]) -> None:
+    """A decision in the form `_record_non_executable` or an ALLOW writes it."""
+    allow = decision.get("disposition") == "ALLOW"
+    _require_exact_keys(
+        decision, ALLOW_DECISION_FIELDS if allow else DECISION_FIELDS, "STATE_SHAPE"
+    )
+    # Text first: a set lookup on a list raises a bare TypeError.
+    _require_identifier(decision["disposition"], "STATE_SHAPE")
+    _require_identifier(decision["intent_id"], "STATE_SHAPE")
+    _require_sha256(decision["request_hash"], "STATE_SHAPE")
+    _require_identifier(decision["message_code"], "STATE_SHAPE")
+    _stored_time(decision["recorded_at"], "recorded_at")
+    if allow:
+        _require_sha256(decision["permit_hash"], "STATE_SHAPE")
+        if not (
+            decision["message_code"] == "ALLOW_ISSUED"
+            and decision["gate_engaged"] is True
+            and type(decision["gate_bit"]) is int
+            and decision["gate_bit"] == 1
+            and decision["structural_gate"] is True
+            and decision["effect_gate"] is True
+        ):
+            raise ContractViolation("STATE_SHAPE", "gates")
+        return
+    engaged = decision["gate_engaged"]
+    if (
+        decision["disposition"] not in NON_EXECUTABLE
+        or type(engaged) is not bool
+        or (
+            decision["gate_bit"] is not None
+            if not engaged
+            else type(decision["gate_bit"]) is not int or decision["gate_bit"] != 0
+        )
+        or not all(
+            decision[gate] is None or type(decision[gate]) is bool
+            for gate in ("structural_gate", "effect_gate")
+        )
+    ):
+        raise ContractViolation("STATE_SHAPE", "gates")
+
+
+def _check_receipt_fields(receipt: Mapping[str, Any], fields: frozenset[str]) -> None:
+    """The fields a receipt and its seed share, in the form `commit_execution` writes."""
+    _require_exact_keys(receipt, fields, "STATE_SHAPE")
+    if receipt["message_type"] != "execution_receipt":
+        raise ContractViolation("STATE_SHAPE", "message_type")
+    _require_identifier(receipt["receipt_id"], "STATE_SHAPE")
+    _require_sha256(receipt["permit_hash"], "STATE_SHAPE")
+    _require_identifier(receipt["intent_id"], "STATE_SHAPE")
+    _require_identifier(receipt["outcome"], "STATE_SHAPE")
+    if receipt["outcome"] not in EXECUTION_OUTCOMES:
+        raise ContractViolation("STATE_SHAPE", "outcome")
+    _require_non_negative_int(receipt["structural_debit"], "STATE_SHAPE")
+    _stored_amounts(receipt["resource_debits"], "resource_debits")
+    _stored_time(receipt["recorded_at"], "recorded_at")
+
+
+def _check_stored_result(result: Mapping[str, Any]) -> None:
+    """An operator result in the form `_operator_result` writes it."""
+    _require_exact_keys(result, OPERATOR_RESULT_FIELDS, "STATE_SHAPE")
+    if result["message_type"] != "operator_result":
+        raise ContractViolation("STATE_SHAPE", "message_type")
+    _require_identifier(result["intent_id"], "STATE_SHAPE")
+    _require_sha256(result["request_hash"], "STATE_SHAPE")
+    disposition = _require_identifier(result["disposition"], "STATE_SHAPE")
+    allow = disposition == "ALLOW"
+    if not allow and disposition not in NON_EXECUTABLE:
+        raise ContractViolation("STATE_SHAPE", "disposition")
+    if (
+        result["channel"] != ("OUTPUT" if allow else "REFUSAL")
+        or result["message_code"] != PUBLIC_MESSAGE_CODE_BY_DISPOSITION[disposition]
+    ):
+        raise ContractViolation("STATE_SHAPE", "channel")
+    if allow:
+        _require_sha256(result["permit_hash"], "STATE_SHAPE")
+        _stored_time(result["expires_at"], "expires_at")
+    elif result["permit_hash"] is not None or result["expires_at"] is not None:
+        raise ContractViolation("STATE_SHAPE", "permit")
+
+
+def _check_stored_event(event: Mapping[str, Any]) -> None:
+    """An event in the form `AppendOnlyLedger.append` writes it.
+
+    Of the payloads, the two whose fields an operation reads - the observer projection
+    and the export read a refusal's disposition and an execution's outcome - are held to
+    their form as well. The others no operation reads; their contents are bound by the
+    chain alone.
+    """
+    _require_exact_keys(event, LEDGER_EVENT_FIELDS, "STATE_SHAPE")
+    _require_non_negative_int(event["event_index"], "STATE_SHAPE")
+    _stored_time(event["event_time"], "event_time")
+    kind = _require_identifier(event["event_type"], "STATE_SHAPE")
+    if type(event["actor_role"]) is not str or event["actor_role"] not in _KNOWN_ROLES:
+        raise ContractViolation("STATE_SHAPE", "actor_role")
+    _require_identifier(event["subject_ref"], "STATE_SHAPE")
+    payload = _require_mapping(event["payload"], "STATE_SHAPE")
+    if kind == "INTENT_NON_EXECUTABLE":
+        _check_stored_decision(payload)
+        if payload["disposition"] not in NON_EXECUTABLE:
+            raise ContractViolation("STATE_SHAPE", "payload disposition")
+    elif kind == "EXECUTION_RECORDED":
+        _require_exact_keys(
+            payload, {"execution_request_hash", "receipt_seed"}, "STATE_SHAPE"
+        )
+        _require_sha256(payload["execution_request_hash"], "STATE_SHAPE")
+        seed = _require_mapping(payload["receipt_seed"], "STATE_SHAPE")
+        _check_receipt_fields(seed, RECEIPT_SEED_FIELDS)
+        if seed["downstream_receipt_hash"] is not None:
+            _require_sha256(seed["downstream_receipt_hash"], "STATE_SHAPE")
+
 
 MAX_PERMIT_TTL_SECONDS = 900
 
@@ -2164,6 +2328,7 @@ def _state_locked(required_scope: str) -> Any:
                         self.profile_hash,
                         self._key,
                     )
+                    self._refuse_state_rollback(persisted)
                     if persisted is not None:
                         self._restore_state(persisted)
                     rollback_state = self._snapshot_state()
@@ -2258,6 +2423,7 @@ def _state_read_locked(required_scope: str) -> Any:
                         self.profile_hash,
                         self._key,
                     )
+                    self._refuse_state_rollback(persisted)
                     if persisted is not None:
                         self._restore_state(persisted)
                 return method(self, *args, **kwargs)
@@ -2383,7 +2549,10 @@ class UniversalConnectionLedger:
         the same explicit-scope requirement as every other public operation.
 
         The retired key stays in the verifier registry, so permits it signed
-        remain verifiable until the key is explicitly revoked. A revoked
+        remain verifiable until the key is explicitly revoked. The registry is
+        process-local and not persisted: after a restart a retired key's
+        permits are refused with PERMIT_KEY_UNKNOWN until the rotation is
+        repeated in the new process. A revoked
         key_id can never be rotated back in: revocation is permanent for
         this declaration's lifetime, in-process and across state restore.
         """
@@ -2409,8 +2578,11 @@ class UniversalConnectionLedger:
 
         The active signing key cannot be revoked in place — rotate first, so
         the engine is never left unable to sign. Revocation is remembered, so
-        a revoked key's permits refuse with `PERMIT_KEY_REVOKED` rather than
-        being indistinguishable from tampering. With a `state_path`, the
+        executor and architect verification refuse the revoked key's permits
+        with `PERMIT_KEY_REVOKED` rather than treating them as tampering.
+        An operator replay of a permit that was still live instead returns the
+        opaque REFUSAL result; a consumed or expired permit keeps answering
+        PERMIT_ALREADY_CONSUMED or PERMIT_EXPIRED. With a `state_path`, the
         revoked set is part of the persisted snapshot, so revocation survives
         process restart.
         """
@@ -2498,7 +2670,119 @@ class UniversalConnectionLedger:
             "ledger_events": self.ledger.events_copy(),
         }
 
+    def _refuse_state_rollback(self, persisted: Mapping[str, Any] | None) -> None:
+        """Refuse a stored snapshot that holds LESS history than this process has already seen.
+
+        The snapshot MAC covers the snapshot's own hash and nothing about where it stands in
+        time, so a genuine older row put back in the file would otherwise replace the newer
+        in-memory state on the next call, and a single-use permit that had been committed
+        could be committed again. What this process holds is a prefix of every later honest
+        snapshot, so the stored chain must be at least as long and carry the head seen at
+        that position. A longer chain that extends it - another instance appending to the
+        same file - is accepted. A row that has vanished while this process holds history is
+        the same loss.
+
+        Limit, by construction: a process that holds no history yet (a cold start) has
+        nothing to compare against and accepts what the file holds. Protection across a
+        restart needs an external monotonic anchor; a counter kept inside the same
+        rewritable snapshot is not one.
+
+        Revoked signing keys and terminal permit invalidations are also monotone facts.
+        They can change without appending an event, so a matching event head alone does not
+        permit their loss. Another instance may add such facts; it may never erase ones this
+        process has already observed. The persisted format is unchanged.
+
+        Only the parts of the snapshot this check reads are inspected here. A container it
+        cannot read - of the wrong type, or revoked keys with a member that is not a string -
+        is passed over, not refused: both callers hand the same snapshot to `_restore_state`
+        next, which refuses it as an IntegrityViolation. The records this check compares are
+        the exception. The anchor event must be a mapping that carries the head hash, and the
+        record of each permit this process holds as invalidated must be present, not null,
+        and, when it is a mapping, carry the same reason. A record that fails is refused here
+        as STATE_ROLLBACK, even where the row is only malformed; a permit record of any other
+        form is passed over.
+
+        `_restore_state` checks every field - its type, or for the state version, the two
+        hashes and the permit TTL, equality with this engine's own value - and verifies the
+        stored chain, and it holds every stored record to the form the engine writes: a grant
+        to the grant contract, less the expiry check that belongs to the moment of issue; a
+        decision, a permit body, an idempotency result and a replay receipt to the fields
+        their creation writes, the permit body and the receipt under their own hashes; and an
+        event the chain has verified to the fields `append` writes and, for the two payloads
+        an operation reads, to their form. A value nested deeper than any record admits is
+        refused before anything copies it, and the store refuses text its parser cannot
+        read. Each refusal is an IntegrityViolation: STATE_SHAPE, or for an idempotency
+        result or a replay receipt the code of its pair.
+
+        Residual: the row has already passed the store's MAC check, so a snapshot shaped like
+        that comes only from a holder of the keys or from a faulty writer. Each record is
+        checked on its own: whether records agree with one another - a decision's permit
+        present, a receipt among the receipt hashes, a permit's grant stored - is not checked,
+        nor are the payloads no operation reads, nor a permit's signature, which the reads
+        that use a permit verify. A record that keeps its form and changes its content is
+        restored without a refusal: on reopen no rollback check runs, and on the per-call
+        reload this check compares only the chain, the revoked keys and the invalidation
+        reasons, so a changed event is caught per call only inside the history this process
+        has seen.
+        """
+        if isinstance(persisted, Mapping):
+            revoked_keys = persisted.get("revoked_permit_keys")
+            if (
+                isinstance(revoked_keys, list)
+                and all(isinstance(key_id, str) for key_id in revoked_keys)
+                and not self._revoked_permit_keys.issubset(revoked_keys)
+            ):
+                raise IntegrityViolation("STATE_ROLLBACK")
+            stored_permits = persisted.get("permits")
+            if isinstance(stored_permits, dict):
+                for permit_hash, record in self.permits.items():
+                    if record.invalidated_reason is None:
+                        continue
+                    prior = stored_permits.get(permit_hash)
+                    if prior is None or (
+                        isinstance(prior, Mapping)
+                        and prior.get("invalidated_reason") != record.invalidated_reason
+                    ):
+                        raise IntegrityViolation("STATE_ROLLBACK")
+        elif persisted is None and self._revoked_permit_keys:
+            raise IntegrityViolation("STATE_ROLLBACK")
+        seen = self.ledger.head()
+        if seen["event_count"] == 0:
+            return
+        if persisted is None:
+            raise IntegrityViolation("STATE_ROLLBACK")
+        stored = persisted.get("ledger_events") if isinstance(persisted, Mapping) else None
+        if not isinstance(stored, list):
+            return
+        if len(stored) < seen["event_count"]:
+            raise IntegrityViolation("STATE_ROLLBACK")
+        anchor = stored[seen["event_count"] - 1]
+        if not isinstance(anchor, Mapping) or anchor.get("event_hash") != seen["head_hash"]:
+            raise IntegrityViolation("STATE_ROLLBACK")
+
     def _restore_state(self, state: Mapping[str, Any]) -> None:
+        """Validate and stage a stored representation before installing any of it.
+
+        Stored contract faults are server-side integrity failures. Preserve
+        their code and detail while keeping them off the client-error channel.
+        Of the grant contract, only the issue-time expiry check is not repeated on
+        historical grants: a grant may have expired since it was issued.
+        """
+        try:
+            self._restore_checked_state(state)
+        except IntegrityViolation:
+            raise
+        except ContractViolation as exc:
+            raise IntegrityViolation(exc.code, exc.detail) from exc
+
+    def _restore_checked_state(self, state: Mapping[str, Any]) -> None:
+        # First, before anything that copies or compares: a value nested past the
+        # interpreter's recursion limit stops a deep copy as a bare RecursionError.
+        # Nothing written honestly lies deeper than this. Events and grants sit two
+        # levels into the state and are walked at creation to MAX_NESTING_DEPTH below
+        # themselves; the records further in are the engine's own and a few levels deep.
+        if _nesting_exceeds(state, MAX_NESTING_DEPTH + 2):
+            raise IntegrityViolation("STATE_SHAPE", "nesting depth")
         required = {
             "state_version",
             "profile_hash",
@@ -2529,10 +2813,49 @@ class UniversalConnectionLedger:
             raise IntegrityViolation("STATE_PERMIT_TTL_MISMATCH")
         if not isinstance(state["status"], str) or state["status"] not in {"DRAFT", "ACTIVE"}:
             raise IntegrityViolation("STATE_STATUS")
+        if state["activated_at"] is not None:
+            parse_utc(state["activated_at"])
+        _require_non_negative_int(state["structural_remaining"], "STATE_SHAPE")
+        if state["structural_remaining"] > self.declaration["structural_budget"]["capacity"]:
+            raise IntegrityViolation("STATE_SHAPE", "structural_remaining")
+        if not isinstance(state["ledger_events"], list) or not all(
+            isinstance(event, Mapping) for event in state["ledger_events"]
+        ):
+            raise IntegrityViolation("STATE_SHAPE", "ledger_events")
+        if not isinstance(state["decisions"], dict) or not all(
+            isinstance(key, str) and isinstance(value, Mapping)
+            for key, value in state["decisions"].items()
+        ):
+            raise IntegrityViolation("STATE_SHAPE", "decisions")
+        # Each stored record is held to the form the engine writes, because whatever
+        # reads it next is not built to refuse it: measured, a grant whose permitted
+        # actions are one string admitted an action the same text as a list refuses.
+        for request_hash, decision in state["decisions"].items():
+            try:
+                _require_sha256(request_hash, "STATE_SHAPE")
+                _check_stored_decision(decision)
+            except ContractViolation as exc:
+                raise IntegrityViolation("STATE_SHAPE", f"decision: {exc.detail}") from exc
+        receipt_hashes = state["receipt_hashes"]
+        if not isinstance(receipt_hashes, list):
+            raise IntegrityViolation("STATE_SHAPE", "receipt_hashes")
+        for receipt_hash in receipt_hashes:
+            _require_sha256(receipt_hash, "STATE_SHAPE")
         if not isinstance(state["grants"], dict):
             raise IntegrityViolation("STATE_GRANTS")
-        if not isinstance(state["revoked_grants"], list):
-            raise IntegrityViolation("STATE_REVOKED_GRANTS")
+        if not all(
+            isinstance(key, str) and isinstance(value, Mapping)
+            for key, value in state["grants"].items()
+        ):
+            raise IntegrityViolation("STATE_SHAPE", "grants")
+        for grant_id, grant in state["grants"].items():
+            try:
+                self._validate_grant(grant, issuing=False)
+            except ContractViolation as exc:
+                raise IntegrityViolation("STATE_SHAPE", f"grant: {exc.code}") from exc
+            if grant["grant_id"] != grant_id:
+                raise IntegrityViolation("STATE_SHAPE", "grant: key")
+        _unique_ids(state["revoked_grants"], "STATE_REVOKED_GRANTS", allow_empty=True)
         revoked_permit_keys = state["revoked_permit_keys"]
         if not isinstance(revoked_permit_keys, list) or not all(
             isinstance(key_id, str) for key_id in revoked_permit_keys
@@ -2549,6 +2872,7 @@ class UniversalConnectionLedger:
 
         permits: dict[str, PermitRecord] = {}
         for permit_hash, value in state["permits"].items():
+            _require_mapping(value, "STATE_PERMIT_FIELDS")
             _require_exact_keys(
                 value,
                 {
@@ -2563,6 +2887,12 @@ class UniversalConnectionLedger:
             )
             if permit_hash != value["permit_hash"]:
                 raise IntegrityViolation("STATE_PERMIT_KEY_MISMATCH")
+            _require_sha256(permit_hash, "STATE_SHAPE")
+            _require_mapping(value["body"], "STATE_SHAPE")
+            if type(value["consumed"]) is not bool or type(value["reservation_active"]) is not bool:
+                raise IntegrityViolation("STATE_SHAPE", "permit flags")
+            if value["invalidated_reason"] is not None:
+                _require_identifier(value["invalidated_reason"], "STATE_SHAPE")
             envelope = value["signature"]
             if (
                 not isinstance(envelope, Mapping)
@@ -2572,6 +2902,10 @@ class UniversalConnectionLedger:
                 )
             ):
                 raise IntegrityViolation("STATE_PERMIT_SIGNATURE")
+            try:
+                self._check_stored_permit_body(value["body"], permit_hash)
+            except ContractViolation as exc:
+                raise IntegrityViolation("STATE_SHAPE", f"permit body: {exc.detail}") from exc
             permits[permit_hash] = PermitRecord(
                 body=copy.deepcopy(value["body"]),
                 permit_hash=value["permit_hash"],
@@ -2587,7 +2921,14 @@ class UniversalConnectionLedger:
                 raise IntegrityViolation(f"STATE_{name.upper()}")
             restored: dict[str, tuple[str, dict[str, Any]]] = {}
             for key, pair in source.items():
-                if not isinstance(pair, list) or len(pair) != 2:
+                if (
+                    not isinstance(key, str)
+                    or not isinstance(pair, list)
+                    or len(pair) != 2
+                    or not isinstance(pair[0], str)
+                    or not SHA256_RE.fullmatch(pair[0])
+                    or not isinstance(pair[1], Mapping)
+                ):
                     raise IntegrityViolation(f"STATE_{name.upper()}_PAIR")
                 restored[key] = (pair[0], copy.deepcopy(pair[1]))
             return restored
@@ -2596,33 +2937,119 @@ class UniversalConnectionLedger:
         if not isinstance(state["committed_resources"], list):
             raise IntegrityViolation("STATE_COMMITTED_RESOURCES")
         for item in state["committed_resources"]:
+            _require_mapping(item, "STATE_COMMITTED_RESOURCE_FIELDS")
             _require_exact_keys(
                 item,
                 {"committed_at", "debits"},
                 "STATE_COMMITTED_RESOURCE_FIELDS",
             )
+            _require_mapping(item["debits"], "STATE_SHAPE")
+            for resource_id, amount in item["debits"].items():
+                _require_identifier(resource_id, "STATE_SHAPE")
+                _require_non_negative_int(amount, "STATE_SHAPE")
             committed_resources.append(
                 (parse_utc(item["committed_at"]), copy.deepcopy(item["debits"]))
             )
 
-        self.status = state["status"]
-        self.activated_at = copy.deepcopy(state["activated_at"])
-        self.grants = copy.deepcopy(state["grants"])
-        self.revoked_grants = set(state["revoked_grants"])
-        self._revoked_permit_keys = set(revoked_permit_keys)
-        self._permit_verifiers = {
+        # Every fallible parse/copy and chain check precedes installation.
+        # In particular, a late replay-pair refusal must not filter a verifier
+        # out of the running process or replace any of its prior state.
+        idempotency = restore_pairs("idempotency")
+        execution_replays = restore_pairs("execution_replays")
+        for key, (_, result) in idempotency.items():
+            try:
+                _require_identifier(key, "STATE_SHAPE")
+                _check_stored_result(result)
+            except ContractViolation as exc:
+                raise IntegrityViolation("STATE_IDEMPOTENCY_PAIR", f"result: {exc.detail}") from exc
+        for key, (_, receipt) in execution_replays.items():
+            try:
+                _check_receipt_fields(receipt, RECEIPT_FIELDS)
+                _require_sha256(receipt["ledger_event_hash"], "STATE_SHAPE")
+                _require_sha256(receipt["receipt_hash"], "STATE_SHAPE")
+                # Stored under its permit, and sealed by its own hash as issued.
+                if receipt["permit_hash"] != key or receipt["receipt_hash"] != sha256_hex(
+                    {field: item for field, item in receipt.items() if field != "receipt_hash"}
+                ):
+                    raise ContractViolation("STATE_SHAPE", "hash")
+            except ContractViolation as exc:
+                raise IntegrityViolation(
+                    "STATE_EXECUTION_REPLAYS_PAIR", f"receipt: {exc.detail}"
+                ) from exc
+        activated_at = copy.deepcopy(state["activated_at"])
+        grants = copy.deepcopy(state["grants"])
+        decisions = copy.deepcopy(state["decisions"])
+        receipts = copy.deepcopy(receipt_hashes)
+        revoked_grants = set(state["revoked_grants"])
+        revoked_keys = set(revoked_permit_keys)
+        verifiers = {
             key_id: verifier
             for key_id, verifier in self._permit_verifiers.items()
-            if key_id not in self._revoked_permit_keys
+            if key_id not in revoked_keys
         }
+        events = copy.deepcopy(state["ledger_events"])
+        candidate_chain = AppendOnlyLedger(self._key, self.clock, self.ledger._event_signer)
+        candidate_chain._restore_events(events)
+        if not candidate_chain.verify():
+            raise IntegrityViolation("LEDGER_CHAIN_FAILURE")
+        # After the chain: an event the chain refuses is a chain failure, and only an
+        # event it admits is held to the form `append` writes.
+        for event in events:
+            try:
+                _check_stored_event(event)
+            except ContractViolation as exc:
+                raise IntegrityViolation("STATE_SHAPE", f"event: {exc.detail}") from exc
+
+        self.status = state["status"]
+        self.activated_at = activated_at
+        self.grants = grants
+        self.revoked_grants = revoked_grants
+        self._revoked_permit_keys = revoked_keys
+        self._permit_verifiers = verifiers
         self.permits = permits
-        self.decisions = copy.deepcopy(state["decisions"])
-        self.idempotency = restore_pairs("idempotency")
-        self.execution_replays = restore_pairs("execution_replays")
+        self.decisions = decisions
+        self.idempotency = idempotency
+        self.execution_replays = execution_replays
         self.structural_remaining = state["structural_remaining"]
         self.committed_resources = committed_resources
-        self.receipt_hashes = copy.deepcopy(state["receipt_hashes"])
-        self.ledger._restore_events(copy.deepcopy(state["ledger_events"]))
+        self.receipt_hashes = receipts
+        self.ledger._restore_events(events)
+
+    def _check_stored_permit_body(self, body: Mapping[str, Any], permit_hash: str) -> None:
+        """A permit body in the form `evaluate_intent` issues it, under its own hash.
+
+        Its signature is not checked here: a permit signed under a key revoked since is
+        a legitimate record, and the reads that use a permit verify it themselves.
+        """
+        _require_exact_keys(body, PERMIT_BODY_FIELDS, "STATE_SHAPE")
+        if body["message_type"] != "execution_permit":
+            raise ContractViolation("STATE_SHAPE", "message_type")
+        for key in (
+            "permit_id", "intent_id", "authority_grant_id", "connector_id", "action_id",
+            "effect_class_id", "target_system_id", "reservation_id",
+        ):
+            _require_identifier(body[key], "STATE_SHAPE")
+        _require_sha256(body["request_hash"], "STATE_SHAPE")
+        _require_sha256(body["state_anchor_hash"], "STATE_SHAPE")
+        if not self._binding_matches(body["binding"]):
+            raise ContractViolation("STATE_SHAPE", "binding")
+        _require_non_negative_int(body["structural_cost"], "STATE_SHAPE")
+        _stored_amounts(body["resource_claims"], "resource_claims")
+        if not (
+            body["gate_engaged"] is True
+            and type(body["gate_bit"]) is int
+            and body["gate_bit"] == 1
+            and body["structural_gate"] is True
+            and body["effect_gate"] is True
+        ):
+            raise ContractViolation("STATE_SHAPE", "gates")
+        _stored_time(body["issued_at"], "issued_at")
+        _stored_time(body["expires_at"], "expires_at")
+        ttl = body["ttl_seconds"]
+        if type(ttl) is not int or not 1 <= ttl <= MAX_PERMIT_TTL_SECONDS:
+            raise ContractViolation("STATE_SHAPE", "ttl_seconds")
+        if sha256_hex(body) != permit_hash:
+            raise ContractViolation("STATE_SHAPE", "hash")
 
     def _now(self) -> datetime:
         value = self.clock.now()
@@ -2713,7 +3140,13 @@ class UniversalConnectionLedger:
         self.activated_at = utc_text(now)
         return self.declaration_hash
 
-    def _validate_grant(self, grant: Mapping[str, Any]) -> None:
+    def _validate_grant(self, grant: Mapping[str, Any], *, issuing: bool = True) -> None:
+        """The grant contract, at issue and on restore.
+
+        A restore runs it on every stored grant with `issuing=False`, which drops the
+        one check that belongs to the moment of issue: a grant that was live when it
+        was issued may have expired since.
+        """
         required = {
             "message_type",
             "grant_id",
@@ -2756,7 +3189,7 @@ class UniversalConnectionLedger:
         # that was never live. A grant whose window is wholly in the FUTURE
         # is still issued - pre-issuing is a legitimate operation, and a rule
         # of "valid now" would have broken it.
-        if valid_until <= self._now():
+        if issuing and valid_until <= self._now():
             raise ContractViolation("AUTHORITY_EXPIRED", grant["grant_id"])
         if (
             not isinstance(grant["approval_evidence_ref"], str)
@@ -2871,8 +3304,8 @@ class UniversalConnectionLedger:
         if revoked_by not in allowed_revokers:
             raise ContractViolation("REVOCATION_ACTOR_UNAUTHORIZED")
         if (
-            parse_utc(revocation["revoked_at"])
-            > self._now() + timedelta(seconds=5)
+            parse_utc(revocation["revoked_at"]) - self._now()
+            > timedelta(seconds=5)
         ):
             raise ContractViolation("REVOCATION_IN_FUTURE")
         _require_identifier(revocation["reason_code"], "REVOCATION_REASON")
@@ -2935,6 +3368,17 @@ class UniversalConnectionLedger:
         # decision in the signed chain and burn the caller's key.
         binding = _require_mapping(intent["binding"], "INTENT_BINDING")
         _require_exact_keys(binding, set(self._binding()), "INTENT_BINDING")
+        # The VALUES' forms are shape too. The wire schema's patterns end in `$`, which
+        # `re.search` also lets match before a trailing newline, so a value such as
+        # `<hash>\n` passes the body schema; checking only the keys here let it reach the
+        # comparison and be recorded as a BINDING_MISMATCH refusal in the signed chain,
+        # burning the caller's idempotency key. `fullmatch` is what the other fields use.
+        for key in ("profile_id", "declaration_id"):
+            _require_identifier(binding[key], "INTENT_BINDING")
+        for key in ("profile_version", "declaration_version"):
+            _require_version(binding[key], "INTENT_BINDING")
+        for key in ("profile_hash", "declaration_hash"):
+            _require_sha256(binding[key], "INTENT_BINDING")
         for key in {
             "intent_id",
             "idempotency_key",
@@ -2981,7 +3425,18 @@ class UniversalConnectionLedger:
             allow_empty=True,
         )
         _deep_forbidden_operator_scan(intent, self._forbidden_operator_fields)
-        _deep_secret_scan(intent)
+        # The control maps carry booleans under the control ids, and resource
+        # claims carry counts under resource ids; an undeclared key in either
+        # still meets the guard.
+        _deep_secret_scan(
+            intent,
+            declared_keys={
+                id(intent["prerequisite_results"]): frozenset(controls["required_prerequisite_ids"]),
+                id(intent["hard_block_flags"]): frozenset(controls["hard_block_flag_ids"]),
+                id(intent["manual_review_flags"]): frozenset(controls["manual_review_flag_ids"]),
+                id(intent["resource_claims"]): frozenset(self._resources),
+            },
+        )
 
     def _resolve_controls(
         self,
@@ -3016,28 +3471,30 @@ class UniversalConnectionLedger:
             )
         except Exception as exc:
             raise ContractViolation("CONTROL_RESOLUTION_FAILED") from exc
-        if not isinstance(derived, Mapping) or set(derived) != set(
-            CONTROL_FIELDS
-        ):
-            raise ContractViolation("CONTROL_RESOLUTION_INVALID")
-        resolved: dict[str, Any] = {}
-        for field in CONTROL_BOOLEAN_FIELDS:
-            value = derived[field]
-            if not isinstance(value, Mapping) or set(value) != set(
-                intent[field]
+        try:
+            if not isinstance(derived, Mapping) or set(derived) != set(
+                CONTROL_FIELDS
             ):
                 raise ContractViolation("CONTROL_RESOLUTION_INVALID")
-            if not all(isinstance(flag, bool) for flag in value.values()):
+            resolved: dict[str, Any] = {}
+            for field in CONTROL_BOOLEAN_FIELDS:
+                value = derived[field]
+                if not isinstance(value, Mapping) or set(value) != set(
+                    intent[field]
+                ):
+                    raise ContractViolation("CONTROL_RESOLUTION_INVALID")
+                if not all(isinstance(flag, bool) for flag in value.values()):
+                    raise ContractViolation("CONTROL_RESOLUTION_INVALID")
+                resolved[field] = dict(value)
+            ambiguity = derived[CONTROL_AMBIGUITY_FIELD]
+            if not isinstance(ambiguity, list):
                 raise ContractViolation("CONTROL_RESOLUTION_INVALID")
-            resolved[field] = dict(value)
-        ambiguity = derived[CONTROL_AMBIGUITY_FIELD]
-        if not isinstance(ambiguity, list):
-            raise ContractViolation("CONTROL_RESOLUTION_INVALID")
-        try:
             _unique_ids(ambiguity, "AMBIGUITY_FLAGS", allow_empty=True)
-        except ContractViolation as exc:
+            resolved[CONTROL_AMBIGUITY_FIELD] = list(ambiguity)
+        except Exception as exc:
+            # Output the checks cannot read (a mapping that raises on access or
+            # iteration) is malformed like output they can read and refuse.
             raise ContractViolation("CONTROL_RESOLUTION_INVALID") from exc
-        resolved[CONTROL_AMBIGUITY_FIELD] = list(ambiguity)
         return resolved
 
     def _resolve_evidence_bundle(
@@ -3059,7 +3516,18 @@ class UniversalConnectionLedger:
             raise ContractViolation("EVIDENCE_RESOLUTION_FAILED") from exc
         if not isinstance(resolved, Mapping):
             raise ContractViolation("EVIDENCE_RESOLUTION_INVALID")
-        resolved_bundle = copy.deepcopy(dict(resolved))
+        try:
+            # Plain JSON values, read the way the permit hash reads them. A deep
+            # copy kept a dict subclass or a Mapping as it was: one that raises
+            # when read escaped the refusal guard below, and a subclass could
+            # answer the gate one status while the hash bound another. The
+            # canonical reader takes every value through items(), refuses what
+            # is not JSON and bounds the nesting, so a generator, a lock, an
+            # unreadable mapping or nesting past the limit ends as the same
+            # recorded refusal, and the gate and the hash see one value.
+            resolved_bundle = json.loads(canonical_json(dict(resolved)))
+        except Exception as exc:
+            raise ContractViolation("EVIDENCE_RESOLUTION_INVALID") from exc
         try:
             self._validate_evidence_bundle(resolved_bundle, intent["intent_id"])
         except ContractViolation as exc:
@@ -3076,9 +3544,14 @@ class UniversalConnectionLedger:
             {"message_type", "intent_id", "collected_at", "items"},
             "EVIDENCE_BUNDLE_FIELDS",
         )
-        if evidence["message_type"] != "evidence_bundle":
+        # Native strings only, as at the actor checks: a str subclass can
+        # override equality, and the bytes bound into the permit would then
+        # differ from the value the gate compared. Evidence submitted in
+        # process reaches this check as given; resolver output arrives
+        # already read as plain JSON by _resolve_evidence_bundle.
+        if type(evidence["message_type"]) is not str or evidence["message_type"] != "evidence_bundle":
             raise ContractViolation("EVIDENCE_MESSAGE_TYPE")
-        if evidence["intent_id"] != intent_id:
+        if type(evidence["intent_id"]) is not str or evidence["intent_id"] != intent_id:
             raise ContractViolation("EVIDENCE_INTENT_MISMATCH")
         parse_utc(evidence["collected_at"])
         if not isinstance(evidence["items"], list) or not evidence["items"]:
@@ -3101,10 +3574,10 @@ class UniversalConnectionLedger:
             if evidence_type in seen_types:
                 raise ContractViolation("DUPLICATE_EVIDENCE_TYPE", evidence_type)
             seen_types.add(evidence_type)
-            if not isinstance(item["ref"], str) or not item["ref"]:
+            if type(item["ref"]) is not str or not item["ref"]:
                 raise ContractViolation("EVIDENCE_REFERENCE", evidence_type)
             if (
-                not isinstance(item["status"], str)
+                type(item["status"]) is not str
                 or item["status"] not in allowed_statuses
             ):
                 raise ContractViolation("EVIDENCE_STATUS", evidence_type)
@@ -3134,7 +3607,12 @@ class UniversalConnectionLedger:
         commit, the structure reserved for it must come back immediately
         rather than sit until its TTL. Both revocation surfaces route through
         here so the two cannot drift apart.
+
+        Expiry is settled first. A permit whose window closed before the
+        revocation keeps PERMIT_EXPIRED, the error its replays answer, even
+        when no read had purged its reservation yet.
         """
+        self._purge_expired_reservations(self._now())
         for record in self.permits.values():
             # Only a permit that is still live is killed here. One whose
             # reservation was already released keeps the reason it was
@@ -3182,11 +3660,11 @@ class UniversalConnectionLedger:
         now: datetime,
         window_seconds: int,
     ) -> int:
-        start = now - timedelta(seconds=window_seconds)
+        window_microseconds = window_seconds * 1_000_000
         return sum(
             claims.get(resource_id, 0)
             for committed_at, claims in self.committed_resources
-            if committed_at >= start
+            if (now - committed_at) // timedelta(microseconds=1) <= window_microseconds
         )
 
     def _effect_gate(
@@ -3326,7 +3804,7 @@ class UniversalConnectionLedger:
         self._assert_active()
         self._validate_intent(intent)
         now = self._now()
-        if parse_utc(intent["received_at"]) > now + timedelta(seconds=5):
+        if parse_utc(intent["received_at"]) - now > timedelta(seconds=5):
             raise ContractViolation("INTENT_TIME_IN_FUTURE")
         # Validate the submitted evidence bundle's shape and time BEFORE the
         # authorization branches, mirroring the intent checks above. Deferring
@@ -3336,7 +3814,7 @@ class UniversalConnectionLedger:
         # an oracle for the authorization stage. The resolved bundle is
         # re-validated after resolution below.
         self._validate_evidence_bundle(evidence_bundle, intent["intent_id"])
-        if parse_utc(evidence_bundle["collected_at"]) > now + timedelta(seconds=5):
+        if parse_utc(evidence_bundle["collected_at"]) - now > timedelta(seconds=5):
             raise ContractViolation("EVIDENCE_TIME_IN_FUTURE")
         # Case-normalized on the DECLARED hash fields, exactly as the executor
         # replay identity is: the wire rule accepts a SHA-256 in either case,
@@ -3367,12 +3845,35 @@ class UniversalConnectionLedger:
                     raise IntegrityViolation("IDEMPOTENCY_PERMIT_MISSING")
                 if sha256_hex(record.body) != record.permit_hash:
                     raise IntegrityViolation("PERMIT_HASH_FAILURE")
-                self._verify_permit_signature(record)
+                def replay_refusal(reason: str) -> dict[str, Any]:
+                    # A replay must not turn architect-only invalidation into
+                    # a second operator channel. No new decision or event is
+                    # recorded, and the submitted request identity is retained.
+                    return self._operator_result(
+                        intent["intent_id"], request_hash, "REFUSAL", reason
+                    )
+
+                try:
+                    self._verify_permit_signature(record)
+                except IntegrityViolation:
+                    raise
+                except ContractViolation as exc:
+                    # A revoked key does not erase a permit's lifecycle: a consumed
+                    # or expired permit answers its documented error whatever
+                    # became of its key since, and a committed action is never
+                    # replayed as a REFUSAL that an operator could submit again.
+                    if record.consumed:
+                        raise ContractViolation("PERMIT_ALREADY_CONSUMED") from exc
+                    if record.invalidated_reason == "PERMIT_EXPIRED":
+                        raise ContractViolation("PERMIT_EXPIRED") from exc
+                    return replay_refusal(exc.code)
                 self._purge_expired_reservations(self._now())
                 if record.consumed:
                     raise ContractViolation("PERMIT_ALREADY_CONSUMED")
                 if record.invalidated_reason:
-                    raise ContractViolation(record.invalidated_reason)
+                    if record.invalidated_reason == "PERMIT_EXPIRED":
+                        raise ContractViolation("PERMIT_EXPIRED")
+                    return replay_refusal(record.invalidated_reason)
                 _, authority_failure = self._grant_validity(
                     record.body["authority_grant_id"],
                     self._now(),
@@ -3380,7 +3881,7 @@ class UniversalConnectionLedger:
                 if authority_failure is not None:
                     record.reservation_active = False
                     record.invalidated_reason = authority_failure
-                    raise ContractViolation(authority_failure)
+                    return replay_refusal(authority_failure)
             return copy.deepcopy(old_result)
 
         def finish(result: dict[str, Any]) -> dict[str, Any]:
@@ -3520,33 +4021,46 @@ class UniversalConnectionLedger:
                     False,
                 )
             )
-        resolved_evidence_bundle = self._resolve_evidence_bundle(
-            intent,
-            evidence_bundle,
-            now,
-        )
-        evidence_types, invalid_evidence_types = self._validate_evidence_bundle(
-            resolved_evidence_bundle,
-            intent["intent_id"],
-        )
-        if parse_utc(resolved_evidence_bundle["collected_at"]) > now + timedelta(seconds=5):
-            raise ContractViolation("EVIDENCE_TIME_IN_FUTURE")
-        # Authoritative controls: derived (or pass-through) maps are the gate
-        # inputs from here on, and they are bound into the PERMIT request hash
-        # so the issued permit commits to what was actually gated on. This hash
-        # stays internal to the permit body; the operator-facing result and the
-        # architect decision are keyed on submitted_request_hash instead, so an
-        # operator cannot tell an authorization-stage refusal (which carries the
-        # submitted hash) from a control-stage refusal or an ALLOW by comparing
-        # the returned request_hash to a locally computed submitted hash.
-        resolved_controls = self._resolve_controls(intent, now)
-        permit_request_hash = sha256_hex(
-            {
-                "intent": dict(intent),
-                "evidence_bundle": resolved_evidence_bundle,
-                "resolved_controls": resolved_controls,
-            }
-        )
+        try:
+            resolved_evidence_bundle = self._resolve_evidence_bundle(
+                intent,
+                evidence_bundle,
+                now,
+            )
+            evidence_types, invalid_evidence_types = self._validate_evidence_bundle(
+                resolved_evidence_bundle,
+                intent["intent_id"],
+            )
+            if parse_utc(resolved_evidence_bundle["collected_at"]) - now > timedelta(seconds=5):
+                raise ContractViolation("EVIDENCE_TIME_IN_FUTURE")
+            resolved_controls = self._resolve_controls(intent, now)
+            # Authoritative controls: derived (or pass-through) maps are the gate
+            # inputs from here on, and they are bound into the PERMIT request hash
+            # so the issued permit commits to what was actually gated on. This hash
+            # stays internal to the permit body; the operator-facing result and the
+            # architect decision are keyed on submitted_request_hash instead, so an
+            # operator cannot tell an authorization-stage refusal (which carries the
+            # submitted hash) from a control-stage refusal or an ALLOW by comparing
+            # the returned request_hash to a locally computed submitted hash.
+            # It is computed inside this try: resolver output that passed the
+            # checks but cannot be hashed is a resolution failure, not a 400
+            # that would name the stage after authorization.
+            permit_request_hash = sha256_hex(
+                {
+                    "intent": dict(intent),
+                    "evidence_bundle": resolved_evidence_bundle,
+                    "resolved_controls": resolved_controls,
+                }
+            )
+        except ContractViolation:
+            # Resolution happens after authorization; its failure must not reveal
+            # that stage through an error status or a reusable idempotency key.
+            return finish(
+                self._record_non_executable(
+                    intent, request_hash, "REFUSAL",
+                    "AUTHORITATIVE_RESOLUTION_FAILED", False,
+                )
+            )
 
         if invalid_evidence_types:
             return finish(
@@ -3640,22 +4154,18 @@ class UniversalConnectionLedger:
             )
 
         issued_at = utc_text(now)
-        permit_expires_at = min(
-            now + timedelta(seconds=self.permit_ttl_seconds),
-            parse_utc(self.grants[intent["authority_grant_id"]]["valid_until"]),
-            parse_utc(self.declaration["expires_at"]),
+        permit_expires_at = now + min(
+            timedelta(seconds=self.permit_ttl_seconds),
+            parse_utc(self.grants[intent["authority_grant_id"]]["valid_until"]) - now,
+            parse_utc(self.declaration["expires_at"]) - now,
         )
         expires_at = utc_text(permit_expires_at)
         # ttl_seconds is the permit's EFFECTIVE lifetime, not the configured
-        # nominal: when the grant or the declaration expires earlier than the
-        # configured TTL, expires_at is capped and the sealed number must
-        # agree with it, so a reader of one signed permit computing
-        # issued_at + ttl_seconds lands on expires_at. The difference is
-        # rounded UP to whole seconds and never below one: the schema
-        # requires an integer of at least 1, and rounding down could make a
-        # permit that has a fraction of a second left read as having none.
-        # Equality with expires_at therefore holds to the second, not to the
-        # microsecond.
+        # nominal: the grant or declaration can cap expires_at before the
+        # configured TTL. The remaining duration is rounded UP to whole
+        # seconds and never below one, as required by the schema. Thus the
+        # sealed number is a ceiling with less than one second of rounding
+        # slack; expires_at remains the exact validity cutoff.
         remaining = (permit_expires_at - now).total_seconds()
         effective_ttl_seconds = max(1, int(remaining) + (remaining > int(remaining)))
         permit_body = {
@@ -3701,15 +4211,20 @@ class UniversalConnectionLedger:
             "permit_hash": permit_hash,
             "recorded_at": issued_at,
         }
+        permit_event = {
+            "decision": decision,
+            "permit_body": copy.deepcopy(permit_body),
+            "permit_hash": permit_hash,
+            "permit_signature": copy.deepcopy(record.signature),
+        }
+        # The permitted claims are keyed by the resource ids the action declares.
         self.ledger.append(
             "PERMIT_ISSUED",
             ROLE_ARCHITECT,
             intent["intent_id"],
-            {
-                "decision": decision,
-                "permit_body": copy.deepcopy(permit_body),
-                "permit_hash": permit_hash,
-                "permit_signature": copy.deepcopy(record.signature),
+            permit_event,
+            declared_keys={
+                id(permit_event["permit_body"]["resource_claims"]): frozenset(self._resources),
             },
         )
         self.permits[permit_hash] = record
@@ -3843,11 +4358,13 @@ class UniversalConnectionLedger:
             execution_request["state_anchor_hash"].upper()
             != record.body["state_anchor_hash"]
         ):
+            record.reservation_active = False
+            record.invalidated_reason = "STATE_ANCHOR_CHANGED"
             raise ContractViolation("STATE_ANCHOR_CHANGED")
         committed_at = parse_utc(execution_request["committed_at"])
-        if committed_at > now + timedelta(seconds=5):
+        if committed_at - now > timedelta(seconds=5):
             raise ContractViolation("EXECUTION_TIME_IN_FUTURE")
-        if committed_at < parse_utc(record.body["issued_at"]) - timedelta(seconds=5):
+        if parse_utc(record.body["issued_at"]) - committed_at > timedelta(seconds=5):
             raise ContractViolation("EXECUTION_TIME_PRECEDES_PERMIT")
 
         outcome = execution_request["outcome"]
@@ -3902,6 +4419,7 @@ class UniversalConnectionLedger:
             event_hash = self.ledger.append(
                 "EXECUTION_RECORDED", ROLE_EXECUTOR, record.body["intent_id"],
                 {"execution_request_hash": execution_request_hash, "receipt_seed": receipt_seed},
+                declared_keys={id(resource_debits): frozenset(self._resources)},
             )
             receipt = {key: value for key, value in receipt_seed.items() if key != "downstream_receipt_hash"}
             receipt["ledger_event_hash"] = event_hash
@@ -3943,6 +4461,32 @@ class UniversalConnectionLedger:
             "reservation_active": record.reservation_active,
             "invalidated_reason": record.invalidated_reason,
         }
+
+    @_state_read_locked(ROLE_ARCHITECT)
+    def architect_permit_verification(
+        self,
+        permit_hash: str,
+        actor_scope: str | None = None,
+    ) -> dict[str, Any]:
+        """Report, changing nothing, whether this engine can verify the permit's seal.
+
+        These are the two checks `commit_execution` makes after its liveness checks: the
+        body against its hash, and the signature through the verifier registry. A caller
+        about to cause an external effect for a permit asks here first, so a permit this
+        engine cannot verify - a key it does not hold after a restart whose rotation
+        ceremony was not replayed, a signature that fails - is refused before the effect
+        and not discovered by the commit that follows it. Refuses with the codes the
+        commit would: PERMIT_UNKNOWN, PERMIT_HASH_FAILURE, PERMIT_SIGNATURE_ENVELOPE,
+        PERMIT_KEY_REVOKED, PERMIT_KEY_UNKNOWN and PERMIT_SIGNATURE_FAILURE.
+        """
+        self._assert_integrity()
+        record = self.permits.get(_require_sha256(permit_hash, "PERMIT_HASH"))
+        if record is None:
+            raise ContractViolation("PERMIT_UNKNOWN")
+        if sha256_hex(record.body) != record.permit_hash:
+            raise IntegrityViolation("PERMIT_HASH_FAILURE")
+        self._verify_permit_signature(record)
+        return {"permit_hash": record.permit_hash, "verified": True}
 
     @_state_read_locked(ROLE_ARCHITECT)
     def architect_decision(
@@ -4043,7 +4587,7 @@ class UniversalConnectionLedger:
             if dict(registry_core_anchor) != expected_core_anchor:
                 raise ContractViolation("REGISTRY_CORE_ANCHOR")
             if not isinstance(record["status"], str) or record["status"] not in {
-                "DRAFT", "ACTIVE", "SUSPENDED", "REVOKED", "EXPIRED",
+                "DRAFT", "ACTIVE",
             }:
                 raise ContractViolation("REGISTRY_STATUS")
             if record["activated_at"] is not None:
@@ -4103,6 +4647,107 @@ class UniversalConnectionLedger:
     ) -> dict[str, Any]:
         self._assert_integrity()
         return self.ledger.head()
+
+
+_OBSERVER_EXPORT_FIELDS = {"channel", "message_code", "event_time", "subject_ref"}
+
+
+def _projected_observer_rows(
+    engine: UniversalConnectionLedger, events: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Pair each old observer record with its export-only classification."""
+    rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for event in events:
+        kind = event["event_type"]
+        if kind == "PERMIT_ISSUED":
+            channel, code = "OUTPUT", "EXECUTION_AUTHORIZED"
+        elif kind == "INTENT_NON_EXECUTABLE":
+            channel = "REFUSAL"
+            code = engine._public_message_code(event["payload"]["disposition"])
+        elif kind == "EXECUTION_RECORDED":
+            if event["payload"]["receipt_seed"]["outcome"] != "COMMITTED":
+                continue
+            channel, code = "OUTPUT", "EXECUTION_AUTHORIZED"
+        else:
+            continue
+        if code not in PUBLIC_MESSAGE_CODES:
+            raise IntegrityViolation("PUBLIC_MESSAGE_CODE_INVALID")
+        original = {
+            "channel": channel,
+            "message_code": code,
+            "event_time": event["event_time"],
+            "subject_ref": event["subject_ref"],
+        }
+        public = dict(original)
+        if kind == "EXECUTION_RECORDED":
+            public["message_code"] = "EXECUTION_COMMITTED"
+        rows.append((original, public))
+    return rows
+
+
+def build_observer_export(
+    engine: UniversalConnectionLedger,
+    signer: Ed25519DetachedSigner,
+    *,
+    actor_scope: str | None = None,
+) -> dict[str, Any]:
+    """Build a separately signed public projection through the architect read gate.
+
+    Its hashes attest only the projected records, not the private ledger chain.
+    The signing key's operator identity needs independent authentication.
+    """
+    from nc25ol_reader import MAX_EVENTS, MAX_EXPORT_BYTES
+
+    _require_scope(actor_scope, ROLE_ARCHITECT)
+    if not isinstance(engine, UniversalConnectionLedger):
+        raise ContractViolation("OBSERVER_EXPORT_ENGINE")
+    if not isinstance(signer, Ed25519DetachedSigner):
+        raise ContractViolation("OBSERVER_EXPORT_SIGNER")
+
+    # Preserve one in-memory snapshot while the existing guarded projection
+    # verifies the original private chain and selects its four public fields.
+    with engine._state_lock:
+        fields = set(engine.profile["roles"]["observer_projection_fields"])
+        if fields != _OBSERVER_EXPORT_FIELDS:
+            raise ContractViolation("OBSERVER_EXPORT_FIELDS")
+        projection = engine.observer_projection(actor_scope=ROLE_ARCHITECT)
+        rows = _projected_observer_rows(engine, engine.ledger.events_copy())
+    if projection != [original for original, _public in rows]:
+        raise IntegrityViolation("OBSERVER_EXPORT_PROJECTION_MISMATCH")
+
+    if len(rows) > MAX_EVENTS:
+        raise ContractViolation("OBSERVER_EXPORT_EVENT_LIMIT")
+
+    export_format = "nc25ol-observer-export/v1"
+    events: list[dict[str, Any]] = []
+    previous = "0" * 64
+    for index, (_original, public_fields) in enumerate(rows):
+        if set(public_fields) != _OBSERVER_EXPORT_FIELDS:
+            raise IntegrityViolation("OBSERVER_EXPORT_FIELDS")
+        body = {"index": index, "previous_hash": previous, "record": public_fields}
+        event_hash = hashlib.sha256(canonical_json(body)).hexdigest().upper()
+        events.append({**body, "event_hash": event_hash})
+        previous = event_hash
+
+    raw_key = signer.public_key_bytes()
+    public_key = {
+        "algorithm": "Ed25519",
+        "key_id": signer.key_id,
+        "raw_base64": base64.b64encode(raw_key).decode("ascii"),
+        "fingerprint_sha256": hashlib.sha256(raw_key).hexdigest().upper(),
+    }
+    head = {"event_count": len(events), "head_hash": previous}
+    statement = {"format": export_format, "head": head, "public_key": public_key}
+    export = {
+        "format": export_format,
+        "events": events,
+        "head": head,
+        "public_key": public_key,
+        "signature": dict(signer.sign(canonical_json(statement))),
+    }
+    if len(canonical_json(export)) > MAX_EXPORT_BYTES:
+        raise ContractViolation("OBSERVER_EXPORT_BYTE_LIMIT")
+    return export
 
 
 def bind_fixture(

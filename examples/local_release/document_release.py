@@ -232,7 +232,11 @@ class Gateway:
         if state in {'PREPARED', 'CALLING', 'AMBIGUOUS'}:
             try:
                 result = self.engine.evaluate_intent(row['intent'], row['evidence'], actor_scope='nc25.operator')
-                if result.get('permit_hash') != row['permit_hash'] or result.get('disposition') != 'ALLOW':
+                if result.get('disposition') != 'ALLOW':
+                    # A replay of a permit a policy has since invalidated is the coarse operator refusal;
+                    # its detailed reason stays in architect permit state.
+                    raise ReleaseError(result['message_code'])
+                if result.get('permit_hash') != row['permit_hash']:
                     raise ReleaseError('PERMIT_BINDING')
             except Exception as exc:
                 # No success inference. Integrity failures propagate with their original identity.

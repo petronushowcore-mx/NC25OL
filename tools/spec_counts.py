@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -102,6 +103,85 @@ def acceptance_gate_rows(report: str) -> list[tuple[str, str]] | None:
     return rows
 
 
+def _own_code(body: list[ast.stmt]) -> Iterator[tuple[ast.AST, ast.stmt]]:
+    """(node, statement) for every node in one scope's own code.
+
+    A scope's own code is its statements, the blocks nested in them — if, for,
+    while, try, with and match open no scope — and the parts of a nested def,
+    class or lambda that run where the definition stands: decorators, defaults,
+    annotations, bases and keywords. A nested body is a scope of its own and is
+    not entered. Neither is a comprehension's target, which binds inside the
+    comprehension; the rest of a comprehension is, because an assignment
+    expression there binds in the enclosing scope. Nor is a name annotated
+    without a value, which binds nothing; an attribute or subscript annotated
+    that way is still evaluated, so it is walked.
+    """
+    pending = [(node, node) for node in body]
+    while pending:
+        node, statement = pending.pop()
+        if isinstance(node, ast.stmt):
+            statement = node
+        yield node, statement
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            children = [child for child in ast.iter_child_nodes(node) if child not in node.body]
+        elif isinstance(node, ast.Lambda):
+            children = [node.args]
+        elif isinstance(node, ast.comprehension):
+            children = [node.iter, *node.ifs]
+        elif isinstance(node, ast.AnnAssign) and node.value is None:
+            children = [node.annotation]
+            if not isinstance(node.target, ast.Name):
+                children.append(node.target)
+        else:
+            children = ast.iter_child_nodes(node)
+        pending.extend((child, statement) for child in children)
+
+
+def _binds(node: ast.AST, name: str) -> bool:
+    """Whether the node binds `name` in the scope whose own code holds it."""
+    if isinstance(node, ast.Name):
+        # Every assignment target — plain, augmented, annotated with a value or
+        # unpacked — a for or with target, an assignment expression, a `type`
+        # alias, and `del`.
+        return node.id == name and not isinstance(node.ctx, ast.Load)
+    if isinstance(node, ast.alias):
+        # `import a.b` binds `a`; a star import may bind any name.
+        return node.name == "*" or (node.asname or node.name.partition(".")[0]) == name
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return node.name == name
+    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return node.name == name
+    if isinstance(node, ast.MatchMapping):
+        return node.rest == name
+    return False
+
+
+def _module_bindings(tree: ast.AST, name: str) -> list[tuple[ast.AST, ast.stmt, ast.AST | None]]:
+    """Every binding of `name` in the module namespace, in source order.
+
+    Each comes with the def or class it sits in, or None for module code. A
+    binding inside a def or class counts only where that def or class declares
+    the name global: it rebinds the module's name when that code runs.
+    """
+    sites = [(node, statement, None) for node, statement in _own_code(tree.body)
+             if _binds(node, name)]
+    for scope in ast.walk(tree):
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            own = list(_own_code(scope.body))
+            if any(isinstance(node, ast.Global) and name in node.names for node, _ in own):
+                sites += [(node, statement, scope) for node, statement in own
+                          if _binds(node, name)]
+    return sorted(sites, key=lambda site: site[0].lineno)
+
+
+def _named(sites: list[tuple[ast.AST, ast.stmt, ast.AST | None]]) -> str:
+    return ", ".join(
+        f"{type(statement).__name__} line {node.lineno}"
+        + ("" if scope is None else f" in {scope.name}, which declares it global")
+        for node, statement, scope in sites
+    )
+
+
 def sole_assignment(tree: ast.AST, name: str, *, where: str = "") -> ast.expr | None:
     """The value assigned to `name` at module level, and there must be one.
 
@@ -113,6 +193,22 @@ def sole_assignment(tree: ast.AST, name: str, *, where: str = "") -> ast.expr | 
     a module with two top-level definitions of the same name has a defect
     whatever the reader does.
 
+    The poisoned definition need not be a second top-level assignment, so
+    every binding of the name in the module namespace is counted: an augmented
+    assignment, an assignment inside an if, for, while, try, with or match
+    block, an unpacking target, a for, with, except or case target, an
+    assignment expression, an import, a def or class of the name, `del`, a
+    star import, which may bind any name, and a binding inside a def or class
+    that declares the name global. The name annotated without a value binds
+    nothing and is not counted. The reader does not follow control flow, so it
+    asks for one unconditional statement: two bindings in exclusive branches
+    are refused like any two, and a single binding is read only when it
+    assigns the name itself, plainly or with an annotation, at the top level
+    of the module; any other single binding is refused rather than read as
+    absent. Named limit: a name written dynamically — through globals(), exec
+    or setattr on the module — and an in-place change to the bound value are
+    not bindings, and this reader does not see them.
+
     Takes a parsed tree rather than a path because the other caller already
     holds one. It is published rather than private because the failure-surface
     tool needs the same reader, and a reader whose whole purpose is to refuse a
@@ -122,18 +218,26 @@ def sole_assignment(tree: ast.AST, name: str, *, where: str = "") -> ast.expr | 
     an error, because for a shipped declaration it is and for an optional one
     it is not.
     """
-    found = []
-    for node in tree.body:
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            if any(isinstance(target, ast.Name) and target.id == name for target in targets):
-                found.append(node.value)
-    if len(found) > 1:
+    sites = _module_bindings(tree, name)
+    place = f"{name}{' in ' + where if where else ''}"
+    if len(sites) > 1:
         raise RuntimeError(
-            f"Symbol assigned {len(found)} times at module level:"
-            f" {name}{' in ' + where if where else ''}"
+            f"Symbol bound {len(sites)} times in the module namespace: {place} ({_named(sites)})"
         )
-    return found[0] if found else None
+    if not sites:
+        return None
+    node, statement, _ = sites[0]
+    top_level = any(statement is item for item in tree.body)
+    if top_level and isinstance(statement, ast.Assign) and any(
+        target is node for target in statement.targets
+    ):
+        return statement.value
+    if top_level and isinstance(statement, ast.AnnAssign) and statement.target is node:
+        return statement.value
+    raise RuntimeError(
+        "Symbol bound once, but not by an assignment of the name at the top level:"
+        f" {place} ({_named(sites)})"
+    )
 
 
 def _sole_assignment(path: Path, symbol: str) -> ast.expr:
@@ -181,20 +285,22 @@ def literal_mapping_values(path: Path, symbol: str) -> list[str]:
 
 def test_method_count(path: Path, class_name: str) -> int:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    # Every definition of the name, not the first: a class defined twice at
-    # module level runs as the LAST definition, and a reader that stops at the
-    # first would count the methods of a class the suite never instantiates.
-    # Same shape as `_sole_assignment`, and refused for the same reason.
-    classes = [node for node in tree.body
-               if isinstance(node, ast.ClassDef) and node.name == class_name]
-    if len(classes) != 1:
+    # Every binding of the name, not the first class: a class defined twice,
+    # or rebound by any binding `sole_assignment` counts, runs as the LAST
+    # binding, and a reader that stops at the first class would count the
+    # methods of a class the suite never instantiates. So the name must be
+    # bound once, by a class statement at the top level of the module.
+    sites = _module_bindings(tree, class_name)
+    if len(sites) != 1 or not isinstance(sites[0][0], ast.ClassDef) or not any(
+        sites[0][0] is item for item in tree.body
+    ):
         raise RuntimeError(
-            f"Test class defined {len(classes)} times at module level:"
-            f" {class_name} in {path.name}"
+            f"Test class not bound once by a top-level class statement:"
+            f" {class_name} in {path.name} ({_named(sites)})"
         )
     names = [
         item.name
-        for item in classes[0].body
+        for item in sites[0][0].body
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
         and item.name.startswith("test_")
     ]

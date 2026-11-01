@@ -4,14 +4,19 @@ The engine validates structure, identifier coverage, hashes, ordering, and the
 declared status. It is not a JSON Schema validator and it does not read the wire
 contract. This script closes both gaps for the package's own artefacts:
 
-  1. every shipped profile, declaration, and runtime fixture, and the live
-     results the engine produces (operator result, execution receipt, registry
-     record), validate against the JSON Schemas in `core/schemas/`;
+  1. the profile and declaration of every shipped profile directory (banking,
+     document-release, OTCS), the authority grant, intent and evidence fixtures
+     of each, and the live results the engine produces (operator result,
+     execution receipt, registry record), validate against the JSON Schemas in
+     `core/schemas/`; a profile directory without its own checks fails the
+     population check instead of passing unread;
   2. `protocol/universal-connection.openapi.yaml` parses, every `$ref` in it
      resolves (including the external references into those same schemas), its
      route set exactly matches the declared route table, every route requires
-     mutual TLS plus exactly one expected OAuth2 scope, and every route maps to
-     an existing engine operation;
+     mutual TLS plus exactly one expected OAuth2 scope, every route maps to
+     an existing engine operation, and the parameters it declares are the
+     set written out from the reference adapter, each a string schema with
+     the engine's own pattern;
   3. the architect permit, the architect decision in both its executable and
      non-executable forms, and the ledger head produced by a live run validate
      against the inline response schemas the wire contract declares for them.
@@ -21,8 +26,8 @@ non-mutating projection and not an authority principal, so the route-coverage
 check treats it as a documented exception rather than a missing path.
 
 Each part needs one library that the reference engine itself does not use. A
-missing library is reported as NOT_RUN and never as a pass; the exit status is
-non-zero only for a real failure.
+missing library is reported as NOT_RUN and never as a pass: a run with a part
+not run exits non-zero, and under pytest it is a skip only when no check failed.
 """
 from __future__ import annotations
 
@@ -37,10 +42,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sdk" / "python"))
 
 from nc25_universal_ledger import (  # noqa: E402
+    ContractViolation,
     FixedClock,
+    IDENTIFIER_RE,
     IntegrityViolation,
     ROLE_ARCHITECT,
+    SHA256_RE,
     UniversalConnectionLedger,
+    _require_identifier,
+    _require_sha256,
     bind_fixture,
     load_json,
     sha256_hex,
@@ -50,10 +60,15 @@ from nc25_universal_adapter import UniversalConnectionHttpAdapter  # noqa: E402
 EXPECTED_CONFORMANCE_IDS = frozenset(
     {
         "schema_format_keyword_active", "schema_max_length_keyword_active",
-        "schema_rejects_unknown_provenance",
+        "schema_rejects_removed_provenance",
         "schema_banking_profile", "schema_second_profile", "schema_declaration",
         "schema_second_declaration", "schema_authority_grant", "schema_intent",
-        "schema_evidence_bundle", "schema_live_operator_allow",
+        "schema_evidence_bundle", "schema_profile_population",
+        "schema_otcs_profile", "schema_otcs_declaration",
+        "schema_second_authority_grant", "schema_second_intent",
+        "schema_second_evidence_bundle", "schema_otcs_authority_grant",
+        "schema_otcs_intent", "schema_otcs_evidence_bundle",
+        "schema_live_operator_allow",
         "schema_live_operator_refusal", "schema_live_operator_manual_review",
         "schema_rejects_refusal_with_permit",
         "http_body_cap_413", "http_revoke_success_204",
@@ -67,6 +82,7 @@ EXPECTED_CONFORMANCE_IDS = frozenset(
         "openapi_declared_version", "openapi_has_references",
         "openapi_references_resolve", "openapi_binds_shipped_schemas",
         "openapi_route_set", "openapi_route_operations", "openapi_route_security",
+        "openapi_parameter_patterns_match_engine",
         "openapi_declares_emitted_statuses",
         "wire_live_architect_permit", "wire_live_decision_allow",
         "wire_live_decision_refused", "wire_live_ledger_head",
@@ -319,24 +335,24 @@ def schema_conformance() -> None:
         "overlong domain name was accepted",
     )
 
-    misdeclared_provenance = copy.deepcopy(
+    removed_provenance = copy.deepcopy(
         load_json(ROOT / "examples" / "synthetic-connection-declaration.json")
     )
-    misdeclared_provenance["structural_budget"]["provenance"] = "vendor_asserted"
-    misdeclared_provenance_errors = list(
+    removed_provenance["structural_budget"]["provenance"] = "vendor_asserted"
+    removed_provenance_errors = list(
         Draft202012Validator(
             declaration_schema,
             format_checker=format_checker,
-        ).iter_errors(misdeclared_provenance)
+        ).iter_errors(removed_provenance)
     )
     check(
         any(
-            error.validator == "enum"
-            and list(error.path) == ["structural_budget", "provenance"]
-            for error in misdeclared_provenance_errors
+            error.validator == "additionalProperties"
+            and list(error.path) == ["structural_budget"]
+            for error in removed_provenance_errors
         ),
-        "schema_rejects_unknown_provenance",
-        "capacity provenance outside the published coding was accepted",
+        "schema_rejects_removed_provenance",
+        "removed capacity-provenance metadata was accepted",
     )
 
     validate(
@@ -366,6 +382,19 @@ def schema_conformance() -> None:
         against("evidence_bundle"),
         "schema_evidence_bundle",
     )
+    shipped = sorted(path.name for path in (ROOT / "profiles").iterdir() if path.is_dir())
+    check(
+        shipped == ["banking", "document-release", "otcs"],
+        "schema_profile_population",
+        f"profile directories without their own checks: {shipped}",
+    )
+    otcs = load_json(ROOT / "profiles" / "otcs" / "reference-connection.json")
+    validate(otcs["profile"], profile_schema, "schema_otcs_profile")
+    validate(otcs["declaration"], declaration_schema, "schema_otcs_declaration")
+    for prefix, reference in (("second", bundle), ("otcs", otcs)):
+        validate(reference["grant"], against("authority_grant"), f"schema_{prefix}_authority_grant")
+        validate(reference["intent"], against("intent"), f"schema_{prefix}_intent")
+        validate(reference["evidence"], against("evidence_bundle"), f"schema_{prefix}_evidence_bundle")
     live = live_surface()
     validate(
         live["operator_allow"],
@@ -542,19 +571,181 @@ def openapi_conformance() -> None:
             # contract free to advertise one role while the engine enforced
             # another - the two sides agreed by hand, not by construction.
             declared = getattr(engine_method, "__nc25_required_scope__", None)
-            if declared is not None and declared != scope:
+            if declared is None:
+                # Skipped before: a route whose scope nothing on the engine side confirms.
+                bad_operation.append(f"{path}: engine {engine_attr} declares no required scope")
+            elif declared != scope:
                 bad_operation.append(
                     f"{path}: contract scope {scope!r} != engine role {declared!r}"
                 )
     check(not bad_operation, "openapi_route_operations", "; ".join(bad_operation))
     check(not bad_security, "openapi_route_security", "; ".join(bad_security))
 
-    # Every status the reference adapter can emit on a route is DECLARED for
-    # that route. The table below is the adapter's behaviour written down,
-    # route by route, every status included: the three parametric GET routes
-    # answer 400 for a malformed selector, and a table of 403 and 413 alone
-    # would leave that undeclared. 503 is on every route: the last-resort guard
-    # can answer on any of them. 200 on the grants route is the replay answer.
+    # The parameters the contract declares, keyed by route, method, location and
+    # name, are exactly the set written out below from the reference adapter:
+    # each {name} of a route path, and the Idempotency-Key header of the
+    # operator route. Header names compare in lower case, as HTTP compares them.
+    # The adapter also reads the role header X-Workload-Scope on every route;
+    # the contract states it in its security text rather than as a parameter,
+    # so it is outside the set and a parameter declaring it fails here. An
+    # operation's entry replaces a path-level entry of the same location and
+    # name, as OpenAPI says; the same pair twice in one list fails. A declared
+    # parameter outside the set, one of the set the contract leaves out, a
+    # validator row nothing in the set uses, a parameters value that is not a
+    # list and an entry that does not resolve to a parameter all fail.
+    #
+    # Each declared schema, followed through every reference, must be a string
+    # with the engine's own pattern, read from the compiled expression rather
+    # than copied, so that a value the engine refuses as malformed is malformed
+    # in the contract's words too. A keyword beside a $ref other than an
+    # annotation, a type other than string, any keyword but type, pattern,
+    # minLength, maxLength and annotations, and a minLength or maxLength that
+    # narrows the lengths the pattern allows all fail. Equal source text means
+    # equal accepted values only for an expression without flags, anchored at
+    # both ends, written in the part of the syntax that ECMA-262, the dialect
+    # of an OpenAPI pattern, reads the same way (character classes without
+    # escapes, plain characters and bounded repeats) and applied to the whole
+    # value: a Python `$` also matches before a final newline, so each helper
+    # is probed with one. An engine expression outside that part fails here,
+    # for a person to judge. Which helper checks which parameter is written in
+    # the table by hand, not read from the engine.
+    validators = {
+        "permit_hash": SHA256_RE,  # _require_sha256 in commit_execution and architect_permit
+        "request_hash": SHA256_RE,  # _require_sha256 in architect_decision
+        "connector_id": IDENTIFIER_RE,  # _require_identifier in registry_record
+        # The header itself meets no validator. Absent or empty it is a 400;
+        # any value other than intent.idempotency_key, which _validate_intent
+        # checks with _require_identifier, is a 409 mismatch.
+        "idempotency-key": IDENTIFIER_RE,
+    }
+    annotations = {"description", "summary", "title", "$comment", "example", "examples", "deprecated"}
+    portable = re.compile(r"\^(?:\[[^\]\\^]+\]|[A-Za-z0-9_-]|\{[0-9]+(?:,[0-9]+)?\})+\$")
+    read_parameters = {
+        (path, method, "path", name)
+        for path, (method, *_route) in ROUTES.items()
+        for name in re.findall(r"\{([^}]+)\}", path)
+    } | {("/v1/operator/intents:evaluate", "post", "header", "idempotency-key")}
+
+    def dereference(node: object) -> tuple[object, str | None]:
+        # A fragment is read in the document of the current hop, a file from
+        # that document's folder; a cycle or an unreadable target is named.
+        base, folder, source, seen = document, protocol, "", set()
+        while isinstance(node, dict) and isinstance(node.get("$ref"), str):
+            beside = sorted(set(node) - {"$ref"} - annotations)
+            if beside:
+                return None, f"keywords beside $ref: {beside}"
+            reference = node["$ref"]
+            file_part, _, fragment = reference.partition("#")
+            if file_part:
+                target = (folder / file_part).resolve()
+                if not target.is_file() or ROOT.resolve() not in target.parents:
+                    return None, f"reference {reference!r} names no file inside the package"
+                try:
+                    base = json.loads(target.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    return None, f"reference target {file_part!r} is not JSON this check reads"
+                folder, source = target.parent, str(target)
+            if (source, fragment) in seen:
+                return None, f"reference cycle at {reference!r}"
+            seen.add((source, fragment))
+            node = resolve(base, fragment) if fragment else base
+        return node, None
+
+    def lengths(pattern: str) -> tuple[int, int]:
+        low = high = 0
+        for _atom, repeat in re.findall(r"(\[[^\]\\^]+\]|[A-Za-z0-9_-])(\{[0-9]+(?:,[0-9]+)?\})?", pattern[1:-1]):
+            least, _, most = repeat[1:-1].partition(",")
+            low += int(least or 1)
+            high += int(most or least or 1)
+        return low, high
+
+    def schema_problem(schema: object, expected: re.Pattern[str]) -> str | None:
+        if not isinstance(schema, dict):
+            return f"schema {schema!r} is not a mapping"
+        unread = sorted(set(schema) - {"type", "pattern", "minLength", "maxLength"} - annotations)
+        if unread:
+            return f"schema keywords this check does not read: {unread}"
+        if schema.get("type") != "string":
+            return f"type {schema.get('type')!r} is not string"
+        if schema.get("pattern") != expected.pattern:
+            return f"pattern {schema.get('pattern')!r} is not the engine's {expected.pattern!r}"
+        if not portable.fullmatch(expected.pattern):
+            return None  # named below with the engine's expression
+        low, high = lengths(expected.pattern)
+        least, most = schema.get("minLength", 0), schema.get("maxLength", high)
+        if type(least) is not int or type(most) is not int or least > low or most < high:
+            return f"minLength {least!r} or maxLength {most!r} narrows the pattern's lengths {low}..{high}"
+        return None
+
+    mismatched: list[str] = []
+    declared: dict[tuple[str, str, str, str], dict] = {}
+    for path, path_item in paths.items():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method not in {"get", "put", "post", "delete", "options", "head", "patch", "trace"} or not isinstance(
+                operation, dict
+            ):
+                continue
+            for level, listed in (("path", path_item.get("parameters", [])),
+                                  ("operation", operation.get("parameters", []))):
+                if not isinstance(listed, list):
+                    mismatched.append(f"{method.upper()} {path}: {level} parameters {listed!r} is not a list")
+                    continue
+                here: set[tuple[str, str, str, str]] = set()
+                for entry in listed:
+                    parameter, problem = dereference(entry)
+                    if problem or not (isinstance(parameter, dict) and isinstance(parameter.get("name"), str)
+                                       and isinstance(parameter.get("in"), str)):
+                        mismatched.append(f"{method.upper()} {path}: a parameter entry that is not a parameter"
+                                          + (f" ({problem})" if problem else ""))
+                        continue
+                    place = parameter["in"]
+                    name = parameter["name"].lower() if place == "header" else parameter["name"]
+                    key = (path, method, place, name)
+                    if key in here:
+                        mismatched.append(f"{method.upper()} {path} {place} {name}: declared twice at {level} level")
+                    here.add(key)
+                    declared[key] = parameter
+    for path, method, place, name in sorted(set(declared) ^ read_parameters):
+        side = "declared but not read" if (path, method, place, name) in declared else "read but not declared"
+        mismatched.append(f"{method.upper()} {path} {place} {name}: {side}")
+    for key in sorted(set(declared) & read_parameters):
+        path, method, _place, name = key
+        expected, parameter = validators.get(name), declared[key]
+        if expected is None:
+            problem = "no engine validator named"
+        elif "schema" not in parameter:
+            problem = "no schema" + (", and content is not read here" if "content" in parameter else "")
+        else:
+            schema, problem = dereference(parameter["schema"])
+            problem = problem or schema_problem(schema, expected)
+        if problem:
+            mismatched.append(f"{method.upper()} {path} {name}: {problem}")
+    for name in sorted(set(validators) - {name for _path, _method, _place, name in read_parameters}):
+        mismatched.append(f"{name}: a validator row for a parameter nothing reads")
+    for name, expected in sorted(validators.items()):
+        if expected.flags != re.UNICODE or not portable.fullmatch(expected.pattern):
+            mismatched.append(
+                f"{name}: engine pattern {expected.pattern!r} (flags {expected.flags})"
+                " is outside the portable part"
+            )
+    # The probe passes each helper a code of the engine's own vocabulary: a code invented here is a construction
+    # outside the engine's closed world, and the failure-surface tracer refuses the run that observes it.
+    for helper, sample, code in ((_require_identifier, "bank-01\n", "INTENT_IDENTIFIER"),
+                                 (_require_sha256, "A" * 64 + "\n", "REQUEST_HASH")):
+        try:
+            helper(sample, code)
+        except ContractViolation:
+            continue
+        mismatched.append(f"{helper.__name__}: accepts {sample!r}, which the contract's pattern refuses")
+    check(not mismatched, "openapi_parameter_patterns_match_engine", "; ".join(mismatched))
+
+    # Curated route-status contract, checked against OpenAPI. This table
+    # is not runtime reachability evidence: live wire cases and the stored-state
+    # regression exercise actual emissions separately. The parametric GETs
+    # allow malformed selectors, all routes allow integrity halts, and grants
+    # allow a successful idempotent replay.
     emitted_by_route = {
         "/v1/declarations:activate": {"201", "400", "403", "409", "413", "503"},
         "/v1/authority-grants": {"200", "201", "400", "403", "409", "413", "503"},
@@ -738,10 +929,21 @@ def _exec_request(intent, permit_hash):
 def http_adapter_conformance() -> None:
     """Drive the reference WSGI adapter in-process and prove the wire MUSTs.
 
-    Standard-library only (no jsonschema or pyyaml), so this section runs even
-    when the optional conformance libraries are absent.
+    The adapter requires jsonschema and its date-time checker for POST bodies;
+    the conformance suite additionally uses PyYAML to inspect the published
+    OpenAPI contract.
     """
 
+    # Without the checker the adapter fails closed (503) on every POST, so the
+    # wire MUSTs cannot be exercised: the part is not run, as for the other
+    # optional libraries, instead of reporting 503 failures and stopping.
+    try:
+        from jsonschema import FormatChecker
+
+        FormatChecker(formats=["date-time"])
+    except (ImportError, KeyError):
+        skipped.append("HTTP_ADAPTER_CONFORMANCE=NOT_RUN (jsonschema date-time checker unavailable)")
+        return
     expected_scopes = {
         operation_id: scope for _method, operation_id, scope, _engine in ROUTES.values()
     }
@@ -1088,7 +1290,9 @@ def http_adapter_conformance() -> None:
     _activate_and_grant(halt_app, halt_grant)
 
     def _raise_integrity() -> None:
-        raise IntegrityViolation("LEDGER_TAMPERED")
+        # A code production can emit. A name invented here once reached the published
+        # Error.code enum through the recorded run, and no production path raised it.
+        raise IntegrityViolation("LEDGER_CHAIN_FAILURE")
 
     halt_app._engine._assert_integrity = _raise_integrity
     halt_status, _ = _http_call(
@@ -1124,9 +1328,9 @@ def http_adapter_conformance() -> None:
         f"status={fault_status} body={fault_body}",
     )
 
-    # A body with no idempotency_key is an incomplete intent (400 from the
-    # engine's form check), not a header mismatch; a present, differing key
-    # stays the 409 the http_idempotency_mismatch row certifies.
+    # A body with no idempotency_key is refused by the ingress schema with
+    # its field path. A present, differing key stays the 409 certified by
+    # http_idempotency_mismatch after schema validation.
     field_app, field_grant, field_intent, field_evidence = _adapter_fixture()
     _activate_and_grant(field_app, field_grant)
     keyless = dict(field_intent)
@@ -1140,7 +1344,9 @@ def http_adapter_conformance() -> None:
         idem=field_intent["idempotency_key"],
     )
     check(
-        field_status == 400 and field_body.get("code") == "INTENT_FIELDS",
+        field_status == 400 and field_body == {
+            "code": "BODY_SCHEMA", "message": "$.intent.idempotency_key: required"
+        },
         "http_missing_idempotency_field_400",
         f"status={field_status} body={field_body}",
     )
@@ -1204,7 +1410,7 @@ def http_adapter_conformance() -> None:
     )
     check(
         shape_status == 400
-        and shape_body.get("code") == "INTENT_BINDING"
+        and shape_body == {"code": "BODY_SCHEMA", "message": "$.intent.binding: type"}
         and shape_app._engine.ledger.head()["event_count"] == shape_events
         and not shape_app._engine.idempotency,
         "http_intent_binding_400",
@@ -1230,9 +1436,9 @@ def http_adapter_conformance() -> None:
     )
     check(
         wrap_activate_status == 400
-        and wrap_activate_body.get("code") == "ACTIVATE_BODY"
+        and wrap_activate_body == {"code": "BODY_SCHEMA", "message": "$.extra: additionalProperties"}
         and wrap_eval_status == 400
-        and wrap_eval_body.get("code") == "OPERATOR_BODY",
+        and wrap_eval_body == {"code": "BODY_SCHEMA", "message": "$.extra: additionalProperties"},
         "http_wrapper_unknown_key_400",
         f"activate={wrap_activate_status}/{wrap_activate_body} "
         f"evaluate={wrap_eval_status}/{wrap_eval_body}",
@@ -1289,12 +1495,14 @@ def main() -> None:
 
 def test_contract_conformance_suite() -> None:
     # A partial run now exits non-zero from main(), which is the right answer
-    # for the acceptance path. Under pytest the same situation is a skip, not a
-    # failure, so the exit is translated here rather than weakened there.
+    # for the acceptance path. Under pytest a run whose only gap is a missing
+    # library is a skip, so that one exit is translated here rather than
+    # weakened there. A real failure stays a failure even when a library is
+    # also missing: translating it would report a failed check as skipped.
     try:
         main()
     except SystemExit:
-        if not skipped:
+        if failures or not skipped:
             raise
     if skipped:
         import pytest

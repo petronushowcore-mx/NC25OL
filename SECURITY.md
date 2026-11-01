@@ -40,7 +40,10 @@ Every shipped file except the manifest itself is bound by SHA-256 in
 own hash. What holds the manifest is the verifier rather than a second hash:
 its coverage check compares the declared set against the files actually
 present, so a file added, removed, or renamed without updating the manifest is
-reported. Outside the package, the manifest is held by the revision it was
+reported. Three root-level directories are outside both the manifest and this
+check: the repository directory `.git/` and the virtual-environment directories
+`.venv/` and `venv/` that README names, so a file added inside one of them is
+not reported. Outside the package, the manifest is held by the revision it was
 committed in. The
 NC2.5 core is bound by SHA-256, byte length, and line count in
 `SOURCE-MANIFEST.json`. Run `python -B tests/run_acceptance.py` to verify the

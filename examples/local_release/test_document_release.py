@@ -159,7 +159,9 @@ class Cases(unittest.TestCase):
         self.start(fault=lambda point:self.revoke() if point=='after_prepare' else None)
         row=self.submit()
         self.assertEqual(row['state'],'NOT_EXECUTED','REVOKED_BEFORE_POST')
-        self.assertEqual(row['reason'],'AUTHORITY_REVOKED','REVOCATION_REASON')
+        self.assertEqual(row['reason'],'EXECUTION_DENIED','REVOCATION_REASON')
+        permit=self.engine.architect_permit(row['permit_hash'],actor_scope='nc25.architect')
+        self.assertEqual(permit['invalidated_reason'],'AUTHORITY_REVOKED','ARCHITECT_REVOCATION_REASON')
         self.assertEqual(self.counts(),(0,0),'NO_REVOKED_EFFECT')
 
     def test_lost_response_recovers_one_effect(self):

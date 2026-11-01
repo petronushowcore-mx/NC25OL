@@ -532,8 +532,12 @@ def _plain_copy(value: Any, code: str, depth: int = 0) -> Any:
     RecursionError, and a str or dict subclass past the limit runs its own `upper` or
     `items` and leaves as whatever that raises. Counted by CONTAINERS - the top-level value
     at depth zero, and a container entered at depth MAX_NESTING_DEPTH or deeper refused -
-    which is how the wire's bracket scan and the stored-row walk count, so no document this
-    door admits is refused for its depth on read-back. The engine's own walk counts values instead
+    which is how the wire's bracket scan and the stored-row walk count. The door counts each
+    argument from its own top, but a stored row nests the intent and the evidence bundle two
+    levels deeper (request, then admission) and the walk counts the row from its top, so a
+    document within two levels of the limit passes here and its row would be refused on
+    read-back. None is written today: the engine's intent and evidence checks refuse such
+    nesting before an ALLOW. The engine's own walk counts values instead
     and admits one container more when the innermost is empty; the door does not inherit
     that. Counting as the engine did, it let such a document through here, and the walk
     refuses that document when it reads a row back - which the door case's boundary row
@@ -1284,16 +1288,17 @@ class SQLiteOTCSOutbox:
             two calls later under no code of ours. So the walk also applies the engine's
             MAX_NESTING_DEPTH to the parsed structure: the same limit a submitted document
             meets, read from the same place, and applied at the same level, measured at the
-            boundary. Seeding the top-level value at 1 would refuse a document of exactly
-            MAX containers that the wire admits, and so make a row the engine accepts
-            unreadable by every public call. Only with both does the answer stop depending
+            boundary. Seeding the top-level value at 1 would count one level more than the
+            adapter's bracket scan and refuse a stored value of exactly MAX containers, as
+            deep as a body the wire admits. Only with both does the answer stop depending
             on which of the interpreter's limits is smaller.
             """
             # Seeded at 0, so the bound here is the bound on the wire and not one level
             # stricter. Measured at the boundary with MAX_NESTING_DEPTH = 64: with the
-            # top-level value seeded at 1, a document of exactly 64 containers is ADMITTED
-            # by the adapter's scan and REFUSED here, so a row the engine accepts through
-            # the wire cannot be read back through any public call and nothing repairs it.
+            # top-level value seeded at 1, a value of exactly 64 containers - as deep as a
+            # body the adapter's scan ADMITS - is REFUSED here, and a row holding one
+            # cannot be read back through any public call and nothing repairs it. The
+            # outbox rows are written by this bridge, not through the wire.
             # The adapter counts opening brackets from zero; counting values from one
             # visits a scalar inside N containers at N+1. At 63 and at 65 the two agree,
             # which is why only a case at exactly the limit shows it.
@@ -2050,6 +2055,22 @@ class OTCSBridge:
             return "DECLARATION_OUTSIDE_VALIDITY"
         if now >= parse_utc(body["expires_at"]):
             return "PERMIT_EXPIRED"
+        # Last, so every reason above keeps its place: a permit the engine can no longer
+        # verify (a signer key it does not hold, a failing signature) is refused HERE, before
+        # the downstream call. `commit_execution` makes the same two checks, but only after
+        # the append, so the effect had already happened when the refusal came.
+        try:
+            self._engine.architect_permit_verification(
+                row["permit_hash"],
+                actor_scope=ROLE_ARCHITECT,
+            )
+        except IntegrityViolation:
+            # Same reasoning as above: the engine cannot vouch for the permit, which is
+            # not the permit being dead. The row stays where it was; a repaired registry
+            # lets it resume without touching OTCS twice.
+            raise
+        except ContractViolation as exc:
+            return exc.code
         return None
 
     def _fault(self, point: str) -> None:
@@ -2126,11 +2147,12 @@ class OTCSBridge:
                     last_error=reason,
                 )
                 # Named for the CLASS, not one member of it:
-                # _permit_not_live_reason answers with any of seven reasons
+                # _permit_not_live_reason answers with any of eight reasons
                 # (consumed, reservation inactive, declaration not active or
-                # outside validity, expired, a stored invalidation reason, or a
-                # refusal code from the lookup itself), and a name like EXPIRED
-                # would cover one of the seven.
+                # outside validity, expired, a stored invalidation reason, a
+                # refusal code from the lookup itself, or one from the permit's
+                # verification, such as PERMIT_KEY_REVOKED), and a name like
+                # EXPIRED would cover one of the eight.
                 raise OTCSReconciliationRequired(
                     "OTCS_PERMIT_NOT_LIVE_ON_RECOVERY", reason
                 )
@@ -2191,12 +2213,19 @@ class OTCSBridge:
                     # that is not ours, left uncaught, would leave this `try` with the row
                     # CALLING over an effect that happened: the receipt object's own code, run
                     # while it is read - a mapping whose `keys` raises, a value whose methods
-                    # do. Those shapes are read by `_plain_copy`, which runs none of the
-                    # object's code and refuses an unreadable mapping by name, so they arrive
-                    # above as OTCS_RECEIPT_FIELDS. What is left for this clause is what no
-                    # copy sees - a fault in this module's own receipt code - and the answer is
-                    # the one the bridge already has for a receipt it cannot use:
-                    # RECONCILIATION_REQUIRED, which asks an operator rather than guessing.
+                    # do. The object's code runs in two places. `_plain_copy` copies a mapping
+                    # that is not a dict by its own methods and refuses an Exception from them
+                    # by name, so it arrives above as OTCS_RECEIPT_FIELDS. A value the copy
+                    # leaves as it is meets the check that refuses it, and a hash profile that
+                    # is not a string is refused as OTCS_HASH_PROFILE with its own repr as the
+                    # detail, an Exception from that repr recorded in its place. A
+                    # BaseException that is not an Exception, from either place, passes both
+                    # clauses of this `try` and leaves the row CALLING, as a crash at this
+                    # point would; recovery then rests on OTCS idempotent replay. What is left
+                    # for this clause is what no copy sees - a fault in this module's own
+                    # receipt code - and the answer is the one the bridge already has for a
+                    # receipt it cannot use: RECONCILIATION_REQUIRED, which asks an operator
+                    # rather than guessing.
                     # Fail-closed by design, and witnessed by a case that injects that fault.
                     transition(
                         project_id,
@@ -2282,6 +2311,31 @@ class OTCSBridge:
                 raise OTCSReconciliationRequired(
                     "OTCS_LOCAL_FINALIZATION_REFUSED", exc.code
                 ) from exc
+            if (
+                row["state"] == "DOWNSTREAM_REJECTED"
+                and self._permit_not_live_reason(row, operation) is not None
+            ):
+                # A definitive refusal is by the client contract known to have
+                # produced no external effect, and the engine cannot record a
+                # failed execution under a permit that stopped being live. Left
+                # alone, the row stayed DOWNSTREAM_REJECTED for good: every execute
+                # and recover asked the engine again and raised again, and the
+                # chain never held an event for the attempt. NOT_EXECUTED is the
+                # honest end here, which it is not for CALLING and AMBIGUOUS, where
+                # "nothing happened" cannot be established. The downstream's own
+                # code stays the rejection code; why local finalisation was
+                # refused is kept in last_error. A refusal for any other reason is
+                # not a dead permit and still leaves loudly, as before.
+                row = transition(
+                    project_id,
+                    idempotency_key,
+                    {"DOWNSTREAM_REJECTED"},
+                    "NOT_EXECUTED",
+                    execution_request=execution_request,
+                    rejection_code=row.get("rejection_code"),
+                    last_error=exc.code,
+                )
+                return self._result(row)
             raise
         self._fault("after_local_commit")
         final_state = (

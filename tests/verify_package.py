@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "tools"))
 import failure_surface  # noqa: E402
+import build_package_manifest  # noqa: E402
 sys.path.pop(0)
 
 # A virtual environment made in the package root (`python -m venv .venv`) is not part of
@@ -29,14 +31,15 @@ def in_environment_directory(relative: Path) -> bool:
 
 
 EXPECTED_PROFILE_HASH = (
-    "D0467762926BF45A856431BF8038044852681456D1FBBAEEEBC80A4EC1674C6F"
+    "E47781D27DCEE82130AAD20AA5EBEC508ACECD62054DD9E3F8F18ABB9C1B687E"
 )
 EXPECTED_DECLARATION_HASH = (
-    "54E6C072FA6D20F2F4E32030E26F124C339BEE10F9307B6FA2D35EDF33DFC78E"
+    "CF36ED7013155C113B76C17E089CCC24FFCEB73672CC5FF57398B069F7897097"
 )
 STANDALONE_PACKAGE_CHECK_IDS = frozenset(
     {
         "required_files", "no_build_artefacts", "gitignore_python_caches",
+        "nonstandard_environment_directory",
         "dependency_lock", "package_manifest_shape",
         "package_manifest_coverage", "package_manifest_hashes",
         "collectible_script_suites", "documented_acceptance_route",
@@ -61,8 +64,9 @@ STANDALONE_PACKAGE_CHECK_IDS = frozenset(
         "ledger_chain", "registry_projection_exact", "registry_rejects_nested_forbidden_data",
         "logical_quote_punctuation", "docx_document_part", "docx_title",
         "docx_projection_source_bound", "docx_acceptance_counts_current",
+        "docx_core_anchor_current",
         "docx_header_version_matches_title", "package_version_consistency",
-        "citation_metadata_contract",
+        "citation_metadata_contract", "documentation_licence_coverage",
         "acceptance_report_gate_rows_current",
         "failure_surface_static_ratchet", "package_counter_literals_current",
         "acceptance_report_ratchet_figures_current",
@@ -108,8 +112,8 @@ class Checks:
     def passed_ids(self) -> set[str]:
         return {label for label, kind in self.verdicts.items() if kind == "PASS"}
 
-    def require(self, condition: bool, label: str) -> None:
-        self._record(label, "PASS" if condition else "FAIL")
+    def require(self, condition: bool, label: str, reason: str = "") -> None:
+        self._record(label, "PASS" if condition else "FAIL", reason)
 
     def passed(self, label: str) -> None:
         self._record(label, "PASS")
@@ -229,7 +233,10 @@ def external_source_tree_available(base: Path, inputs: list[dict]) -> bool:
             item_path = safe_source_path(base, item["relative_path"])
             if not item_path.is_file():
                 return False
-    except (AssertionError, KeyError):
+    # A malformed manifest (an entry that is not an object, a path that is not
+    # text) means the external tree cannot be named: standalone, where the
+    # manifest checks report it, instead of a crash before any verdict.
+    except (AssertionError, KeyError, TypeError, ValueError, OSError):
         return False
     return True
 
@@ -303,6 +310,15 @@ def docx_acceptance_count_mismatches(document_paragraphs: list[str]) -> list[str
                 "ContractRegressions",
             ),
         ),
+        "declaration_field_census": (
+            r"(\d+) tests holding each fixed declaration and registry field to its"
+            r" classification in DECLARATION-FIELDS\.md and to the engine line that"
+            r" consumes it",
+            counts.test_method_count(
+                ROOT / "tests" / "test_declaration_field_census.py",
+                "DeclarationFieldCensusTests",
+            ),
+        ),
         # Counted apart from the regressions for the same reason the report
         # names them apart: the bridge has its own acceptance step now, so a
         # summed figure would certify a suite shape that no longer exists.
@@ -359,6 +375,43 @@ def docx_acceptance_count_mismatches(document_paragraphs: list[str]) -> list[str
     return mismatches
 
 
+def docx_core_anchor_mismatches(document_paragraphs: list[str]) -> list[str]:
+    """Compare the core anchor the shipped document prints with SOURCE-MANIFEST.json.
+
+    The builder reads every core value from the manifest's one
+    immutable_nc25_core input, so the two differ only when the document is
+    stale: a manifest updated without a rebuilt DOCX prints the old hash, file
+    and sizes while every other check stays green. Each label must appear
+    exactly once, followed by its value.
+    """
+    manifest = json.loads((ROOT / "SOURCE-MANIFEST.json").read_text(encoding="utf-8"))
+    cores = [
+        entry for entry in manifest["inputs"]
+        if entry.get("role") == "immutable_nc25_core"
+    ]
+    if len(cores) != 1:
+        return [f"immutable_nc25_core inputs={len(cores)}"]
+    core = cores[0]
+    expected = {
+        "Core SHA-256": core["sha256"],
+        "File": core["file_name"],
+        "SHA-256": core["sha256"],
+        "Bytes / lines": f"{core['byte_length']:,} bytes / {core['line_count']:,} lines",
+    }
+    mismatches: list[str] = []
+    for label, value in expected.items():
+        positions = [
+            index for index, text in enumerate(document_paragraphs[:-1]) if text == label
+        ]
+        if len(positions) != 1:
+            mismatches.append(f"{label}: label matches={len(positions)}")
+        elif document_paragraphs[positions[0] + 1] != value:
+            mismatches.append(
+                f"{label}: docx={document_paragraphs[positions[0] + 1]!r} manifest={value!r}"
+            )
+    return mismatches
+
+
 def docx_title_version(sections: dict[str, list[str]]) -> str | None:
     """Version value of the first title-table Version cell, or None.
 
@@ -398,6 +451,23 @@ def docx_header_version_mismatches(sections: dict[str, list[str]]) -> list[str]:
                 f"header v{header_versions[0]} != title {title_version}"
             )
     return problems
+
+
+def documentation_licence_mismatches(root: Path = ROOT) -> list[str]:
+    """Root Markdown documents must be named in the documentation licence list.
+
+    This checks that list only; nested code/example documents use the existing
+    directory grants and are outside this check's declared population.
+    """
+    text = (root / "LICENSE").read_text(encoding="utf-8")
+    documentation = text.split("2. CODE, SCHEMAS, AND MACHINE-READABLE ARTEFACTS", 1)[0]
+    return [
+        path.name for path in sorted(root.glob("*.md"))
+        if path.is_file() and not re.search(
+            r"(?<![A-Za-z0-9_.-])" + re.escape(path.name) + r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_.-])",
+            documentation,
+        )
+    ]
 
 
 def citation_metadata_mismatches() -> list[str]:
@@ -528,12 +598,11 @@ def package_version_mismatches(sections: dict[str, list[str]]) -> list[str]:
 def spectrum_pair_mismatches(package_version: str) -> list[str]:
     """The Spectrum release this version pairs with, as every carrier in the package states it.
 
-    The pairing rule (CHANGELOG, `LL.MM.PP`) gives the release from the version; the recorded
-    source release in examples/spectrum_release must be a run on exactly that release. Three
-    carriers state one fact: the pairing line of the current CHANGELOG section, the RESULT.md
-    prose, table and reproduction commands, and result.json. When the version moves, RESULT.md
-    can stay on the previous pair while the other carriers move; this compares them. The commit
-    is read from RESULT.md, never written here."""
+    The current CHANGELOG section names the exact release. Its minor line must match the
+    package's, but a Ledger-only revision may advance the patch independently. The recorded
+    source release in examples/spectrum_release must be a run on the named release. Three
+    carriers state one fact: the CHANGELOG pairing line, the RESULT.md prose, table and
+    reproduction commands, and result.json. The commit is read from RESULT.md."""
     problems: list[str] = []
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     section = re.search(
@@ -541,12 +610,12 @@ def spectrum_pair_mismatches(package_version: str) -> list[str]:
     )
     if section is None:
         return [f"changelog has no section {package_version}"]
-    tags = re.findall(r"Paired with Spectrum `(v\d{2}\.\d{2}\.\d{2})`", section.group(1))
+    tags = re.findall(r"Paired with Spectrum `(v00\.\d{2}\.\d{2})`", section.group(1))
     if len(tags) != 1:
         return [f"changelog {package_version}: Spectrum pairing lines={len(tags)}"]
     tag = tags[0]
-    if tag.split(".")[1:] != package_version.split(".")[1:]:
-        problems.append(f"pairing rule: {package_version} is not paired with {tag}")
+    if tag.split(".")[1] != package_version.split(".")[1]:
+        problems.append(f"Spectrum minor line: {package_version} is not paired with {tag}")
     result_md = (ROOT / "examples" / "spectrum_release" / "RESULT.md").read_text(
         encoding="utf-8"
     )
@@ -602,6 +671,9 @@ def acceptance_report_row_mismatches() -> list[str]:
         "JSON Schema and OpenAPI conformance": counts.literal_collection_size(
             ROOT / "tests" / "test_contract_conformance.py",
             "EXPECTED_CONFORMANCE_IDS",
+        ),
+        "Declaration field census": counts.test_method_count(
+            ROOT / "tests" / "test_declaration_field_census.py", "DeclarationFieldCensusTests"
         ),
         # The bridge has its own acceptance step and its own gate row, so the
         # two suites are counted apart. Summing them here would refuse a
@@ -759,13 +831,45 @@ def acceptance_report_ratchet_figures_mismatches() -> list[str]:
     return []
 
 
+def acceptance_runner_bytecode_guarded(source: str) -> bool:
+    """The acceptance runner launches each step with -B and bytecode writes off.
+
+    Asked of the parsed runner, not of its text: a commented-out or quoted line
+    satisfied the old substring search while the guard was gone, and so did an
+    environment that was built but never handed to the step.
+    """
+    tree = ast.parse(source)
+    sets_flag = any(
+        isinstance(node, ast.Assign)
+        and any(ast.unparse(target) == "environment['PYTHONDONTWRITEBYTECODE']" for target in node.targets)
+        and isinstance(node.value, ast.Constant) and node.value.value == "1"
+        for node in ast.walk(tree)
+    )
+    dash_b = any(
+        isinstance(node, ast.List) and ast.unparse(node) == "[sys.executable, '-B', str(ROOT / relative_path)]"
+        for node in ast.walk(tree)
+    )
+    handed_over = any(
+        isinstance(node, ast.Call) and ast.unparse(node.func) == "subprocess.run"
+        and any(keyword.arg == "env" and ast.unparse(keyword.value) == "environment" for keyword in node.keywords)
+        and any(ast.unparse(argument) == "command" for argument in node.args)
+        for node in ast.walk(tree)
+    )
+    return sets_flag and dash_b and handed_over
+
+
 def acceptance_report_binding_mismatches() -> list[str]:
     """The report names the bytes it was generated for; hold it to them.
 
     The digest rule lives in run_acceptance.bound_bytes and is imported, not
     restated: the writer and the reader of this fact share one definition.
+    The digests prove which bytes the report names. Whether its figures came
+    from them is carried by REBIND_MARKER: the --rebind-only bootstrap writes
+    the digests and the marker, the generator's rewrite after a passing run
+    removes the marker, and a report still carrying it is refused here outside
+    the acceptance run whose results regenerate the report.
     """
-    from run_acceptance import bound_bytes
+    from run_acceptance import ACCEPTANCE_RUN_FLAG, REBIND_MARKER, bound_bytes
 
     manifest = json.loads(
         (ROOT / "PACKAGE-MANIFEST.json").read_text(encoding="utf-8")
@@ -799,6 +903,17 @@ def acceptance_report_binding_mismatches() -> list[str]:
             "ACCEPTANCE-REPORT.md: bound document "
             f"{match.group(2)[:12]}... != shipped {expected_document[:12]}..."
         )
+    # Rebound and not regenerated: the digests are true and the figures are not
+    # certified. That state is the bootstrap's purpose inside the acceptance run
+    # whose results regenerate the report - run_acceptance with --json-output,
+    # the only run that sets the flag - and a stale report anywhere else, the
+    # final run and CI included.
+    if (" ".join(REBIND_MARKER.split()) in report
+            and os.environ.get(ACCEPTANCE_RUN_FLAG) != "1"):
+        problems.append(
+            "ACCEPTANCE-REPORT.md: rebound without an acceptance run;"
+            " regenerate it from a passing run"
+        )
     return problems
 
 
@@ -827,6 +942,14 @@ def package_counter_literal_mismatches() -> list[str]:
 def _run_checks(
     checks: "Checks", source_root: Path | None, source_mode: str
 ) -> None:
+    unexpected_environments = (
+        build_package_manifest.nonstandard_environment_directories(ROOT)
+    )
+    checks.require(
+        not unexpected_environments,
+        "nonstandard_environment_directory",
+        ",".join(unexpected_environments),
+    )
     required_files = [
         ".gitignore",
         "README.md",
@@ -836,6 +959,8 @@ def _run_checks(
         "requirements-lock.txt",
         "UNIVERSAL-CONNECTION-RUNBOOK.md",
         "ACCEPTANCE-REPORT.md",
+        "READING.md",
+        "DECLARATION-FIELDS.md",
         load_spec_counts().spec_docx_name(ROOT),
         "core/nc25-core-crosswalk.json",
         "core/schemas/profile.schema.json",
@@ -846,6 +971,7 @@ def _run_checks(
         "sdk/python/nc25_universal_ledger.py",
         "sdk/python/nc25_universal_adapter.py",
         "sdk/python/nc25_otcs_bridge.py",
+        "sdk/python/nc25ol_reader.py",
         "profiles/PROFILE-AUTHORING-CHECKLIST.md",
         "profiles/banking/bank-profile.json",
         "profiles/banking/questionnaire-crosswalk.json",
@@ -855,20 +981,30 @@ def _run_checks(
         "examples/synthetic-authority-grant.json",
         "examples/synthetic-intent-allow.json",
         "examples/synthetic-evidence-bundle.json",
+        "examples/local_release/quickstart.py",
+        "examples/local_release/quickstart-expected.txt",
+        "examples/local_release/test_quickstart.py",
+        "examples/local_release/mutate_quickstart.py",
         "tests/test_universal_connection.py",
         "tests/test_semantic_contracts.py",
         "tests/test_safety_mutations.py",
         "tests/test_contract_conformance.py",
+        "tests/test_declaration_field_census.py",
+        "tests/test_adapter_schema_gate.py",
+        "tests/mutate_adapter_schema_gate.py",
         "tests/run_acceptance.py",
         "tests/check_failure_surface.py",
         "tests/failure-surface-baseline.json",
         "tests/test_contract_regressions.py",
+        "tests/test_reader.py",
         "tests/test_otcs_bridge.py",
         "tests/verify_package.py",
+        "tests/mutate_reader_json.py",
         "tools/build_acceptance_report.py",
         "tools/build_review_bundle.py",
         "tools/build_docx_audit_projection.py",
         "tools/build_error_code_enum.py",
+        "tools/declaration_field_census.py",
         "tools/failure_surface.py",
         "tools/build_universal_specification.py",
         "tools/build_package_manifest.py",
@@ -911,6 +1047,8 @@ def _run_checks(
         "pyyaml": "6.0.3",
         "referencing": "0.37.0",
         "rpds-py": "2026.6.3",
+        "rfc3339-validator": "0.1.4",
+        "six": "1.17.0",
         "typing-extensions": "4.16.0",
     }
     lock_versions: dict[str, str] = {}
@@ -1036,8 +1174,7 @@ def _run_checks(
     )
     runner_source = (ROOT / "tests" / "run_acceptance.py").read_text(encoding="utf-8")
     checks.require(
-        'command = [sys.executable, "-B", str(ROOT / relative_path)]' in runner_source
-        and 'environment["PYTHONDONTWRITEBYTECODE"] = "1"' in runner_source,
+        acceptance_runner_bytecode_guarded(runner_source),
         "acceptance_runner_bytecode_guard",
     )
     checks.require(
@@ -1078,16 +1215,20 @@ def _run_checks(
     evidence = load_json(ROOT / "examples" / "synthetic-evidence-bundle.json")
     crosswalk = load_json(ROOT / "core" / "nc25-core-crosswalk.json")
 
+    # A failed check records FAIL and the run goes on: raising here made the
+    # failing check and every later one BLOCKED, indistinguishable from a crash.
     try:
         validate_profile(profile)
     except (ContractViolation, IntegrityViolation) as exc:
-        raise AssertionError("profile_semantics") from exc
-    checks.passed("profile_semantics")
+        checks.require(False, "profile_semantics", exc.code)
+    else:
+        checks.passed("profile_semantics")
     try:
         validate_declaration(declaration, profile)
     except (ContractViolation, IntegrityViolation) as exc:
-        raise AssertionError("declaration_semantics") from exc
-    checks.passed("declaration_semantics")
+        checks.require(False, "declaration_semantics", exc.code)
+    else:
+        checks.passed("declaration_semantics")
     second = load_json(
         ROOT / "profiles" / "document-release" / "reference-connection.json"
     )
@@ -1203,16 +1344,20 @@ def _run_checks(
     input_by_role = {item["role"]: item for item in manifest["inputs"]}
     core_manifest = input_by_role["immutable_nc25_core"]
 
-    for item in manifest["inputs"]:
-        safe_source_path(ROOT, item["relative_path"])
-    checks.passed("manifest_path_containment")
+    try:
+        for item in manifest["inputs"]:
+            safe_source_path(ROOT, item["relative_path"])
+    except AssertionError:
+        checks.require(False, "manifest_path_containment", "a manifest input escapes the package")
+    else:
+        checks.passed("manifest_path_containment")
 
     try:
         safe_source_path(ROOT, "../outside-package")
     except AssertionError:
         checks.passed("path_containment_self_test")
     else:
-        raise AssertionError("path_containment_self_test")
+        checks.require(False, "path_containment_self_test", "an escaping path was accepted")
 
     print(f"SOURCE_MODE={source_mode}")
     if source_root is not None:
@@ -1351,13 +1496,17 @@ def _run_checks(
         openapi.count("mutualTLS: []") >= len(required_paths),
         "openapi_mtls_declaration_floor",
     )
-    # The contract's Error.code enum is the vocabulary a caller can actually
+    # The contract's Error.code enum is the published union, including defensive
     # receive, and it is held to the LIVE static scan rather than to the
     # recorded baseline: a code added to the engine or the adapter without a
     # baseline regeneration would otherwise stay invisible here. The codes the
     # translation site re-emits from an integrity halt belong to neither
-    # vocabulary and are observable only at run time, so that part is read
-    # from the baseline's recorded run. Reddens in either direction.
+    # vocabulary and are observable only at run time - and by the baseline's own
+    # definition were injected from outside production, typically by a test replacing
+    # an engine method. No production path emits them, so they are NOT part of the
+    # published union: a test-only name in the enum would be a public contract
+    # nothing can produce (LEDGER_TAMPERED was). They stay in the baseline as a
+    # visible ratchet. Reddens in either direction.
     enum_block = re.search(
         r"(?ms)^        code:\n.*?^          enum:\n((?:^            - \S+\n)+)",
         openapi,
@@ -1368,13 +1517,8 @@ def _run_checks(
         else set()
     )
     static_surface, _ = failure_surface.static_snapshot()
-    recorded_baseline = json.loads(
-        (ROOT / "tests" / "failure-surface-baseline.json").read_text(encoding="utf-8")
-    )
-    live_codes = (
-        set(static_surface["engine_refusal_codes"])
-        | set(static_surface["wire_error_codes"])
-        | set(recorded_baseline["runtime"]["foreign_translated_codes"])
+    live_codes = set(static_surface["engine_refusal_codes"]) | set(
+        static_surface["wire_error_codes"]
     )
     checks.require(
         bool(enum_block) and declared_codes == live_codes,
@@ -1454,7 +1598,7 @@ def _run_checks(
             "registry_rejects_nested_forbidden_data",
         )
     else:
-        raise AssertionError("registry_rejects_nested_forbidden_data")
+        checks.require(False, "registry_rejects_nested_forbidden_data", "nested forbidden data was accepted")
 
     markdown = "\n".join(
         path.read_text(encoding="utf-8")
@@ -1498,11 +1642,20 @@ def _run_checks(
         "docx_acceptance_counts_current",
     )
     checks.require(
+        not docx_core_anchor_mismatches(
+            projection_sections.get("word/document.xml", [])
+        ),
+        "docx_core_anchor_current",
+    )
+    checks.require(
         not docx_header_version_mismatches(projection_sections),
         "docx_header_version_matches_title",
     )
     checks.require(
         not citation_metadata_mismatches(), "citation_metadata_contract",
+    )
+    checks.require(
+        not documentation_licence_mismatches(), "documentation_licence_coverage",
     )
     checks.require(
         not package_version_mismatches(projection_sections),
@@ -1519,9 +1672,11 @@ def _run_checks(
         not failure_surface_problems,
         "failure_surface_static_ratchet",
     )
+    binding_mismatches = acceptance_report_binding_mismatches()
     checks.require(
-        not acceptance_report_binding_mismatches(),
+        not binding_mismatches,
         "acceptance_report_bound_to_bytes",
+        "; ".join(binding_mismatches),
     )
     checks.require(
         not package_counter_literal_mismatches(),

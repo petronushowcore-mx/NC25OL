@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -23,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from spec_counts import (  # noqa: E402
     literal_collection_size,
+    sole_assignment,
     spec_docx_name,
     test_method_count,
 )
@@ -43,8 +45,40 @@ def _package_version() -> str:
 
 
 SPEC_VERSION = _package_version()
+
+
+def _core_anchor() -> dict:
+    """The one NC2.5 core input, as SOURCE-MANIFEST.json records it.
+
+    Every core-anchor value the document prints is read here. A typed copy in
+    this builder would stay behind when the manifest's core entry changes, and
+    the normative document would then print a hash and sizes nothing checks.
+    """
+    manifest = json.loads(
+        (ROOT / "SOURCE-MANIFEST.json").read_text(encoding="utf-8")
+    )
+    cores = [entry for entry in manifest["inputs"] if entry.get("role") == "immutable_nc25_core"]
+    if len(cores) != 1:
+        raise RuntimeError(f"Expected one immutable_nc25_core input, found {len(cores)}")
+    core = cores[0]
+    for field, kind in (
+        ("file_name", str),
+        ("core_version", str),
+        ("doi", str),
+        ("sha256", str),
+        ("byte_length", int),
+        ("line_count", int),
+    ):
+        if type(core.get(field)) is not kind:
+            raise RuntimeError(f"Invalid core anchor field {field}: {core.get(field)!r}")
+    if not re.fullmatch(r"[0-9A-F]{64}", core["sha256"]):
+        raise RuntimeError(f"Invalid core anchor sha256: {core['sha256']!r}")
+    return core
+
+
+CORE_ANCHOR = _core_anchor()
 SPEC_VERSION_MAJOR_MINOR = ".".join(SPEC_VERSION.split(".")[:2])
-SPEC_DATE_TEXT = "18 October 2026"
+SPEC_DATE_TEXT = "22 October 2026"
 
 CONFORMANCE_CHECK_COUNT = literal_collection_size(ROOT / "tests" / "test_contract_conformance.py", "EXPECTED_CONFORMANCE_IDS")
 # The two sets are counted apart, because the acceptance report names them
@@ -60,10 +94,13 @@ OTCS_BRIDGE_TEST_COUNT = test_method_count(
 FUNCTIONAL_TEST_COUNT = test_method_count(ROOT / "tests" / "test_universal_connection.py", "ConnectionSuite")
 SEMANTIC_TEST_COUNT = test_method_count(ROOT / "tests" / "test_semantic_contracts.py", "SemanticContractTests")
 SAFETY_MUTATION_COUNT = literal_collection_size(ROOT / "tests" / "test_safety_mutations.py", "EXPECTED_MUTATION_IDS")
+CENSUS_TEST_COUNT = test_method_count(
+    ROOT / "tests" / "test_declaration_field_census.py", "DeclarationFieldCensusTests"
+)
 
 
 def _normalize_docx_archive(path: Path) -> None:
-    """Make package metadata and ZIP member timestamps reproducible."""
+    """Make package metadata and the ZIP member order, timestamps and host-system field reproducible."""
     fixed_time = (2026, 7, 28, 0, 0, 0)
     temp = path.with_name(path.stem + ".deterministic" + path.suffix)
     with zipfile.ZipFile(path, "r") as source:
@@ -104,7 +141,9 @@ def _normalize_docx_archive(path: Path) -> None:
                 member.compress_type = info.compress_type
                 member.external_attr = info.external_attr
                 member.internal_attr = info.internal_attr
-                member.create_system = info.create_system
+                # Fixed, not copied: zipfile stamps the building host here (0 on
+                # Windows, 3 elsewhere); 3 keeps the bytes POSIX builds already give.
+                member.create_system = 3
                 member.comment = info.comment
                 target.writestr(member, data)
         temp.replace(path)
@@ -492,11 +531,8 @@ def add_title_page(doc: Document) -> None:
             ("Affiliation", "The Urgrund Laboratheory"),
             ("Licence", "CC BY 4.0 (specification) • MIT (code and schemas)"),
             ("Status", "Reference and conformance package"),
-            ("Core anchor", "NC2.5 v3.0 • DOI 10.17605/OSF.IO/NHTC5"),
-            (
-                "Core SHA-256",
-                "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3",
-            ),
+            ("Core anchor", f"NC2.5 v{CORE_ANCHOR['core_version']} • DOI {CORE_ANCHOR['doi']}"),
+            ("Core SHA-256", CORE_ANCHOR["sha256"]),
         ],
         [2400, 6960],
         font_size=9,
@@ -610,20 +646,17 @@ def add_executive_decision(doc: Document) -> None:
 def add_nc25_relationship(doc: Document, crosswalk: dict) -> None:
     doc.add_heading("2. Relationship to NC2.5", level=1)
     doc.add_paragraph(
-        "The package is anchored to one read-only NC2.5 v3.0 source file. The source hash is repeated in the profile, declaration, source manifest, and crosswalk. The package translates declared interface and separation constraints into an engineering contract; it does not modify the core or turn conditional structural results into deployment guarantees."
+        f"The package is anchored to one read-only NC2.5 v{CORE_ANCHOR['core_version']} source file. The source hash is repeated in the profile, declaration, source manifest, and crosswalk. The package translates declared interface and separation constraints into an engineering contract; it does not modify the core or turn conditional structural results into deployment guarantees."
     )
     add_table(
         doc,
         ["Anchor", "Value"],
         [
-            ("File", "NC25_v3_0_patched_v4.tex"),
-            ("Version", "3.0"),
-            ("DOI", "10.17605/OSF.IO/NHTC5"),
-            (
-                "SHA-256",
-                "20F1EA17E0B986627CAD9AFA7C02E1DC5088C43A779435E5A38F11E43A06C9C3",
-            ),
-            ("Bytes / lines", "1,414,184 bytes / 14,228 lines"),
+            ("File", CORE_ANCHOR["file_name"]),
+            ("Version", CORE_ANCHOR["core_version"]),
+            ("DOI", CORE_ANCHOR["doi"]),
+            ("SHA-256", CORE_ANCHOR["sha256"]),
+            ("Bytes / lines", f"{CORE_ANCHOR['byte_length']:,} bytes / {CORE_ANCHOR['line_count']:,} lines"),
             ("Package posture", "Read-only input; no source modification"),
         ],
         [2300, 7060],
@@ -669,11 +702,11 @@ def add_nc25_relationship(doc: Document, crosswalk: dict) -> None:
     add_bullets(
         doc,
         [
-            "The hash-chained event ledger is an immutable append-only record of the declared event types: genealogy, not load. Permit-state changes that append no event (reservation expiry, window-limit invalidation) are visible in permit state only.",
+            "The hash-chained event ledger is an immutable append-only record of the declared event types: genealogy, not load. Permit-state changes that append no event (reservation expiry; grant-validity invalidation at commit or evaluation replay; state-anchor and window-limit invalidation at commit; invalidation by permit signing-key revocation) are visible in permit state only. Key custody itself appends no event: the revoked key set is held in engine state, and signer rotation is process-local runtime configuration reflected only in the key_id of later permit signatures.",
             "The structural budget is a monotone committed-action counter read by the gate. It debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so it is narrower than the core's structural-pressure accounting.",
             "Resource limits are sliding windows; committed amounts age out, so they are rate boundaries, not burden.",
             "A new declaration version starts a new accounting instance. No burden crosses versions, and a cross-version continuation claim requires an external ledger.",
-            "The declared capacity carries a provenance coding (fully stipulated, empirically calibrated, derived from a load model, or mixed). The coding is sealed by the declaration hash and never read by the gate.",
+            "The declaration enforces a non-negative capacity but does not encode its empirical origin. Any calibration or load-model evidence belongs to an external governance record; this package does not bind it.",
         ],
     )
 
@@ -716,7 +749,7 @@ def add_architecture(doc: Document) -> None:
     add_bullets(
         doc,
         [
-            "Connector-supplied evidence status and control booleans are untrusted claims; the production evaluator resolves and derives them from authoritative systems.",
+            "Connector-supplied evidence status, control flags and ambiguity flags are untrusted claims; the production evaluator resolves and derives them from authoritative systems.",
             "Resolved evidence and derived controls are bound to the exact request and current-state anchor before gate evaluation.",
             "The connector cannot activate, revise, or write the profile or declaration.",
             "The evaluator does not expose its internal gate trace to the operator.",
@@ -775,12 +808,12 @@ def add_contract_objects(doc: Document) -> None:
         doc,
         [
             "binds one profile identifier, version, and canonical hash;",
-            "identifies one connector, identity issuer, and permitted environments;",
+            "identifies one connector; runtime workload identity and permitted environments require external identity and transport enforcement;",
             "narrows actions, effects, targets, explicit action-target bindings, and scope values;",
-            "declares a structural selector, capacity, and capacity provenance coding independently from domain limits;",
+            "declares a non-negative structural capacity independently from domain resource limits; capacity provenance is outside this schema;",
             "declares resource limits per intent and per time window;",
-            "names owners, interfaces, off-limits systems, and change process;",
-            "binds the mapping witness and immutable approval evidence.",
+            "names approval and authority issuers, revision authorities, a no-live-override constraint, and off-limits systems; other ownership and service-separation facts require external governance;",
+            "binds the mapping witness; declaration-level approval-evidence references are outside this schema.",
         ],
     )
 
@@ -829,7 +862,7 @@ def add_state_machine(doc: Document) -> None:
         font_size=8,
     )
     doc.add_paragraph(
-        "The reference engine implements DRAFT to ACTIVE plus validity blocking. SUSPENDED, REVOKED, and EXPIRED are production registry projection states whose transitions must be defined and persisted by a production governance adapter."
+        "The reference engine and registry expose only DRAFT and ACTIVE plus validity blocking. Suspension, connector-wide revocation, and expiry transitions require an external governance adapter; they are not states of this registry interface."
     )
 
     doc.add_heading("6.2 Evaluation order", level=2)
@@ -848,7 +881,7 @@ def add_state_machine(doc: Document) -> None:
         ],
     )
     doc.add_paragraph(
-        "The SDK resolves exact submitted-request idempotency first, verifies binding, authority, action-target, and scope authorization, and only then calls the injected evidence and control resolvers. Connector claims are ignored on each wired surface, resolver output is validated and bound into the result and permit request hash, and resolver failure is closed. Without the resolvers, evaluate_intent gates on the declared intent flags and remains the explicit internal post-resolution boundary — a documented reference boundary that production closes by wiring both resolvers."
+        "The SDK resolves exact submitted-request idempotency first, verifies binding, authority, action-target, and scope authorization, and only then calls the injected evidence and control resolvers. Connector claims are ignored on each wired surface, resolver output is validated and bound into the permit's own request hash, and resolver failure is closed. The operator result and the architect decision carry the submitted request hash, which does not cover resolver output. Without the resolvers, evaluate_intent gates on the declared intent flags and remains the explicit internal post-resolution boundary — a documented reference boundary that production closes by wiring both resolvers."
     )
 
     doc.add_heading("6.3 Gate semantics", level=2)
@@ -908,7 +941,7 @@ def add_integrity_revision(doc: Document) -> None:
         doc,
         [
             "An ALLOW always reserves the structural cost, and reserves each domain resource claim whose resource declares reservation_required.",
-            "The configured permit TTL is sealed into the permit, cannot exceed 900 seconds, and expires_at is capped by the authority-grant and declaration expiries.",
+            "The permit seals its effective lifetime as ttl_seconds: the configured TTL, at most 900 seconds, capped by the authority-grant and declaration expiries, rounded up to whole seconds and never below one. expires_at is the exact cutoff.",
             "Trusted-time causality permits at most five seconds of forward skew for intent receipt, evidence collection, revocation, and execution commit; execution may not precede permit issuance by more than five seconds.",
             "A resource declared with reservation_required false holds nothing while a permit is outstanding; only committed amounts count against its window limit.",
             "Active reservations count against later evaluations and prevent over-issue.",
@@ -917,18 +950,18 @@ def add_integrity_revision(doc: Document) -> None:
             "COMMITTED records the declared debits and consumes the permit.",
             "FAILED or ABORTED consumes the permit but releases the reservation without debit.",
             "The executor must present the same connector, profile hash, declaration hash, and state anchor.",
-            "An expired, changed, revoked, or tampered permit blocks a new commit. After a successful commit, an exact canonical retry returns the stored receipt without another event or debit, including after permit, grant, or declaration expiry or revocation; a changed retry conflicts. This read-only replay cannot authorize new work.",
+            "An expired, changed, revoked, or tampered permit blocks a new commit. A state-anchor mismatch invalidates the permit and releases its reservation; restoring the old anchor cannot revive it. After a successful commit, an exact canonical retry returns the stored receipt without another event or debit, including after permit, grant, or declaration expiry or revocation; a changed retry conflicts. This read-only replay cannot authorize new work.",
         ],
     )
 
     doc.add_heading("7.2 Idempotency", level=2)
     doc.add_paragraph(
-        "The idempotency key binds a canonical hash of the connector-submitted intent and evidence bundle before external resolution. An exact evaluation replay therefore returns an active permit or the original non-executable result without calling the resolver again; the separately computed result request hash binds the authoritative resolved bundle used by the gate. Replay of a consumed, expired, revoked, or otherwise invalidated permit fails closed and never reissues ALLOW. A different submitted request under the same key is a conflict and produces no second decision or permit. Executor replay is separate: an exact canonical retry after a successful commit returns the stored receipt without a second event or debit, including after permit, grant, or declaration expiry or revocation, while a changed retry conflicts. This read-only replay cannot authorize new work. In the HTTP adapter, the Idempotency-Key header must exactly equal intent.idempotency_key; a mismatch is rejected before evaluation."
+        "The idempotency key binds a canonical hash of the connector-submitted intent and evidence bundle before external resolution. An exact evaluation replay therefore returns an active permit or the original non-executable result without calling the resolver again; the separately computed permit request hash binds the authoritative resolved bundle used by the gate. Replay of a consumed, expired, revoked, or otherwise invalidated permit fails closed and never reissues ALLOW. Policy invalidations return the ordinary coarse REFUSAL/EXECUTION_DENIED operator result without a second decision or event; detailed reasons remain in architect permit state. Documented consumed and expired permit lifecycle errors remain distinct, while integrity faults remain transport-level halts. A different submitted request under the same key is a conflict and produces no second decision or permit. Executor replay is separate: an exact canonical retry after a successful commit returns the stored receipt without a second event or debit, including after permit, grant, or declaration expiry or revocation, while a changed retry conflicts. This read-only replay cannot authorize new work. In the HTTP adapter, the Idempotency-Key header must exactly equal intent.idempotency_key; a mismatch is rejected before evaluation."
     )
 
     doc.add_heading("7.3 Revocation", level=2)
     doc.add_paragraph(
-        "A grant revocation recorded before commit invalidates every outstanding permit and releases its reservation. A later grant cannot revive an old permit. Revocation evidence is appended to the local chain. A caller-supplied revoked_at may be at most five seconds ahead of the trusted processing clock."
+        "A grant revocation recorded before commit invalidates every outstanding permit and releases its reservation. A later grant cannot revive an old permit. Grant revocation evidence is appended to the local chain. A caller-supplied revoked_at may be at most five seconds ahead of the trusted processing clock. Permit signing-key revocation appends no event."
     )
 
     doc.add_heading("7.4 Append-only local evidence", level=2)
@@ -937,7 +970,7 @@ def add_integrity_revision(doc: Document) -> None:
         [
             "Every event carries an index, UTC time, event type, role, subject reference, payload, previous-event hash, event hash, and signature.",
             "A profile, declaration, permit, signature, or chain mismatch halts execution.",
-            "Raw secrets and reusable credentials are forbidden even in the local reference ledger.",
+            "Raw secrets and reusable credentials must not enter even the local reference ledger, and keeping them out is the integrator's obligation: the engine refuses a mapping key that reads as a credential field name but does not inspect values, and three free-text references reach signed events after only a non-empty and length check: approval_evidence_ref on declaration activation and on an authority grant, and evidence_ref on a revocation.",
             "Production storage must provide transactional append-only or WORM behavior and independent restore evidence.",
         ],
     )
@@ -949,7 +982,7 @@ def add_integrity_revision(doc: Document) -> None:
         [
             ("Action, effect, or resource mapping", "New profile version, witness hash, profile hash, and approval"),
             ("Control flag or evidence requirement", "New profile version and affected declarations"),
-            ("Connector, target, scope, limit, owner, or interface", "New declaration version and approval"),
+            ("Connector, target, scope, limit, approval authority, or off-limits set", "New declaration version and approval; external service and lineage records require separate governance"),
             ("Grant scope or validity", "New grant; old permit remains bound to old grant"),
             ("Runtime observation only", "Append evidence; do not rewrite the live gate"),
         ],
@@ -1117,18 +1150,20 @@ def add_api(doc: Document) -> None:
         doc,
         [
             "Every route requires mTLS and a workload identity carrying the exact route scope.",
-            "Every public SDK operation requires an explicit actor_scope; omission fails closed, no method supplies its required role as a default, and production derives the scope from verified workload identity.",
+            "Every public SDK operation requires an explicit actor_scope; omission fails closed, no method supplies its required role as a default, and production derives the scope from verified workload identity. Identifier, version, hash and role arguments require native Python str values so caller-defined equality cannot impersonate an actor.",
+            "Post-authorization resolver failures produce recorded REFUSAL/EXECUTION_DENIED with the submitted request hash and a consumed idempotency key. The architect decision names AUTHORITATIVE_RESOLUTION_FAILED; an exact retry preserves that refusal.",
             "The runtime intent and evidence schemas are internal evaluator inputs; a production adapter ignores connector-asserted truth values and overwrites them with authoritative evidence resolution and independently derived controls.",
             "Resolved evidence and derived controls are bound to the request and current-state anchor before evaluation.",
             "The operator route requires an Idempotency-Key header exactly equal to intent.idempotency_key; mismatch is rejected before evaluation.",
             "Wire SHA-256 inputs use exactly 64 hexadecimal characters in either case; the engine normalizes comparisons and emits canonical uppercase values.",
             "The executor consume route requires the path permit_hash to equal execution_request.permit_hash. The adapter passes the path value as route_permit_hash to commit_execution; mismatch fails with EXECUTION_PERMIT_MISMATCH before lookup, replay, consumption, or debit.",
             "The registry route passes its connector_id path selector to registry_record. A different or unknown selector fails with CONNECTOR_NOT_FOUND and maps to HTTP 404; the active connector record is never substituted.",
-            "If an in-process exception interrupts reference commit, the engine restores its pre-call state before re-raising. With state_path configured, SQLite serializes writers with BEGIN IMMEDIATE, commits permit consumption, debit, receipt, replay state, reservations, and the local event chain atomically for one node, and reloads one verified snapshot under the local lock for every public read.",
+            "If an in-process exception interrupts reference commit, the engine restores its pre-call ledger, debit, permit, receipt, and replay state before re-raising, except for the four commit refusals that invalidate the permit on purpose (an AUTHORITY_* grant failure, PERMIT_EXPIRED, STATE_ANCHOR_CHANGED, and RESOURCE_WINDOW_LIMIT): they keep the invalidation, and a later commit with that permit is refused with the same code. With state_path configured, SQLite serializes writers with BEGIN IMMEDIATE, commits permit consumption, debit, receipt, replay state, reservations, and the local event chain atomically for one node, and reloads one verified snapshot under the local lock for every public read.",
+            "The reference SQLite snapshot MAC authenticates bytes, not their place in time. A running instance refuses a shorter or forked event history, a missing row, or loss of a signing-key revocation or terminal permit invalidation it has observed. Honest newer history and terminal facts from another instance remain acceptable. A genuine older snapshot restored before a cold start is not detected: production storage must provide an independent monotonic anchor and restore verification. A counter inside the same rewritable snapshot does not provide that protection.",
             "Signer configuration is external runtime configuration. Reopening a state_path whose event chain contains Ed25519 envelopes requires a verifier-compatible event_signer with the same key_id; SQLite deliberately persists neither signer configuration nor private keys. Omitting the verifier, or supplying one that declares both an algorithm and a key_id and differs from the persisted envelope in either, fails closed with EVENT_SIGNER_REQUIRED. The EventSigner protocol requires only sign and verify, so a signer that does not declare both cannot be compared against the envelope at all; for such a signer the mismatch is not distinguished and reaches the caller as a chain verdict. A signer declaring the same key_id with different key material likewise cannot be told apart from a forged chain and so fails full-chain integrity verification.",
             "External JSON Schema references define profile, declaration, and runtime payloads.",
             "The HTTP adapter wraps the reference engine's primitive declaration and grant hashes into the response objects defined by OpenAPI.",
-            "A standard-library reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and enforces these wire rules end-to-end: it derives the route scope from the transport identity and never the body, binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.",
+            "A reference WSGI adapter (sdk/python/nc25_universal_adapter.py) implements every route and validates each POST body against the packaged JSON Schemas with pinned jsonschema before calling the engine. It reads the reference X-Workload-Scope header rather than the body; that header does not authenticate a principal. Production derives role and requester from verified workload identity. It binds the posted activation profile and declaration to the engine's sealed hashes, requires the Idempotency-Key header to equal intent.idempotency_key, binds the path permit hash to the body, and maps engine outcomes to the declared HTTP statuses. The engine's default paths are standard-library only; the optional Ed25519 signers require the pinned cryptography wheel and fail closed without it. Production replaces the scope header with mTLS plus scoped OAuth.",
             "A contract error is distinct from a normalized non-executable business result.",
             "Integrity failure returns no permit and requires an operational halt.",
         ],
@@ -1143,10 +1178,11 @@ def add_failure_matrix(doc: Document) -> None:
         [
             ("Missing required evidence", "REFUSAL", "No", "None"),
             ("Structurally valid evidence with INVALID, REVOKED, or EXPIRED status", "REFUSAL", "No", "None"),
-            ("Malformed evidence object, hash, reference, or unknown status", "Contract error / halt", "No decision", "None"),
+            ("Malformed submitted evidence object, hash, reference, or unknown status", "Contract error / halt", "No decision", "None"),
+            ("Resolver failure or malformed/future authoritative output", "REFUSAL", "No", "None"),
             ("Ambiguous request", "MANUAL_REVIEW", "No", "None"),
             ("Manual-review flag true", "MANUAL_REVIEW", "No", "None"),
-            ("Hard-block flag true", "REFUSAL", "No", "None"),
+            ("Hard-block flag true or prerequisite false, with no ambiguity flag", "REFUSAL", "No", "None"),
             ("Binding, authority, action-target pairing, or scope mismatch", "REFUSAL", "No", "None"),
             ("Structural capacity unavailable", "REFUSAL", "Yes; structural=0", "None"),
             ("Domain resource rule or window unavailable", "REFUSAL", "Yes; effect=0", "None"),
@@ -1158,6 +1194,9 @@ def add_failure_matrix(doc: Document) -> None:
         ],
         [3600, 2250, 2050, 1460],
         font_size=7.8,
+    )
+    doc.add_paragraph(
+        "Control results are checked only after the authorization, resolver, and evidence checks pass, and before the structural and effect gates. Within the control results, ambiguity is checked first, so an ambiguous request with a false prerequisite or a true hard-block flag returns MANUAL_REVIEW rather than REFUSAL, and its recorded decision names only AMBIGUOUS_INTENT. Otherwise a false prerequisite or a true hard-block flag returns REFUSAL before any manual-review flag is checked."
     )
 
 
@@ -1171,9 +1210,9 @@ def add_production(doc: Document) -> None:
             ("Optional Ed25519 permit/event envelope", "KMS/HSM-backed detached signature with managed key policy", "Tamper, wrong-key, rotation, and independent-verification evidence"),
             ("Versioned permit signature envelope (shipped; key_id-routed verification, rotation, revocation)", "Managed key custody source behind the same envelope; key ceremonies and revocation evidence", "Wire-contract conformance and independent signature verification"),
             ("Connector-supplied evidence claims", "Inject an authoritative evidence resolver; exceptions, malformed output, and intent mismatch fail closed", "Override, malformed-output, and request/state binding tests"),
-            ("Connector-supplied control booleans", "Inject an authoritative control resolver (shipped injection point); derived results replace the intent flags and bind into the request hash; failures fail closed", "Independent control-derivation and spoofed-control-rejection tests"),
+            ("Connector-supplied control and ambiguity flags", "Inject an authoritative control resolver (shipped injection point); derived results replace the intent flags and bind into the permit request hash; failures fail closed", "Independent control-derivation and spoofed-control-rejection tests"),
             ("In-memory event list", "Transactional append-only or WORM storage", "Retention configuration and restore test"),
-            ("Optional single-node SQLite idempotency", "Managed or replicated unique constraint and replay-safe result store where multi-node availability is required", "Concurrency, restart, and failover tests"),
+            ("Optional single-node SQLite idempotency", "Independent monotonic restore anchor, retained history, and a replay-safe result store; replication where multi-node availability is required", "Genuine older-snapshot restore refusal, concurrency, restart, and failover tests"),
             ("In-memory execution replay", "Store execution request hash and receipt atomically with permit consumption", "Lost-response retry and changed-retry conflict tests"),
             ("Required local OTCS SQLite outbox", "Transactional replicated outbox or workflow store preserving exact requests, receipts, and reconciliation state", "Crash-before-call, ambiguous-response, and failover tests"),
             ("Project-idempotent OTCS append port", "Authenticated expected-head compare-and-swap client with signature and inclusion-proof verification", "Duplicate suppression, stale-head, signature, proof, and replay tests"),
@@ -1194,13 +1233,13 @@ def add_production(doc: Document) -> None:
     add_bullets(
         doc,
         [
-            "Connector-supplied evidence status and prerequisite, hard-block, or manual-review booleans are never authority in production: the engine ships an evidence resolver and a control resolver whose derived results replace the connector claims as gate inputs, and production MUST wire both to authoritative systems. Without the resolvers the reference engine gates on the declared intent flags — a documented reference boundary, not a production posture.",
+            "Connector-supplied evidence status and prerequisite, hard-block, manual-review or ambiguity flags are never authority in production: the engine ships an evidence resolver and a control resolver whose derived results replace the connector claims as gate inputs, and production MUST wire both to authoritative systems. Without the resolvers the reference engine gates on the declared intent flags — a documented reference boundary, not a production posture.",
             "The production evaluator resolves authoritative evidence and derives controls before the reference gate boundary.",
-            "No raw secret, token, password, private key, or reusable credential enters an intent, event, receipt, or registry record.",
+            "No raw secret, token, password, private key, or reusable credential may enter an intent, event, receipt, or registry record. The engine enforces this only for mapping keys that read as credential field names; a secret placed in the value of an ordinary field, such as approval_evidence_ref or evidence_ref, reaches the signed event, so keeping values clean is the integrator's obligation.",
             "The connector has no write path to profile, declaration, gate, or architect store.",
             "Operator and observer surfaces never expose gate internals.",
-            "Revocation and expiry are checked again at commit, not only at evaluation.",
-            "A local integrity failure blocks every later operation until investigated.",
+            "Grant revocation and expiry, permit expiry, permit signing-key revocation, and declaration validity are checked again at commit, not only at evaluation. Evidence status and derived controls are not re-resolved at commit, so a permit can be committed on the resolver state at its issuance for up to its sealed lifetime of at most 900 seconds; a shorter configured permit TTL narrows that window.",
+            "A profile-seal, declaration-seal, or event-chain failure is detected again on every operation and blocks every later operation while the damage remains; any other integrity failure, such as a permit hash or signature failure, refuses only the calls that meet it. The reference keeps no halt latch and records no integrity refusal, so production must stop the instance on any integrity failure until it is investigated.",
             "Logs and evidence use enterprise data-classification, retention, and access controls.",
         ],
     )
@@ -1216,11 +1255,44 @@ def add_production(doc: Document) -> None:
             "Integrity failures remain raised hard errors because a compromised seal or ledger cannot safely author a new disposition.",
             "This reference has no downstream caller or independent rule-conflict detector, so integrity_failure, downstream_unavailable, and rule_conflict are not decorative configuration fields.",
             "A production extension adds a reviewed runtime branch and a new schema version before adding another configurable failure condition.",
-            "Every inbound profile, declaration, and runtime message has a normative JSON Schema, exercised by the shipped conformance suite. The reference engine enforces its semantic contract itself; wire-ingress schema validation is an integrator obligation (README step 5), because the standard-library reference adapter deliberately carries no third-party schema dependency.",
+            "Every inbound profile, declaration, and runtime message has a normative JSON Schema, exercised by the shipped conformance suite. The reference adapter validates each POST body before the engine and refuses with SCHEMA_VALIDATION_UNAVAILABLE if jsonschema or the packaged schemas are absent or invalid. The engine enforces its semantic contract; integrators must enforce the same schema boundary on any other ingress path.",
             "The conformance suite activates date-time format checking and carries negative probes for malformed formats and overlong strings.",
         ],
     )
 
+
+
+def acceptance_step_ids() -> tuple[str, ...]:
+    """The step names of tests/run_acceptance.py, read from its one STEPS literal."""
+    path = ROOT / "tests" / "run_acceptance.py"
+    node = sole_assignment(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)), "STEPS", where=path.name)
+    if node is None:
+        raise RuntimeError(f"STEPS not found in {path.name}")
+    return tuple(step[0] for step in ast.literal_eval(node))
+
+
+def acceptance_rows() -> list[tuple[str, str, str]]:
+    """One table row per acceptance step, in the runner's order.
+
+    The rows are keyed by step name, so a step without a row, or a row without
+    a step, stops the build: the table cannot fall short of the suite the
+    acceptance report certifies.
+    """
+    rows = {
+        "functional_behaviour": ("Functional behavior", f"{FUNCTIONAL_TEST_COUNT} positive and negative state-machine tests, each run against all three shipped profiles", "All pass on all three profiles"),
+        "semantic_contracts": ("Semantic contradictions", f"{SEMANTIC_TEST_COUNT} profile, declaration, role, and input tests", "All rejected as designed"),
+        "safety_mutations": ("Deliberate-break sensitivity", f"{SAFETY_MUTATION_COUNT} named safety facts", "Each mutation produces its own expected refusal or error"),
+        "contract_conformance": ("Contract conformance", f"{CONFORMANCE_CHECK_COUNT} checks covering shipped artefacts, active format and length bounds, live outputs, wire references, route table, per-route security, and engine operations", "All validate and resolve; reported NOT_RUN, never as a pass, when the optional libraries are absent"),
+        "declaration_field_census": ("Declaration field census", f"{CENSUS_TEST_COUNT} tests holding each fixed declaration and registry field to its classification in DECLARATION-FIELDS.md and to the engine line that consumes it", "The inventory and the document agree; a new field or a removed engine consumer is the first failure"),
+        "contract_regressions": ("Contract regressions", f"{EXTERNAL_REGRESSION_COUNT} focused tests derived from the executable suite", "Each pins one contract fact: a defect the engine once had, or a refusal code that no other check witnessed"),
+        "otcs_bridge": ("OTCS bridge", f"{OTCS_BRIDGE_TEST_COUNT} tests over the permit-gated append seam, including every declared refusal code of its own vocabulary", "Each refusal answers with its own code, and the declared vocabulary equals the measured one"),
+        "failure_surface_ratchet": ("Failure-surface ratchet", "Layered closed-world vocabularies, both emission-point counts with the dynamic gap enumerated, runtime-observed witnesses, and architect decisions", "No unclassified emission path, no silent runtime sink, no unacknowledged baseline delta"),
+        "package_verifier": ("Package integrity", "Sources, schemas, API routes, hashes, registry, document", "All package checks pass"),
+    }
+    steps = acceptance_step_ids()
+    if len(set(steps)) != len(steps) or set(steps) != set(rows):
+        raise RuntimeError(f"ACCEPTANCE_TABLE_ROWS steps={list(steps)} rows={sorted(rows)}")
+    return [rows[step] for step in steps]
 
 
 def add_acceptance(doc: Document) -> None:
@@ -1229,16 +1301,7 @@ def add_acceptance(doc: Document) -> None:
     add_table(
         doc,
         ["Check set", "Coverage", "Expected result"],
-        [
-            ("Functional behavior", f"{FUNCTIONAL_TEST_COUNT} positive and negative state-machine tests, each run against all three shipped profiles", "All pass on all three profiles"),
-            ("Semantic contradictions", f"{SEMANTIC_TEST_COUNT} profile, declaration, role, and input tests", "All rejected as designed"),
-            ("Deliberate-break sensitivity", f"{SAFETY_MUTATION_COUNT} named safety facts", "Each mutation produces its own expected refusal or error"),
-            ("Contract conformance", f"{CONFORMANCE_CHECK_COUNT} checks covering shipped artefacts, active format and length bounds, live outputs, wire references, route table, per-route security, and engine operations", "All validate and resolve; reported NOT_RUN, never as a pass, when the optional libraries are absent"),
-            ("Contract regressions", f"{EXTERNAL_REGRESSION_COUNT} focused tests derived from the executable suite", "Each pins one contract fact: a defect the engine once had, or a refusal code that no other check witnessed"),
-            ("OTCS bridge", f"{OTCS_BRIDGE_TEST_COUNT} tests over the permit-gated append seam, including every declared refusal code of its own vocabulary", "Each refusal answers with its own code, and the declared vocabulary equals the measured one"),
-            ("Failure-surface ratchet", "Layered closed-world vocabularies, both emission-point counts with the dynamic gap enumerated, runtime-observed witnesses, and architect decisions", "No unclassified emission path, no silent runtime sink, no unacknowledged baseline delta"),
-            ("Package integrity", "Sources, schemas, API routes, hashes, registry, document", "All package checks pass"),
-        ],
+        acceptance_rows(),
         [2500, 4510, 2350],
     )
     doc.add_paragraph(
@@ -1349,6 +1412,7 @@ def add_appendices(doc: Document, crosswalk: dict) -> None:
             ("sdk/python/nc25_universal_ledger.py", "Reference state machine"),
             ("sdk/python/nc25_universal_adapter.py", "Reference WSGI HTTP adapter enforcing the wire contract"),
             ("sdk/python/nc25_otcs_bridge.py", "Permit-gated OTCS append bridge with durable recovery outbox"),
+            ("sdk/python/nc25ol_reader.py", "Independent, fingerprint-pinned observer-export reader"),
             ("profiles/PROFILE-AUTHORING-CHECKLIST.md", "Required profile authoring gates"),
             ("profiles/banking/", "Bank profile and questionnaire crosswalk"),
             ("profiles/document-release/reference-connection.json", "Second executable reference profile"),
@@ -1425,9 +1489,12 @@ def build() -> Path:
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     # Fixed on purpose: the builder is deterministic, and identical inputs
-    # must give identical bytes, so these are NOT build dates and do not move
-    # with a rebuild. The date that identifies a version is the acceptance
-    # report's verification date; the bytes that identify it are the manifest.
+    # must give identical bytes on any operating system with the locked
+    # dependencies under the same Python and zlib (another zlib may compress
+    # the same members differently), so these are NOT build dates and do not
+    # move with a rebuild. The date that identifies a version is the
+    # acceptance report's verification date; the bytes that identify it are
+    # the manifest.
     doc.core_properties.created = datetime(2026, 7, 28, 0, 0, 0)
     doc.core_properties.modified = datetime(2026, 8, 1, 0, 0, 0)
     doc.save(OUTPUT)

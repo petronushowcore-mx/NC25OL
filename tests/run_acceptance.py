@@ -10,19 +10,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_ACCEPTANCE_STEP_COUNT = 8
+REQUIRED_ACCEPTANCE_STEP_COUNT = 9
 EXPECTED_STEP_PATHS = {
     'functional_behaviour': 'tests/test_universal_connection.py',
     'semantic_contracts': 'tests/test_semantic_contracts.py',
     'safety_mutations': 'tests/test_safety_mutations.py',
     'contract_conformance': 'tests/test_contract_conformance.py',
+    'declaration_field_census': 'tests/test_declaration_field_census.py',
     'contract_regressions': 'tests/test_contract_regressions.py',
     'otcs_bridge': 'tests/test_otcs_bridge.py',
     'failure_surface_ratchet': 'tests/check_failure_surface.py',
     'package_verifier': 'tests/verify_package.py',
 }
 
-# The four unittest steps require a bare `OK` line as well as the count. The
+# A report whose two digests the generator's bootstrap rebound carries this sentence until
+# a passing run regenerates it. The generator writes it and the package verifier reads it,
+# both from here; the verifier admits it only inside the acceptance run whose results
+# regenerate the report, the run with --json-output, which marks its steps' environment
+# with ACCEPTANCE_RUN_FLAG. Every other run, the final run and CI among them, refuses it.
+ACCEPTANCE_RUN_FLAG = "NC25_ACCEPTANCE_RUN"
+REBIND_MARKER = (
+    "The digests above were rebound without an acceptance run: the figures in this\n"
+    "report are certified only once acceptance passes and the report is regenerated."
+)
+
+# The five unittest steps require a bare `OK` line as well as the count. The
 # count is taken from `Ran N tests`, and that line does not change when a test
 # is skipped - unittest reports the skip on the verdict line instead, as
 # `OK (skipped=N)`, and still exits zero. Requiring `^OK$` is what makes a
@@ -33,6 +45,7 @@ STEPS = (
     ("semantic_contracts", "tests/test_semantic_contracts.py", (r"Ran \d+ tests", r"(?m)^OK$"), r"Ran (?P<passed>\d+) tests"),
     ("safety_mutations", "tests/test_safety_mutations.py", (r"SAFETY_MUTATIONS=\d+/\d+ PASS",), r"SAFETY_MUTATIONS=(?P<passed>\d+)/(?P<total>\d+) PASS"),
     ("contract_conformance", "tests/test_contract_conformance.py", (r"CONTRACT_CONFORMANCE=\d+/\d+ PASS",), r"CONTRACT_CONFORMANCE=(?P<passed>\d+)/(?P<total>\d+) PASS"),
+    ("declaration_field_census", "tests/test_declaration_field_census.py", (r"Ran \d+ tests", r"(?m)^OK$"), r"Ran (?P<passed>\d+) tests"),
     ("contract_regressions", "tests/test_contract_regressions.py", (r"Ran \d+ tests", r"(?m)^OK$"), r"Ran (?P<passed>\d+) tests"),
     # Run the bridge separately so its failures keep their own step name
     # and its tests are counted once.
@@ -42,14 +55,27 @@ STEPS = (
 )
 
 
-def extract_step_count(step_id: str, combined: str, pattern: str) -> tuple[int, int]:
+def extract_step_count(
+    step_id: str, combined: str, pattern: str, declared_total: int | None = None
+) -> tuple[int, int]:
+    """The step's passed/total pair; a unittest step's total is its declared count.
+
+    `Ran N tests` carries no total, and taking N for both halves made the pair
+    one number twice. A unittest step's total is the number of tests its module
+    declares, counted apart from the run, so a suite that ran fewer is refused.
+    """
     matches = list(re.finditer(pattern, combined))
     if len(matches) != 1:
         raise SystemExit(f"ACCEPTANCE_COUNT_INVALID {step_id} matches={len(matches)}")
     match = matches[0]
     passed = int(match.group("passed"))
     total_text = match.groupdict().get("total")
-    total = int(total_text) if total_text is not None else passed
+    if total_text is not None:
+        total = int(total_text)
+    elif declared_total is not None:
+        total = declared_total
+    else:
+        raise SystemExit(f"ACCEPTANCE_TOTAL_UNDECLARED {step_id}")
     if passed != total:
         raise SystemExit(
             f"ACCEPTANCE_COUNT_NOT_PASS {step_id} passed={passed} total={total}"
@@ -81,6 +107,52 @@ def validate_step_manifest(steps) -> None:
         raise AssertionError(f"ACCEPTANCE_STEP_MANIFEST expected={expected} actual={actual}")
 
 
+def acceptance_environment(
+    source: dict[str, str], *, regenerates_report: bool = False
+) -> dict[str, str]:
+    """The environment every step runs with: bytecode writes off, no mutant override.
+
+    The reader and adapter suites take their subject from NC25_READER_MUTANT and
+    NC25_ADAPTER_MUTANT so the mutation tools can swap it; inherited by a step,
+    that swap would let acceptance count a reader or adapter it never shipped.
+    ACCEPTANCE_RUN_FLAG admits a report that still carries REBIND_MARKER, so only
+    the run whose results regenerate the report sets it. An inherited flag is
+    dropped like an override: a run that regenerates nothing, the final run and
+    CI among them, must refuse a report no passing run has rewritten.
+    """
+    environment = {
+        key: value for key, value in source.items()
+        if re.fullmatch(r"NC25_\w+_MUTANT", key) is None and key != ACCEPTANCE_RUN_FLAG
+    }
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    if regenerates_report:
+        environment[ACCEPTANCE_RUN_FLAG] = "1"
+    return environment
+
+
+def declared_test_count(relative_path: str, environment: dict[str, str]) -> int:
+    """How many tests a unittest step's module declares, counted apart from its run."""
+    probe = (
+        "import sys, unittest\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "print(unittest.defaultTestLoader.loadTestsFromName(sys.argv[2]).countTestCases())\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", probe, str(ROOT / "tests"), Path(relative_path).stem],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+    count = result.stdout.strip().splitlines()[-1:] if result.returncode == 0 else []
+    if not count or not count[0].isdigit():
+        raise SystemExit(f"ACCEPTANCE_DECLARED_COUNT_UNAVAILABLE {relative_path}")
+    return int(count[0])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json-output", type=Path)
@@ -89,8 +161,10 @@ def main() -> None:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     validate_step_manifest(STEPS)
-    environment = os.environ.copy()
-    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    # The run with --json-output is the one whose results regenerate the report.
+    environment = acceptance_environment(
+        dict(os.environ), regenerates_report=args.json_output is not None
+    )
     completed: list[dict[str, object]] = []
     external_core: dict[str, str] = {"source_mode": "", "external_source_checks": ""}
     for step_id, relative_path, required_markers, count_pattern in STEPS:
@@ -122,7 +196,11 @@ def main() -> None:
             raise SystemExit(
                 f"ACCEPTANCE_MARKER_MISSING {step_id} patterns={missing}"
             )
-        passed, total = extract_step_count(step_id, combined, count_pattern)
+        declared = (
+            declared_test_count(relative_path, environment)
+            if "(?P<total>" not in count_pattern else None
+        )
+        passed, total = extract_step_count(step_id, combined, count_pattern, declared)
         completed.append(
             {"id": step_id, "status": "PASS", "passed": passed, "total": total}
         )
@@ -153,8 +231,14 @@ def main() -> None:
         # changes its entry, so binding it would bind nothing) and the digest
         # of the specification document. The report carries both, and the
         # package verifier recomputes them from the shipped bytes, so a report
-        # generated for a different tree - or a document rebuilt after the
-        # report was generated - is refused instead of certifying stale bytes.
+        # left from a different tree - or from a document rebuilt after it was
+        # generated - is refused. The binding proves which bytes a report
+        # names, not that its figures came from them: the --rebind-only
+        # bootstrap of build_acceptance_report.py writes exactly these two
+        # digests without a run, so after a rebind the figures are certified
+        # only once acceptance passes and the generator rewrites the report.
+        # The bootstrap therefore also writes REBIND_MARKER; the rewrite removes
+        # it, and the package verifier refuses it in every run but this one.
         manifest = json.loads(
             (ROOT / "PACKAGE-MANIFEST.json").read_text(encoding="utf-8")
         )

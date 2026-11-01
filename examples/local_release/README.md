@@ -84,7 +84,7 @@ refusal/assertion inside each selected case; it does not claim global first-fail
 ordering. The scenario runner also checks its result classifier with positive and
 negative controls. All mutations operate on copies. Temporary files must stay outside
 the package; set `TMPDIR` on Unix or `TEMP` and `TMP` on Windows when needed.
-These example checks are separate from the core eight-step acceptance suite.
+These example checks are separate from the core nine-step acceptance suite.
 
 ## Produce a preview from the OTCS candidate
 

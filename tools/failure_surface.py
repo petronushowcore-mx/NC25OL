@@ -12,7 +12,7 @@ import sys
 import unittest
 import unittest.case
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import spec_counts  # noqa: E402  the one home of the sole-assignment reader
@@ -44,8 +44,19 @@ PROCEDURES = {
     "engine_refusal_codes": (
         "Closed world over the engine source: string constants at raise sites"
         " outside the pinned helpers, literal code arguments at pinned-helper"
-        " call sites, pinned-helper code parameter defaults, and the declared"
-        " code sets of the pinned dynamic raise sites."
+        " call sites, pinned-helper code parameter defaults, and the code sets"
+        " of the pinned dynamic raise sites, each derived from the sites that"
+        " supply its codes: the grant-validity returns, the restore helper's call"
+        " sites, and the writes of a permit's invalidation reason, which are its"
+        " assignments as an attribute or as a class-body name, annotated or"
+        " not, and the keyword arguments that name it. A value subscripted from"
+        " any mapping under the field's own name is taken to be a saved or"
+        " persisted copy of one of those writes, and its origin is not checked."
+        " A tuple target that contains the field is named as unreadable, and"
+        " writes in other forms, such as through setattr, a ** mapping or a"
+        " positional constructor argument, are not read. The restore path's"
+        " translation of a caught refusal adds no code of its own: the code it"
+        " raises again was set at a site this procedure already reads."
     ),
     "wire_error_codes": (
         "Closed world over the adapter source: literal code arguments of"
@@ -57,8 +68,9 @@ PROCEDURES = {
         " raised in-process to a Python caller and cannot travel the adapter's"
         " wire, which carries no OTCS route at all. Literal code arguments at"
         " the bridge's own pinned-helper call sites, literal codes at its own"
-        " raise sites, and the codes derived from the one site that iterates a"
-        " literal table of (value, code) pairs. OTCSAppendRejected is excluded"
+        " raise sites, and the codes of a literal table of (value, code) pairs,"
+        " credited only to the helper call that takes its code from the loop"
+        " over that table. OTCSAppendRejected is excluded"
         " on purpose: the bridge defines it and the downstream client raises"
         " it, so counting it would claim a vocabulary the bridge does not own."
     ),
@@ -73,7 +85,8 @@ PROCEDURES = {
         " Procedure coverage pairs figure names with procedure names; it does"
         " not validate the wording of this description. This counts"
         " RAISE SITES, not refusal sites: the few that raise TypeError carry no"
-        " contract code and are counted here and named as dynamic, because a"
+        " contract code, and a bare raise passes on whatever its handler"
+        " caught; both are counted here and named as dynamic, because a"
         " raise the inventory did not account for is the thing this figure"
         " exists to make impossible."
     ),
@@ -133,6 +146,16 @@ PROCEDURES = {
         " anchoring every pattern to exactly one code is a property this"
         " package holds."
     ),
+    "asserted_codes": (
+        "Engine refusal codes checked by a passing unittest assertEqual with"
+        " a production-raised code object and an expected plain string, or by"
+        " a passing code-discriminating assertRaisesRegex. This is separate"
+        " from witnessed_codes, which also counts ordinary equalities."
+    ),
+    "assertion_sites": (
+        "Test-case IDs and assertion kinds that produced asserted engine or"
+        " bridge codes in this recorded run."
+    ),
     "unwitnessed_codes": (
         "engine_refusal_codes minus witnessed_codes: the committed debt. The"
         " baseline pins it as a no-growth ratchet, not a completeness claim."
@@ -149,6 +172,10 @@ PROCEDURES = {
         " Without it the bridge vocabulary is witnessed by nothing: a"
         " deleted sweep row loses its witness in silence while the method"
         " count and the declared-equals-measured check both stay green."
+    ),
+    "asserted_bridge_codes": (
+        "Bridge refusal codes checked by the same passing assertion forms as"
+        " asserted_codes, without crediting engine or wire observations."
     ),
     "unwitnessed_bridge_codes": (
         "bridge_refusal_codes minus witnessed_bridge_codes: the bridge's"
@@ -182,8 +209,11 @@ RUNTIME_PROCEDURE_NAMES = frozenset(
         "constructed_bridge_codes",
         "foreign_translated_codes",
         "witnessed_codes",
+        "asserted_codes",
+        "assertion_sites",
         "unwitnessed_codes",
         "witnessed_bridge_codes",
+        "asserted_bridge_codes",
         "unwitnessed_bridge_codes",
     }
 )
@@ -238,6 +268,12 @@ PINNED_EXCEPTION_HELPERS = frozenset(
 # emit codes the closed world does not contain, and a declaration that cannot
 # notice is not a declaration.
 RESTORE_PAIR_HELPER = "restore_pairs"
+# The permit field a dynamic engine raise re-emits. Its code set is derived
+# the same way, from the writes that put a code into the field.
+INVALIDATION_FIELD = "invalidated_reason"
+# The engine function that catches a refusal raised while a stored state is
+# checked and raises it again as an IntegrityViolation with the same code.
+RESTORE_TRANSLATION_SITE = "_restore_state"
 REFUSAL_CALLEES = frozenset({"ContractViolation", "IntegrityViolation"})
 # The bridge is a third closed world with its own exception classes and its
 # own refusing helpers. Both are properties of the SOURCE rather than one
@@ -260,23 +296,31 @@ TYPE_ERROR_OWNERS = frozenset(
     {"_scope_reader", "_state_locked", "_state_read_locked"}
 )
 
-# The recorded run: the FOUR unittest suites plus the two script suites, the
-# same modules the acceptance pipeline runs, minus the FOUR cases named in
-# RUNTIME_EXCLUDED_SUFFIXES - two self-referential (one re-runs this tool, one
-# re-runs the verifier fleet) and two that install this tool's own observation
-# machinery, which must not nest. Both counts were three and two when the
-# bridge had no suite and no step of its own; neither was recounted when it
-# got them.
+# The recorded run: the SIX unittest suites plus the two script suites, minus
+# the FOUR cases named in RUNTIME_EXCLUDED_SUFFIXES - two self-referential (one
+# re-runs this tool, one re-runs the verifier fleet) and two that install this
+# tool's own observation machinery, which must not nest. Every unittest and
+# script suite an acceptance step runs is here. The reader suite is here too,
+# though no acceptance step runs it, so it is named in RECORDED_ONLY_MODULES.
+# The counts were three and two when the bridge had no suite and no step of
+# its own, and the census suite got its step without joining this run; neither
+# change was recounted here when it happened.
 UNITTEST_SUITE_MODULES = (
     "test_universal_connection",
     "test_semantic_contracts",
+    "test_declaration_field_census",
     "test_contract_regressions",
     # Added when the bridge got its own acceptance step. Until then it reached
     # the recorded run only through an import inside the regressions, so its
     # constructions were credited to a suite that does not own them.
     "test_otcs_bridge",
+    "test_reader",
 )
 SCRIPT_SUITE_MODULES = ("test_contract_conformance", "test_safety_mutations")
+# Recorded-run suites no acceptance step runs. Their verdicts would otherwise
+# only ever be taken under observation, so every one of their methods is also
+# run here without it (_observation_changed_verdicts).
+RECORDED_ONLY_MODULES = frozenset({"test_reader"})
 # Anchored to the start of a line, and the LAST match is the one taken: an
 # unanchored search returns the first hit, which is not necessarily the run's
 # terminal verdict.
@@ -427,7 +471,9 @@ def _restore_pair_codes(tree: ast.AST) -> tuple[set[str], list[str]]:
     return codes, unreadable
 
 
-def _bridge_pair_table_codes(tree: ast.AST) -> tuple[set[str], list[str]]:
+def _bridge_pair_table_codes(
+    tree: ast.AST, specs: dict[str, tuple[int, str | None]]
+) -> tuple[dict[ast.Call, set[str]], list[str]]:
     """Codes a pinned bridge helper receives from a loop over (value, code) pairs.
 
     One site in the bridge iterates a literal tuple of pairs and calls
@@ -438,10 +484,15 @@ def _bridge_pair_table_codes(tree: ast.AST) -> tuple[set[str], list[str]]:
     declared list is a second writer of one fact and goes quiet the moment a
     pair is added.
 
+    The codes belong to the helper call that takes its code from the loop's
+    own code variable, and they are returned keyed by that call. A helper call
+    with a non-literal code anywhere else in the bridge, inside such a loop or
+    not, is not this site and stays UNCLASSIFIED.
+
     A pair whose second element is not a literal string is UNREADABLE and says
     so; it does not silently shrink the world.
     """
-    codes: set[str] = set()
+    sites: dict[ast.Call, set[str]] = {}
     unreadable: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.For):
@@ -452,10 +503,11 @@ def _bridge_pair_table_codes(tree: ast.AST) -> tuple[set[str], list[str]]:
             inner
             for inner in ast.walk(node)
             if isinstance(inner, ast.Call)
-            and _callee_name(inner) in BRIDGE_PINNED_HELPERS
+            and _callee_name(inner) in specs
         ]
         if not calls:
             continue
+        codes: set[str] = set()
         for element in node.iter.elts:
             if not isinstance(element, ast.Tuple) or len(element.elts) != 2:
                 unreadable.append(f"bridge-pair-table:{node.lineno}:not-a-pair")
@@ -468,7 +520,163 @@ def _bridge_pair_table_codes(tree: ast.AST) -> tuple[set[str], list[str]]:
                 )
             else:
                 codes.add(code)
+        pair = node.target.elts if isinstance(node.target, ast.Tuple) else []
+        for call in calls:
+            argument = _call_argument(call, specs[_callee_name(call)][0], "code")
+            if (
+                len(pair) == 2
+                and isinstance(pair[1], ast.Name)
+                and isinstance(argument, ast.Name)
+                and argument.id == pair[1].id
+            ):
+                sites[call] = codes
+    return sites, unreadable
+
+
+def _invalidation_codes(
+    tree: ast.AST, grant_codes: set[str]
+) -> tuple[set[str], list[str]]:
+    """The codes a permit's invalidation reason can hold, read off its writes.
+
+    `ContractViolation(record.invalidated_reason)` raises whatever an earlier
+    write left in that field, so its code set is the union of those writes. It
+    is DERIVED for the reason the restore helper's set is: an empty or a
+    declared set would stay quiet when a write with a new code is added.
+
+    A write is an assignment, annotated or not, whose target is the field as an
+    attribute or, in a class body, as a bare name, which is the field default;
+    a local or module variable spelled like the field is not a write of it. A
+    keyword argument that names the field is a write too. Its value is read as
+    a literal code; as the grant-validity carrier; as a parameter of the
+    writing function, read off the direct calls of that function by its own
+    name, where a call that passes anything but a literal code is UNREADABLE;
+    or as a subscript of any mapping under the field's own name,
+    `x["invalidated_reason"]`, which is taken to be a saved or persisted copy
+    of one of these writes, and where that mapping came from is not checked. A
+    None clears the field and adds nothing. Any other value is UNREADABLE and
+    says so, and so is a tuple or list target that contains the field. A write
+    in any other form is not seen at all, for example one through `setattr`, a
+    `**` mapping or a mapping key, a positional constructor argument, or a call
+    made through another name.
+    """
+    parents = _parents(tree)
+    codes: set[str] = set()
+    unreadable: list[str] = []
+
+    def is_field(target: ast.AST, statement: ast.AST) -> bool:
+        if isinstance(target, ast.Attribute):
+            return target.attr == INVALIDATION_FIELD
+        if not isinstance(target, ast.Name) or target.id != INVALIDATION_FIELD:
+            return False
+        # A bare name is the field only as a default whose nearest enclosing
+        # scope is a class body; a local or module variable is not the field.
+        scope = parents.get(statement)
+        while scope is not None and not isinstance(
+            scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            scope = parents.get(scope)
+        return isinstance(scope, ast.ClassDef)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword):
+            if node.arg != INVALIDATION_FIELD:
+                continue
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(
+                isinstance(target, (ast.Tuple, ast.List))
+                and any(is_field(item, node) for item in ast.walk(target))
+                for target in targets
+            ):
+                # Unpacking does not say which value lands in the field.
+                unreadable.append(f"{INVALIDATION_FIELD}:{node.lineno}:tuple-target")
+                continue
+            if not any(is_field(target, node) for target in targets):
+                continue
+        else:
+            continue
+        value = node.value
+        if value is None:
+            continue
+        if isinstance(value, ast.Constant) and value.value is None:
+            continue
+        where = f"{INVALIDATION_FIELD}:{node.lineno}"
+        code = _literal_code(value)
+        if code is not None:
+            codes.add(code)
+            continue
+        if isinstance(value, ast.Name) and value.id == "authority_failure":
+            codes.update(grant_codes)
+            continue
+        if (
+            isinstance(value, ast.Subscript)
+            and isinstance(value.slice, ast.Constant)
+            and value.slice.value == INVALIDATION_FIELD
+        ):
+            continue
+        function = parents.get(node)
+        while function is not None and not isinstance(
+            function, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            function = parents.get(function)
+        params = [] if function is None else [item.arg for item in function.args.args]
+        if isinstance(value, ast.Name) and value.id in params:
+            # A method's call sites do not pass `self`.
+            position = params.index(value.id) - (1 if params[0] == "self" else 0)
+            calls = [
+                call
+                for call in ast.walk(tree)
+                if isinstance(call, ast.Call) and _callee_name(call) == function.name
+            ]
+            for call in calls:
+                code = _literal_code(_call_argument(call, position, value.id))
+                if code is None:
+                    unreadable.append(f"{where}:call-{call.lineno}")
+                else:
+                    codes.add(code)
+            if calls:
+                continue
+        unreadable.append(f"{where}:{type(value).__name__}")
     return codes, unreadable
+
+
+def _restore_translation_calls(tree: ast.AST) -> set[ast.Call]:
+    """The calls that raise a caught engine refusal again as an integrity failure.
+
+    `_restore_state` catches a ContractViolation from `_restore_checked_state`
+    and raises `IntegrityViolation(exc.code, exc.detail)`. An IntegrityViolation
+    call is this site only inside an `except ContractViolation as <name>`
+    handler of a function by that name, with `<name>.code` as its first
+    argument. Any other dynamic raise there is not this site and stays
+    UNCLASSIFIED.
+    """
+    calls: set[ast.Call] = set()
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if function.name != RESTORE_TRANSLATION_SITE:
+            continue
+        for handler in ast.walk(function):
+            if not (
+                isinstance(handler, ast.ExceptHandler)
+                and isinstance(handler.type, ast.Name)
+                and handler.type.id == "ContractViolation"
+                and handler.name is not None
+            ):
+                continue
+            for call in ast.walk(handler):
+                if not isinstance(call, ast.Call) or not call.args:
+                    continue
+                first = call.args[0]
+                if (
+                    _callee_name(call) == "IntegrityViolation"
+                    and isinstance(first, ast.Attribute)
+                    and first.attr == "code"
+                    and isinstance(first.value, ast.Name)
+                    and first.value.id == handler.name
+                ):
+                    calls.add(call)
+    return calls
 
 
 def _dynamic_refusal_kind(
@@ -476,6 +684,8 @@ def _dynamic_refusal_kind(
     call: ast.Call,
     grant_codes: set[str],
     restore_codes: set[str],
+    invalidation_codes: set[str],
+    restore_translations: set[ast.Call],
     is_engine: bool,
 ) -> tuple[str, set[str]] | None:
     """Classify a known dynamic refusal raise; None means unclassified."""
@@ -484,6 +694,15 @@ def _dynamic_refusal_kind(
         # happened to share an owner name must not inherit their declaration.
         return None
     first = call.args[0]
+    if call in restore_translations:
+        # The restore translation raises a caught ContractViolation again as an
+        # IntegrityViolation with the same code and detail. In the shipped
+        # engine the guarded call is `_restore_checked_state`, so that code was
+        # set where the refusal was first raised, there or in the engine code
+        # it calls, at a site this scan reads on its own: the code is credited
+        # there, or the site is named as unclassified. So the kind adds no
+        # code, as the adapter's translation adds none to the wire.
+        return "integrity-translation-of-engine-code", set()
     if owner == RESTORE_PAIR_HELPER and isinstance(first, ast.JoinedStr):
         return "restore-pairs-interpolation", set(restore_codes)
     if owner in {"evaluate_intent", "commit_execution"}:
@@ -493,9 +712,9 @@ def _dynamic_refusal_kind(
             isinstance(first, ast.Attribute)
             and isinstance(first.value, ast.Name)
             and first.value.id == "record"
-            and first.attr == "invalidated_reason"
+            and first.attr == INVALIDATION_FIELD
         ):
-            return "state-invalidated-reason", set()
+            return "state-invalidated-reason", set(invalidation_codes)
     return None
 
 
@@ -615,12 +834,18 @@ def static_snapshot() -> tuple[dict[str, object], list[str]]:
     )
     helper_specs = _helper_code_specs(engine_tree)
     bridge_specs = _helper_code_specs(bridge_tree, BRIDGE_PINNED_HELPERS)
-    bridge_pair_codes, bridge_pair_unreadable = _bridge_pair_table_codes(bridge_tree)
+    bridge_pair_sites, bridge_pair_unreadable = _bridge_pair_table_codes(
+        bridge_tree, bridge_specs
+    )
     # One reader for one fact: the refusal side and the architect side both
     # need what _grant_validity can return, and two extractors computing it
     # separately would be free to disagree.
     grant_codes = _decision_returns(engine_tree, "_grant_validity")
     restore_codes, restore_unreadable = _restore_pair_codes(engine_tree)
+    invalidation_codes, invalidation_unreadable = _invalidation_codes(
+        engine_tree, grant_codes
+    )
+    restore_translations = _restore_translation_calls(engine_tree)
     engine_codes: set[str] = set()
     wire_codes: set[str] = set()
     bridge_codes: set[str] = set()
@@ -643,7 +868,9 @@ def static_snapshot() -> tuple[dict[str, object], list[str]]:
     # `dynamic_allowed` is the engine's privilege alone. Its dynamic refusal
     # kinds are declared and derived there; the bridge has no such declaration,
     # so a non-literal code in the bridge stays UNCLASSIFIED - fail-closed, the
-    # direction that makes `--write-baseline` refuse rather than invent.
+    # direction that makes `--write-baseline` refuse rather than invent. The
+    # one exception is the helper call that takes its code from the loop over
+    # a literal pair table, and only that call: its codes are that table's.
     sources = (
         (ENGINE_PATH, engine_tree, helper_specs, PINNED_EXCEPTION_HELPERS,
          REFUSAL_CALLEES, engine_codes, True),
@@ -659,9 +886,16 @@ def static_snapshot() -> tuple[dict[str, object], list[str]]:
         for node in ast.walk(tree):
             owner = _owner_name(node, parents)
             if isinstance(node, ast.Raise):
-                if node.exc is None or owner in pinned:
+                if owner in pinned:
                     continue
                 all_points += 1
+                if node.exc is None:
+                    # A bare raise passes on whatever its handler caught, a
+                    # driver error included. It names no code of its own, so
+                    # it adds nothing to a closed world, but it is a raise
+                    # statement and is counted and named like every other.
+                    dynamic_sites.append(name_dynamic_site(relative, owner, "re-raise"))
+                    continue
                 if not isinstance(node.exc, ast.Call):
                     unclassified.append(f"{relative}:{node.lineno}:raise-expression")
                     continue
@@ -683,6 +917,8 @@ def static_snapshot() -> tuple[dict[str, object], list[str]]:
                         call,
                         grant_codes,
                         restore_codes,
+                        invalidation_codes,
+                        restore_translations,
                         path == ENGINE_PATH,
                     )
                     if dynamic is None:
@@ -735,14 +971,15 @@ def static_snapshot() -> tuple[dict[str, object], list[str]]:
             argument = _call_argument(node, position, "code")
             code = _literal_code(argument) if argument is not None else default_code
             if code is None:
-                if path == BRIDGE_PATH and bridge_pair_codes:
+                pair_codes = bridge_pair_sites.get(node)
+                if pair_codes is not None:
                     # The pair-table site: its codes are derived above from the
                     # literal pairs it iterates, so it is a DYNAMIC point with a
                     # declared set, not an unclassified one.
                     dynamic_sites.append(
                         name_dynamic_site(relative, owner, "bridge-pair-table")
                     )
-                    target.update(bridge_pair_codes)
+                    target.update(pair_codes)
                 else:
                     unclassified.append(
                         f"{relative}:{node.lineno}:dynamic-helper:{helper}"
@@ -794,6 +1031,11 @@ def static_snapshot() -> tuple[dict[str, object], list[str]]:
         problems.append(
             "FAILURE_SURFACE_UNCLASSIFIED:restore-helper "
             + ",".join(sorted(restore_unreadable))
+        )
+    if invalidation_unreadable:
+        problems.append(
+            "FAILURE_SURFACE_UNCLASSIFIED:invalidated-reason "
+            + ",".join(sorted(invalidation_unreadable))
         )
     if architect_unresolved:
         problems.append(
@@ -879,6 +1121,8 @@ class _Observation:
         self.witnessed_engine_raw: set[str] = set()
         self.witnessed_wire_raw: set[str] = set()
         self.witnessed_bridge_raw: set[str] = set()
+        self.asserted_engine: dict[str, set[str]] = {}
+        self.asserted_bridge: dict[str, set[str]] = {}
         self.translated: set[str] = set()
         self.nondiscriminating: list[str] = []
 
@@ -932,7 +1176,7 @@ class _ObservedCode(str):
     """The code of a production-raised refusal, as test code sees it.
 
     A passing equality comparison performed by a frame inside tests/ records
-    the pair (this refusal was raised, its exact code was checked). Python's
+    contact with the code, including bookkeeping that asserts nothing. Python's
     subclass-priority rule routes both `exc.code == literal` and
     `literal == exc.code` through this __eq__. __ne__ must be defined too:
     str carries its own C-level __ne__, which would otherwise answer
@@ -1026,7 +1270,12 @@ def _install_observation(
 
         def code_get(self):
             raw = self.__dict__["code"]
-            if self.__dict__.get("_fs_production"):
+            # Only a reader in tests/ is handed the observed form. Production code
+            # that reads a caught code and passes it on gets the plain value: the
+            # replay refusal hands it to an identifier check that accepts exactly
+            # str, and under observation that check refused it, so the recorded
+            # run answered 400 where the package answers 200.
+            if self.__dict__.get("_fs_production") and _entered_from_tests():
                 return observed(raw)
             return raw
 
@@ -1066,6 +1315,27 @@ def _install_observation(
     )
     context = unittest.case._AssertRaisesContext
     original_exit = context.__exit__
+    original_assert_equal = unittest.TestCase.assertEqual
+
+    def traced_assert_equal(self, first, second, msg=None):
+        outcome = original_assert_equal(self, first, second, msg)
+        # Record the assertion call separately from ordinary test equality.
+        if _ACTIVE is not None and _is_test_file(sys._getframe(1).f_code.co_filename):
+            for observed, expected in ((first, second), (second, first)):
+                if not isinstance(observed, (_EngineObservedCode, _BridgeObservedCode)):
+                    continue
+                if type(expected) is not str or str.__eq__(observed, expected) is not True:
+                    continue
+                if isinstance(observed, _EngineObservedCode):
+                    sink, universe = _ACTIVE.asserted_engine, _ACTIVE.engine_universe
+                elif isinstance(observed, _BridgeObservedCode):
+                    sink, universe = _ACTIVE.asserted_bridge, _ACTIVE.bridge_universe
+                else:
+                    continue
+                code = str.__str__(observed)
+                if code in universe:
+                    sink.setdefault(code, set()).add(self.id() + "@assertEqual")
+        return outcome
 
     def traced_exit(self, exc_type, exc_value, traceback):
         outcome = original_exit(self, exc_type, exc_value, traceback)
@@ -1095,10 +1365,10 @@ def _install_observation(
                 # pattern that still matches did not discriminate on the code,
                 # which is exactly how a detail-only pattern passes its
                 # assertion while checking nothing about the code.
+                # That the pattern matches this rendering needs no asking:
+                # `outcome` is true only because the context's own __exit__
+                # found the pattern in str(exc_value).
                 rendering = str(exc_value)
-                checks_code = bool(
-                    pattern.search(code) or pattern.search(rendering)
-                )
                 ambiguous = sorted(
                     other
                     for other in universe
@@ -1108,9 +1378,17 @@ def _install_observation(
                         or pattern.search(rendering.replace(code, other, 1))
                     )
                 )
-                if checks_code and not ambiguous:
+                if not ambiguous:
                     getattr(_ACTIVE, sink_name).add(code[:])
-                elif checks_code:
+                    asserted = (
+                        _ACTIVE.asserted_engine
+                        if isinstance(exc_value, engine_class)
+                        else _ACTIVE.asserted_bridge
+                    )
+                    asserted.setdefault(code[:], set()).add(
+                        self.test_case.id() + "@assertRaisesRegex"
+                    )
+                else:
                     _ACTIVE.nondiscriminating.append(
                         f"pattern={pattern.pattern} code={code} "
                         f"also_matches={ambiguous[:3]}"
@@ -1131,6 +1409,8 @@ def _install_observation(
         )
         restores.append((context, "__exit__", original_exit, True))
         context.__exit__ = traced_exit
+        restores.append((unittest.TestCase, "assertEqual", original_assert_equal, True))
+        unittest.TestCase.assertEqual = traced_assert_equal
     except BaseException:
         # A half-applied patch set has no other path back to a clean process.
         _restore_observation(restores)
@@ -1157,6 +1437,99 @@ def _iter_cases(suite: unittest.TestSuite) -> Iterable[unittest.TestCase]:
             yield from _iter_cases(item)
         else:
             yield item
+
+
+@contextlib.contextmanager
+def _observing(modules: Iterable[object], observation: _Observation) -> Iterator[None]:
+    """Observe the engine, adapter and bridge modules into the given record."""
+    restores = _install_observation(*modules, observation)
+    try:
+        yield
+    finally:
+        _restore_observation(restores)
+
+
+def _method_failures(result: unittest.TestResult) -> set[str]:
+    """The ids of the failures reported inside a test method or its subtests."""
+    return {
+        test.id() for test, _ in result.errors + result.failures
+        if isinstance(getattr(test, "test_case", test), unittest.TestCase)
+    }
+
+
+def _observation_changed_verdicts(
+    result: unittest.TestResult,
+    observe: Callable[[], contextlib.AbstractContextManager[None]],
+    recorded_only: Iterable[unittest.TestCase],
+) -> list[str]:
+    """Name the cases whose verdict the observation itself changed.
+
+    The recorded run must not change what it records. Each test method with a
+    failure in the recorded run, and every method of a suite no acceptance step
+    runs (RECORDED_ONLY_MODULES), runs again alone twice: once under a fresh
+    observation and once without. Both directions are compared inside each
+    method: a subtest that fails only observed, and one that fails only plain.
+    A verdict the two lone runs disagree on is the observation's doing. A
+    verdict they agree on but the recorded run did not comes from that run's
+    order or shared state, and is named as such, so the diagnosis does not
+    point at the observation. A method that passed in the recorded run and
+    belongs to a suite an acceptance step runs is not rerun here: that step
+    runs it unobserved, and a failure there still reddens the package. A
+    failure reported outside a test method (a class or module fixture) cannot
+    be rerun alone, so no claim about the observation is made for it;
+    FAILURE_RUNTIME_SUITE still names it. The script suites are not rerun
+    either.
+    """
+    recorded = _method_failures(result)
+    methods: dict[str, unittest.TestCase] = {}
+    for test, _ in result.errors + result.failures:
+        method = getattr(test, "test_case", test)
+        if isinstance(method, unittest.TestCase):
+            methods.setdefault(method.id(), method)
+    for method in recorded_only:
+        methods.setdefault(method.id(), method)
+    if not methods:
+        return []
+
+    def failing(context: contextlib.AbstractContextManager[None]) -> set[str]:
+        with context:
+            return _method_failures(
+                unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(
+                    unittest.TestSuite(methods.values())
+                )
+            )
+
+    observed = failing(observe())
+    plain = failing(contextlib.nullcontext())
+    changed = sorted(observed ^ plain)
+    reordered = sorted((recorded ^ observed) - set(changed))
+    problems: list[str] = []
+    if changed:
+        problems.append(f"FAILURE_RUNTIME_OBSERVATION_CHANGED_VERDICT {changed}")
+    if reordered:
+        problems.append(f"FAILURE_RUNTIME_ISOLATION_CHANGED_VERDICT {reordered}")
+    return problems
+
+
+def _out_of_world(observation: _Observation) -> list[str]:
+    """Constructions whose code lies outside their own closed world.
+
+    A refusal raised with a code its vocabulary does not contain means the
+    static procedure missed an emission path. The engine was asked this and the
+    bridge was not, so a bridge code outside the bridge world was dropped in
+    silence from the witnessed bridge set, which is intersected with that world.
+    The wire world is not asked: the adapter re-emits engine codes by design,
+    and a code of neither vocabulary is named as foreign instead.
+    """
+    problems = []
+    for scope, constructed, universe in (
+        ("engine", observation.constructed_engine, observation.engine_universe),
+        ("bridge", observation.constructed_bridge, observation.bridge_universe),
+    ):
+        outside = constructed - universe
+        if outside:
+            problems.append(f"FAILURE_RUNTIME_OUT_OF_WORLD {scope}={sorted(outside)}")
+    return problems
 
 
 def runtime_snapshot(
@@ -1229,6 +1602,11 @@ def runtime_snapshot(
             problems.append(
                 f"FAILURE_RUNTIME_EXCLUSION_UNMATCHED {suffix} matched={matched}"
             )
+    # Collected before the run: a suite drops each case once it has run it.
+    recorded_only = [
+        case for case in _iter_cases(selected)
+        if type(case).__module__ in RECORDED_ONLY_MODULES
+    ]
     stream = io.StringIO()
     restores = _install_observation(
         ledger_module, adapter_module, bridge_module, observation
@@ -1267,6 +1645,14 @@ def runtime_snapshot(
                 script_markers[name] = match
     finally:
         _restore_observation(restores)
+    problems.extend(_observation_changed_verdicts(
+        result,
+        lambda: _observing(
+            (ledger_module, adapter_module, bridge_module),
+            _Observation(engine_universe, wire_universe, bridge_universe),
+        ),
+        recorded_only,
+    ))
 
     witnessed = observation.witnessed_engine_raw & observation.engine_universe
     if not observation.constructed_engine:
@@ -1287,11 +1673,7 @@ def runtime_snapshot(
             "FAILURE_RUNTIME_WITNESS_WITHOUT_CONSTRUCTION "
             f"{sorted(witnessed - observation.constructed_engine)}"
         )
-    # An engine refusal raised with a code the closed world does not contain
-    # means the static procedure missed an emission path.
-    outside = observation.constructed_engine - observation.engine_universe
-    if outside:
-        problems.append(f"FAILURE_RUNTIME_OUT_OF_WORLD engine={sorted(outside)}")
+    problems.extend(_out_of_world(observation))
     # The adapter's translation site re-emits the code of a refusal it caught,
     # so a wire raise legitimately carries engine codes. What it must not do
     # silently is carry a code belonging to neither published vocabulary: that
@@ -1309,6 +1691,17 @@ def runtime_snapshot(
         observation.witnessed_bridge_raw & observation.bridge_universe
     )
     unwitnessed_bridge = observation.bridge_universe - witnessed_bridge
+    asserted_engine = set(observation.asserted_engine) & observation.engine_universe
+    asserted_bridge = set(observation.asserted_bridge) & observation.bridge_universe
+    assertion_sites = sorted(
+        f"{scope}|{code}|{site}"
+        for scope, values in (
+            ("engine", observation.asserted_engine),
+            ("bridge", observation.asserted_bridge),
+        )
+        for code, sites in values.items()
+        for site in sites
+    )
     runtime: dict[str, object] = {
         "unittest_modules": list(UNITTEST_SUITE_MODULES),
         "script_suites": list(SCRIPT_SUITE_MODULES),
@@ -1319,9 +1712,12 @@ def runtime_snapshot(
         "constructed_wire_codes": sorted(observation.constructed_wire),
         "foreign_translated_codes": foreign,
         "witnessed_codes": sorted(witnessed),
+        "asserted_codes": sorted(asserted_engine),
+        "assertion_sites": assertion_sites,
         "unwitnessed_codes": sorted(unwitnessed),
         "constructed_bridge_codes": sorted(observation.constructed_bridge),
         "witnessed_bridge_codes": sorted(witnessed_bridge),
+        "asserted_bridge_codes": sorted(asserted_bridge),
         "unwitnessed_bridge_codes": sorted(unwitnessed_bridge),
     }
     return runtime, problems
@@ -1482,6 +1878,26 @@ def check_baseline(include_runtime: bool = False) -> tuple[dict[str, object], li
                 "foreign_translated_codes",
             )
         )
+        for scope, field in (
+            ("engine", "asserted_codes"),
+            ("bridge", "asserted_bridge_codes"),
+        ):
+            missing = sorted(
+                set(baseline_runtime.get(field, []))
+                - set(current_runtime.get(field, []))
+            )
+            for code in missing:
+                problems.append(
+                    "ASSERTED_REFUSAL_PAIR_REMOVED "
+                    f"scope={scope} code={code} "
+                    f"python={sys.version_info.major}.{sys.version_info.minor}"
+                )
+        problems.extend(
+            _set_difference_problem(
+                "ASSERTION_SITE", baseline_runtime, current_runtime,
+                "assertion_sites",
+            )
+        )
         problems.extend(
             _set_difference_problem(
                 "WITNESSED", baseline_runtime, current_runtime, "witnessed_codes"
@@ -1547,6 +1963,15 @@ def _print_snapshot(snapshot: dict[str, object]) -> None:
         print(
             f"UNWITNESSED_BRIDGE_CODES={len(runtime['unwitnessed_bridge_codes'])}"
         )
+        python_minor = f"{sys.version_info.major}.{sys.version_info.minor}"
+        # This receipt describes THIS invocation; the committed baseline remains
+        # version-neutral so the same package works on supported interpreters.
+        print("FAILURE_ASSERTED_PAIRS=" + json.dumps({
+            "python": python_minor,
+            "engine": [[code, python_minor] for code in runtime["asserted_codes"]],
+            "bridge": [[code, python_minor] for code in runtime["asserted_bridge_codes"]],
+            "sites": runtime["assertion_sites"],
+        }, sort_keys=True, separators=(",", ":")))
         print(f"RUNTIME_UNITTEST_TESTS={runtime['unittest_test_count']}")
 
 
@@ -1563,15 +1988,40 @@ def regeneration_regressions(
     old_runtime = baseline.get("runtime") or {}
     new_runtime = current.get("runtime") or {}
     losses: list[str] = []
-    # Every published list is watched by construction. A field escapes only
-    # by being named in SELECTION_FIELDS - which is what that set is for, and
-    # which is read here rather than restated - or by having inverted polarity,
-    # of which there are exactly two and both are named below. A new figure
-    # added to the snapshot is therefore ratcheted the moment it exists, with
-    # nobody having to remember this function.
+    # Every published list declares which way it ratchets. A coverage list
+    # loses when a member disappears; a debt list loses when one appears, under
+    # its own name. The direction is a judgement about what a figure means, so
+    # it is declared for each list here instead of defaulting: twice a debt
+    # list defaulted to coverage, and a regeneration then charged the clean-up
+    # and let the growth through. A list named in neither set is refused until
+    # it is given a direction. SELECTION_FIELDS is read here rather than
+    # restated; those fields are compared after this loop.
+    COVERAGE_FIELDS = frozenset({
+        # The closed worlds.
+        "architect_decision_codes",
+        "bridge_refusal_codes",
+        "engine_refusal_codes",
+        "wire_error_codes",
+        # What the recorded run constructed, witnessed and asserted.
+        "asserted_bridge_codes",
+        "asserted_codes",
+        "assertion_sites",
+        "constructed_bridge_codes",
+        "constructed_engine_codes",
+        "constructed_wire_codes",
+        "witnessed_bridge_codes",
+        "witnessed_codes",
+    })
     DEBT_FIELDS = {
         "unwitnessed_codes": "REGENERATION_GROWS_DEBT",
         "unwitnessed_bridge_codes": "REGENERATION_GROWS_BRIDGE_DEBT",
+        # A foreign code is a name a test injected from outside production.
+        # A new one is the loss; cleaning one up costs nothing.
+        "foreign_translated_codes": "REGENERATION_GROWS_FOREIGN",
+        # An emission point whose code only a run can tell: the gap between the
+        # two emission-point counts, which the inventory names as a finding. A
+        # new one is the loss; making one static costs nothing.
+        "dynamic_emission_points": "REGENERATION_GROWS_DYNAMIC",
     }
     for old_scope, new_scope in ((baseline, current), (old_runtime, new_runtime)):
         for field in sorted(set(old_scope) | set(new_scope)):
@@ -1579,6 +2029,11 @@ def regeneration_regressions(
                 continue
             old_value = old_scope.get(field)
             new_value = new_scope.get(field)
+            if not isinstance(old_value, list) and not isinstance(new_value, list):
+                continue
+            if field not in COVERAGE_FIELDS and field not in DEBT_FIELDS:
+                losses.append(f"REGENERATION_UNCLASSIFIED_FIELD:{field}")
+                continue
             if not isinstance(old_value, list) or not isinstance(new_value, list):
                 continue
             if field in DEBT_FIELDS:
@@ -1603,7 +2058,42 @@ def regeneration_regressions(
             losses.append(
                 f"REGENERATION_LOSES:unittest_test_count {old_tests} -> {new_tests}"
             )
+    # The selection is not a figure, but shrinking it shrinks the evidence every
+    # figure stands on: a suite dropped from the recorded run, a test newly
+    # excluded from it, a script whose marker counts fewer checks. check_baseline
+    # names each as a difference; the write path names each as a loss.
+    for field in ("unittest_modules", "script_suites"):
+        old_value, new_value = old_runtime.get(field), new_runtime.get(field)
+        if isinstance(old_value, list) and isinstance(new_value, list):
+            dropped = sorted(set(old_value) - set(new_value))
+            if dropped:
+                losses.append(f"REGENERATION_LOSES:{field} {dropped}")
+    old_excluded = old_runtime.get("excluded_tests")
+    new_excluded = new_runtime.get("excluded_tests")
+    if isinstance(old_excluded, list) and isinstance(new_excluded, list):
+        added = sorted(set(new_excluded) - set(old_excluded))
+        if added:
+            losses.append(f"REGENERATION_EXCLUDES_MORE:excluded_tests {added}")
+    old_markers = old_runtime.get("script_markers")
+    new_markers = new_runtime.get("script_markers")
+    if isinstance(old_markers, dict) and isinstance(new_markers, dict):
+        for name in sorted(old_markers):
+            old_count = _marker_count(old_markers[name])
+            new_count = _marker_count(new_markers.get(name))
+            if old_count is not None and (new_count is None or new_count < old_count):
+                losses.append(
+                    f"REGENERATION_LOSES:script_markers {name} "
+                    f"{old_markers[name]} -> {new_markers.get(name)}"
+                )
     return losses
+
+
+def _marker_count(marker: object) -> int | None:
+    """The passed count of a script marker such as '55/55', or None."""
+    if not isinstance(marker, str):
+        return None
+    match = re.fullmatch(r"(\d+)/\d+", marker)
+    return int(match.group(1)) if match else None
 
 
 def main() -> None:
@@ -1679,6 +2169,14 @@ def main() -> None:
                     "reason": args.accept_regression,
                     "losses": losses,
                 }
+                if "accepted_regression" in previous:
+                    # Accepting a second loss must not erase the first: the record
+                    # already on file, with whatever history it carries, stays one
+                    # level down. Without this the only trace of why earlier
+                    # coverage was given up was overwritten by the next acceptance.
+                    snapshot["accepted_regression"]["previous"] = previous[
+                        "accepted_regression"
+                    ]
             elif "accepted_regression" in previous:
                 # A recorded loss outlives the regeneration that recorded it.
                 # Dropping it here would erase the only trace of what coverage

@@ -3,18 +3,206 @@
 All notable changes to this package are recorded here. Every version binds an
 exact set of file hashes in `PACKAGE-MANIFEST.json`.
 
-From 01.09.01 a version has three groups with leading zeros, `LL.MM.PP`. The
-last two groups are those of the Tectonica Spectrum release the version is
-paired with: 01.09.01 is paired with Spectrum `v00.09.01`. The first group is
-the edition of Ledger's coverage of Spectrum and develops separately from
-Spectrum's first group: `01` is the first ready source edition, and later
-changes of coverage take `02`, `03` and so on. A ready edition does not mean
-that every later Spectrum layer is covered. The file name of the specification
+From 01.09.01 a version has three groups with leading zeros, `LL.MM.PP`.
+`LL` is Ledger's coverage edition, `MM` is the Spectrum minor line used by the
+recorded local example, and `PP` is this Ledger package's revision. Each entry
+names the exact Spectrum release used by that example. The first two releases
+happened to share `MM.PP` with Spectrum; a Ledger-only revision can advance
+`PP` without implying that a new Spectrum release exists. A ready edition does
+not mean that every later Spectrum layer is covered. The file name of the specification
 document and its running header carry only the first two groups (`v01.09`);
 the README title and every other version field carry all three.
 
 Versions up to 0.0.11 are pre-release; in them the second digit is not used,
 and each entry is a patch.
+
+## 01.09.03
+
+Paired with Spectrum `v00.09.02`. This Ledger-only revision retains the recorded
+Spectrum source observation and adds the connection and reading paths listed
+below.
+
+Upgrading from 01.09.02: a declaration written for 01.09.02 that still carries
+any of the 17 removed fields listed in `DECLARATION-FIELDS.md` is refused under
+01.09.03. The packaged declaration schema no longer admits them, and
+`validate_declaration` names the unknown field under the code of its section:
+`DECLARATION_FIELDS` for `predecessor_declaration_hash` and `evidence_refs`,
+and `CONNECTOR`, `STRUCTURAL_BUDGET`, `GOVERNANCE` or `INTERFACES` for the
+others. Remove those fields before upgrading. The declaration hash, the SHA-256
+of the whole declaration, then changes: grants and intents must carry the new
+hash in their `binding` and revocations in their `declaration_hash`, and state
+persisted under the former hash is not restored (`STATE_DECLARATION_MISMATCH`).
+An evidence resolver must return plain JSON values; output that cannot be
+copied or read as such yields a generic non-executable refusal.
+
+- Adds a local document-release quickstart with expected output showing one
+  committed action, exact replay, consumed-permit refusal, and refusal without
+  issued authority.
+- Validates adapter POST bodies against their packaged JSON schemas before
+  calling the engine, with field-path refusals and a closed refusal if schema
+  validation is unavailable.
+- Classifies the declaration and registry fields by runtime use. Removes 17
+  format-only declaration leaves and the nine corresponding refusal codes;
+  the remaining limits and external responsibilities are explicit.
+- Adds a separately verifiable observer export: the operator signs the chain
+  head with Ed25519, and an independent reader checks the events and signature
+  against an externally pinned key fingerprint without importing the engine.
+- Extends the acceptance and package checks to the field census, reader,
+  failure-surface records, and the exact document and manifest bytes.
+- Reads evidence resolver output as plain JSON values inside the refusal
+  guard, so the gate and the permit hash see one value, and records
+  authoritative resolver failures, including output that cannot be copied or
+  read, as generic non-executable refusals without exposing authorization
+  progress or leaving the request key reusable. Evidence message types, intent
+  identifiers, references and statuses, submitted or resolved, must be native
+  strings.
+- Requires native Python identity and role strings, and recognizes lists by
+  their real type in JSON conversion and the secret and forbidden-field
+  walkers; mappings there are still recognized by their interface. Arbitrary
+  Python objects supplied in process remain outside the reference JSON
+  boundary.
+- Keeps observer exports within the independent reader's count and canonical
+  byte limits; documents instance-attribution and late-report limitations.
+- Evaluates resource windows with exact integer elapsed time, including very
+  large positive windows and the inclusive microsecond boundary.
+- Names the reading and field-inventory documents in the documentation licence
+  and checks root-document coverage.
+- Returns the coarse `REFUSAL`/`EXECUTION_DENIED` result for an exact replay of
+  an evaluation whose permit a policy has since invalidated, where 01.09.02
+  answered 400 with the reason, without a second decision or event; the
+  detailed reason stays in architect permit state. A state-anchor mismatch at
+  commit invalidates the permit and releases its reservation, and restoring the
+  old anchor does not revive it. A consumed or expired permit still answers
+  `PERMIT_ALREADY_CONSUMED` or `PERMIT_EXPIRED` after its signing key is
+  revoked, and a revocation leaves a permit whose window had already closed
+  expired rather than revoked.
+- Checks a persisted snapshot before installing any of it. A stored state that
+  fails the check is refused under an integrity code, which the HTTP adapter
+  answers with 503; 01.09.02 answered a stored contract fault, such as a
+  missing field or a malformed timestamp, with 400. The running engine's state
+  and verifier registry stay as they were. Every stored record is held to the
+  form the engine writes it in: a grant to the grant contract, less the expiry
+  check that belongs to the moment of issue; a decision, a permit body, an
+  idempotency result and a replay receipt to their fields, the permit body and
+  the receipt under their own hashes; and an event the chain has verified to
+  its fields and to the payload fields the observer projection reads. A grant
+  whose permitted actions are stored as one string is refused, where it was
+  read as text and every action whose identifier occurs in it passed the
+  grant's action check. A value nested deeper than any record admits, and
+  stored text the parser cannot read, are refused as well.
+- Stops the secret-name guard from refusing identifiers the profile declares: a
+  declared flag, resource or action named like a secret is evaluated, while
+  undeclared keys, free-form mappings and all values keep the guard.
+- Refuses a C1 control character in a request path with the same opaque 404 as
+  C0 and DEL, reading the path as UTF-8 when the whole of it decodes and one
+  character per byte when it does not. U+2028 and U+2029 are not control
+  characters: a selector carrying them in UTF-8 is answered 400 as malformed,
+  as in 01.09.02, and the error message now shows each as one character, not
+  as its three bytes.
+- States in the OpenAPI contract the identifier pattern of the registry
+  `connector_id`, the 404 for a path that carries a control character, and that
+  ambiguity flags are among the connector claims a production adapter must not
+  trust. The specification, runbook and profile authoring checklist name
+  ambiguity flags the same way.
+- Corrects the OpenAPI contract, the specification and the runbook on what
+  resolver output binds: the permit's own request hash. The request hash on the
+  operator result and the architect decision covers the submitted intent and
+  evidence bundle, not the resolved results.
+- Corrects the specification where 01.09.02 said more or less than the code
+  does: only a profile-seal, declaration-seal or event-chain failure blocks
+  every later operation while the damage remains, and any other integrity
+  failure refuses only the calls that meet it; commit checks grant revocation
+  and expiry, permit expiry, signing-key revocation and declaration validity
+  again, but not evidence status or derived controls; a permit seals its
+  effective lifetime. It also names the order in which control results apply
+  and more permit-state changes that append no event, states the four commit
+  refusals that keep the permit invalidated instead of restoring the pre-call
+  state, states secret exclusion as an integrator duty with the engine's
+  key-name scan as its only check, and lists the observer-export reader in
+  Appendix B.
+- Aligns two entries of `core/nc25-core-crosswalk.json` with the
+  specification's anti-probing duty and states there that the reference
+  adapter has no rate limiter and no probe alerting.
+- Fixes the host-system field in the specification document's archive, so the
+  operating system that runs the builder no longer changes its bytes; a
+  byte-identical rebuild still needs the locked dependencies and the same
+  Python and zlib. The builder reads its core anchor from
+  `SOURCE-MANIFEST.json` and lists every acceptance step, the declaration field
+  census included.
+- Requires `python-docx` for the acceptance suite, whose regression tests now
+  import the specification builder; the README says so.
+- Corrects the banking questionnaire crosswalk, which named interface services
+  removed from the declaration. The banking profile and its synthetic
+  declaration, grant and intent are rebound to the new bytes, so their hashes
+  change. The reference profiles, declaration and crosswalk keep their versions
+  through such a rebinding: the README now says the version rule binds approved
+  production artefacts, not these synthetic fixtures.
+- Brings the README files, runbook, security and reading guides and the SDK
+  docstrings in line with the code: the local-release example's nine-step
+  acceptance suite, the directories the coverage check leaves out, refusal
+  counts without reasons, the export-only `EXECUTION_COMMITTED` code, the
+  fixture declarations' expiry, the conformance suite's exit without optional
+  libraries, the integrator's duty to keep secrets out of evidence values, the
+  commit refusals that keep a permit invalidated, how long a retired signing
+  key's permits stay verifiable, what a restore checks in a persisted snapshot
+  and what it trusts as written, and that without resolvers the engine takes
+  connector evidence statuses and declared flags as given.
+- Corrects the OTCS bridge's comments on how deep a stored row nests an
+  admitted document, on the eight reasons a permit is not live on recovery,
+  and on where a receipt's own code runs while it is admitted.
+- Scopes the acceptance report's geometry counts to the automated geometry
+  audit that produces them.
+- Validates every shipped profile in the conformance suite, fails it when a
+  profile directory has no checks of its own, reports its HTTP adapter part as
+  `NOT_RUN` instead of failing when the date-time format checker is
+  unavailable, and keeps a real failure failing under pytest.
+- Checks in the conformance suite that the OpenAPI contract declares exactly
+  the route-path parameters and the operator route's Idempotency-Key header,
+  and that each, followed through every reference, is a string with the
+  engine's own validation pattern in a form ECMA-262 reads as Python does.
+- Corrects the 0.0.8 entry on the conformance suite: its status check compares
+  a curated table of route statuses with what each route declares, and the
+  table is not derived from the statuses the adapter is observed to emit.
+- Grounds the acceptance figures in checks that can fail: a unittest step's
+  total is its module's declared test count, steps no longer inherit mutant
+  overrides, and the mutation tools count what ran against a named inventory.
+- Reads an acceptance number for the specification and the package verifier
+  only from a name its module binds once, by a top-level assignment; a second
+  binding of any form, an import or a definition of the same name included,
+  is refused, and a counted test class must be defined once.
+- Refuses an acceptance report rebound with `--rebind-only` in every run but
+  the acceptance run with `--json-output`, whose results regenerate it, so its
+  figures count only after that run rewrites them; the final run and CI refuse
+  a report no passing run has rewritten.
+- Lets the package verifier record a failing check and continue instead of
+  blocking every later check, and run standalone when the source-manifest
+  input list is malformed. The verifier also checks the census test count and
+  the core anchor the shipped document prints against their sources
+  (`PACKAGE_CHECKS=64/64`). The failure-surface acceptance step prints its
+  child's output when no receipt line arrives.
+- Counts a field-census source anchor only in code; a string literal or a
+  docstring that quotes it no longer satisfies it.
+- Tests the reader's isolation in a fresh interpreter that loads only the
+  reader, without writing bytecode into the package.
+- Strengthens several regression tests so that each fails when the property
+  it names is broken.
+- Counts and names bare re-raises in the failure-surface inventory, derives
+  the invalidation-reason code set from the writes that set it, and credits a
+  bridge pair table's codes only to the call that takes its code from the loop.
+  The inventory also asks OTCS bridge refusals whether their code lies outside
+  the bridge's vocabulary, counts a smaller recorded selection or a new foreign
+  code as a regeneration loss, and hands the observed refusal code only to test
+  readers. The restore path's translation of a caught refusal adds no code of
+  its own.
+- Charges a new dynamic emission point as a loss when the failure surface is
+  regenerated and lets one become static for free; every published list
+  declares whether it ratchets as coverage or as debt, and a list with no
+  declared direction is refused.
+- Reruns each test that fails in the recorded run alone twice, observed and
+  unobserved, and blames the observation only when those two disagree; a
+  disagreement with the recorded run's order is named separately. The reader
+  suite, which no acceptance step runs, is rerun the same way, and the
+  declaration-field census suite joins the recorded run.
 
 ## 01.09.02
 

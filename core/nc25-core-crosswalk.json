@@ -30,7 +30,7 @@
       "source_lines": "1174-1184",
       "core_object": "Axiom 28 and Structural Exclusion vs Runtime Enforcement",
       "universal_use": "History and state anchors on every intent and permit.",
-      "constraint": "A restored operational state does not erase structural history."
+      "constraint": "A restored operational state does not erase structural history. The reference SQLite guard protects history and terminal facts already observed by a running instance. It cannot detect a genuine older snapshot restored before a cold start; meeting the history requirement across restarts needs an independent monotonic anchor and restore verification in production storage."
     },
     {
       "id": "A29-A33-GATE",
@@ -71,8 +71,8 @@
       "id": "A60-A61-BUDGET",
       "source_lines": "1839-1935",
       "core_object": "Tau-constrained predicate and structural pressure",
-      "universal_use": "Committed-action structural capacity channel, separate from domain resource limits, with a declared capacity provenance coding.",
-      "constraint": "Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package."
+      "universal_use": "Committed-action structural capacity channel, separate from domain resource limits.",
+      "constraint": "The package does not verify the provenance of structural capacity. Domain transaction limits are not the structural selector budget. The reference ledger debits committed actions only; standing pressure, refusals, and failed commits are not accounted, so the core's full structural-pressure accounting remains outside this package."
     },
     {
       "id": "A64-A66-SEPARATION",
@@ -93,7 +93,7 @@
       "source_lines": "7374-7468",
       "core_object": "Gate Bifurcation",
       "universal_use": "Permit/refusal witness without direct gate geometry or reason-code exposure.",
-      "constraint": "The connector receives only a coarse disposition. Repeated probing of that unavoidable decision bit must be throttled and audited by the production adapter."
+      "constraint": "The connector receives only a coarse disposition. A production adapter must rate-limit distinct probes of that unavoidable decision bit per connector and alert on systematic boundary-seeking sequences."
     },
     {
       "id": "T98-FRAMEWORK-CORE",
@@ -113,8 +113,8 @@
       "id": "L47-NON-WEAPONIZABILITY",
       "source_lines": "13317-13341",
       "core_object": "Internal Non-Weaponizability of Admissibility Evaluations",
-      "universal_use": "Hash-only registry, coarse operator codes, forbidden-key scans, and adapter-level anti-probing controls.",
-      "constraint": "Boundary geometry and detailed reasons remain architect evidence only; the unavoidable disposition bit is rate-limited and auditable."
+      "universal_use": "Hash-only registry, coarse operator codes, forbidden-key scans, and an anti-probing obligation on a production adapter.",
+      "constraint": "Boundary geometry and detailed reasons remain architect evidence only; a production adapter must rate-limit distinct probes of the unavoidable disposition bit per connector and alert on systematic boundary-seeking sequences. The reference adapter has no rate limiter and no probe alerting."
     }
   ]
 }

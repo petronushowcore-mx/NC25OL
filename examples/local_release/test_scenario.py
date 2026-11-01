@@ -117,7 +117,9 @@ class Cases(unittest.TestCase):
         a.activate()
         a.start(fault=lambda p: a.revoke() if p == 'after_prepare' else None)
         result = a.submit()
-        self.assertEqual((result['state'], result['reason']), ('NOT_EXECUTED', 'AUTHORITY_REVOKED'))
+        self.assertEqual((result['state'], result['reason']), ('NOT_EXECUTED', 'EXECUTION_DENIED'))
+        permit = a.engine.architect_permit(result['permit_hash'], actor_scope='nc25.architect')
+        self.assertEqual(permit['invalidated_reason'], 'AUTHORITY_REVOKED')
         self.assertEqual(a.target_counts(), (0, 0))
         self.assertEqual(a.engine.structural_remaining, 400)
 
